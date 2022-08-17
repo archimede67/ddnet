@@ -5382,6 +5382,10 @@ void CEditor::RenderServerSettingsEditor(CUIRect View, bool ShowServerSettingsEd
 	View.HSplitTop(20.0f, &ToolBar, &View);
 	ToolBar.Margin(2.0f, &ToolBar);
 
+	static std::vector<std::pair<std::tuple<std::string, int, int>, std::string>> s_AvailableCommands = {
+		std::make_pair(std::tuple("sv_pauseable", 0, 1), "Whether players can pause their char or not")
+	};
+
 	// do the toolbar
 	{
 		CUIRect Button;
@@ -5394,6 +5398,42 @@ void CEditor::RenderServerSettingsEditor(CUIRect View, bool ShowServerSettingsEd
 		Button.VSplitLeft(180.0f, &Button, nullptr);
 		static int s_ClearButton = 0;
 		DoClearableEditBox(&m_CommandBox, &s_ClearButton, &Button, m_aSettingsCommand, sizeof(m_aSettingsCommand), 12.0f, &m_CommandBox, false, CUI::CORNER_ALL);
+
+		if (m_aSettingsCommand[0] != 0) {
+			int NumberCommandsFound = 0;
+
+			CUIRect TestRect;
+			TestRect.x = Button.x;
+
+			for (auto const& Command : s_AvailableCommands) {
+				std::string CommandName = std::get<0>(Command.first);
+				CUIRect CommandTextRect;
+				CommandTextRect.x = TestRect.x;
+				CommandTextRect.w = TestRect.w;
+				CommandTextRect.y = Button.y - (NumberCommandsFound + 1) * 12.0f;
+				CommandTextRect.h = 12.0f;
+
+				if(str_find_nocase(m_aSettingsCommand, CommandName.c_str())) {
+					int MinValue = std::get<1>(Command.first);
+					int MaxValue = std::get<2>(Command.first);
+
+					std::string CommandDescription = Command.second;
+
+					UI()->DoLabel(&CommandTextRect, CommandDescription.c_str(), 10.0f, TEXTALIGN_LEFT);
+
+					NumberCommandsFound++;
+				}
+			}
+
+			if(NumberCommandsFound > 0)
+			{
+				TestRect.w = Button.w;
+				TestRect.h = 0;
+				TestRect.h = NumberCommandsFound * 12.0f;
+				TestRect.y = Button.y - TestRect.h;
+				RenderTools()->DrawUIRect(&TestRect, ColorRGBA(0, 0, 0, 0.75f), CUI::CORNER_ALL, 0.0);
+			}
+		}
 
 		if(!ShowServerSettingsEditorLast) // Just activated
 			UI()->SetActiveItem(&m_CommandBox);
@@ -5419,6 +5459,7 @@ void CEditor::RenderServerSettingsEditor(CUIRect View, bool ShowServerSettingsEd
 					str_copy(Setting.m_aCommand, m_aSettingsCommand, sizeof(Setting.m_aCommand));
 					m_Map.m_vSettings.push_back(Setting);
 					s_CommandSelectedIndex = m_Map.m_vSettings.size() - 1;
+					m_aSettingsCommand[0] = 0;
 				}
 			}
 			UI()->SetActiveItem(&m_CommandBox);
