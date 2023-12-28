@@ -649,7 +649,7 @@ class CEditorActionMoveSoundSource : public CEditorActionLayerBase
 {
 public:
 	CEditorActionMoveSoundSource(CEditor *pEditor, int GroupIndex, int LayerIndex, int SourceIndex, CPoint OriginalPosition, CPoint CurrentPosition);
-
+	
 	void Undo() override;
 	void Redo() override;
 
@@ -657,6 +657,21 @@ private:
 	int m_SourceIndex;
 	CPoint m_OriginalPosition;
 	CPoint m_CurrentPosition;
+};
+
+// ----------------------------
+
+class CEditorActionEditMultipleLayers : public CEditorActionBulk
+{
+public:
+	CEditorActionEditMultipleLayers(CEditor *pEditor, const std::vector<std::shared_ptr<IEditorAction>> &vpActions, const std::vector<int> &vLayerIndices, const char *pDisplay = nullptr, bool Reverse = false);
+	
+	void Undo() override;
+	void Redo() override;
+
+private:
+	std::vector<int> m_vOriginalLayerIndices;
+	std::vector<int> m_vCurrentLayerIndices;
 };
 
 #endif

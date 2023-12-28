@@ -217,6 +217,38 @@ CUI::EPopupMenuFunctionResult CLayerSounds::RenderProperties(CUIRect *pToolBox)
 	return CUI::POPUP_KEEP_OPEN;
 }
 
+CUI::EPopupMenuFunctionResult CLayerSounds::RenderCommonProperties(CEditor *pEditor, CUIRect *pToolbox, const std::vector<std::shared_ptr<CLayerSounds>> &vpLayers, const std::vector<int> &vLayerIndices)
+{
+	CMultiPropertyValue<CLayerSounds, int, CEditor::POPUP_SELECTED_NONE> Sound(vpLayers, [](const std::shared_ptr<CLayerSounds> &pLayer) { return &pLayer->m_Sound; });
+
+	CProperty aProps[] = {
+		{"Sound", Sound(), PROPTYPE_SOUND, -1, 0, Sound.Mixed()},
+		{nullptr},
+	};
+
+	static int s_aIds[(int)ELayerSoundsProp::NUM_PROPS] = {0};
+	int NewVal = 0;
+	auto [State, Prop] = pEditor->DoPropertiesWithState<ELayerSoundsProp>(pToolbox, aProps, s_aIds, &NewVal);
+	if(Prop != ELayerSoundsProp::PROP_NONE)
+		pEditor->m_Map.OnModify();
+
+	// TODO
+	//static CLayerSoundsPropTracker s_Tracker(m_pEditor);
+	//s_Tracker.Begin(this, Prop, State);
+
+	if(Prop == ELayerSoundsProp::PROP_SOUND)
+	{
+		if(NewVal >= 0)
+			Sound.Set(NewVal % pEditor->m_Map.m_vpSounds.size());
+		else
+			Sound.Set(-1);
+	}
+
+	//s_Tracker.End(Prop, State);
+
+	return CUI::POPUP_KEEP_OPEN;
+}
+
 void CLayerSounds::ModifySoundIndex(FIndexModifyFunction Func)
 {
 	Func(&m_Sound);

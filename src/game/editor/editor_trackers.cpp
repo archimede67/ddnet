@@ -505,6 +505,44 @@ int CLayerTilesPropTracker::PropToValue(ETilesProp Prop)
 
 // ------------------------------
 
+void CMultiLayerTilesPropTracker::OnStart(ELayerCommonProp Prop)
+{
+	m_vOriginalValues.resize(m_pvpLayers->size());
+	for(int i = 0; i < (int)m_pvpLayers->size(); i++)
+		m_vOriginalValues[i] = PropToValue(Prop, i);
+}
+
+void CMultiLayerTilesPropTracker::OnEnd(ELayerCommonProp Prop, int Value)
+{
+	// TODO
+	//static std::map<ELayerCommonProp, ELayerProp> s_PropMap{
+	//	{ELayerCommonProp::PROP_GROUP, ELayerProp::PROP_GROUP},
+	//	{ELayerCommonProp::PROP_HQ, ELayerProp::PROP_HQ},
+	//};
+
+	//std::vector<std::shared_ptr<IEditorAction>> vpActions;
+	//for(int i = 0; i < (int)m_pvpLayers->size(); i++)
+	//	vpActions.emplace_back(std::make_shared<CEditorActionEditLayerProp>(m_pEditor, m_pEditor->m_SelectedGroup, (*m_pvLayerIndices)[i], s_PropMap[Prop], m_vOriginalValues[i], Value));
+	//m_pEditor->m_EditorHistory.RecordAction(std::make_shared<CEditorActionEditMultipleLayers>(m_pEditor, vpActions, *m_pvLayerIndices, "Edit many layers properties", true));
+}
+
+int CMultiLayerTilesPropTracker::PropToValue(ELayerCommonProp Prop)
+{
+	return PropToValue(Prop, 0);
+}
+
+int CMultiLayerTilesPropTracker::PropToValue(ELayerCommonProp Prop, int Index)
+{
+	switch(Prop)
+	{
+	case ELayerCommonProp::PROP_GROUP: return m_pEditor->m_SelectedGroup;
+	case ELayerCommonProp::PROP_HQ: return (*m_pvpLayers)[Index]->m_Flags;
+	default: return 0;
+	}
+}
+
+// ------------------------------
+
 void CLayerTilesCommonPropTracker::OnStart(ETilesCommonProp Prop)
 {
 	for(auto &pLayer : m_vpLayers)

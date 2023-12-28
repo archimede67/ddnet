@@ -330,9 +330,14 @@ void CEditor::RenderBackground(CUIRect View, IGraphics::CTextureHandle Texture, 
 	Graphics()->QuadsEnd();
 }
 
-SEditResult<int> CEditor::UiDoValueSelector(void *pID, CUIRect *pRect, const char *pLabel, int Current, int Min, int Max, int Step, float Scale, const char *pToolTip, bool IsDegree, bool IsHex, int Corners, const ColorRGBA *pColor, bool ShowValue)
+SEditResult<int> CEditor::UiDoValueSelector(void *pID, CUIRect *pRect, const char *pLabel, int Current, int Min, int Max, int Step, float Scale, const char *pToolTip, bool *pManual, const SEditorValueSelectorProps &Props, int Corners, const ColorRGBA *pColor)
 {
 	// logic
+	bool IsHex = Props.m_IsHex;
+	bool IsDegree = Props.m_IsDegree;
+	bool ShowValue = Props.m_ShowValue;
+	bool IsMixed = Props.m_Type == SEditorValueSelectorProps::VALUE_MIXED;
+
 	static float s_Value;
 	static CLineInputNumber s_NumberInput;
 	static bool s_TextMode = false;
@@ -340,6 +345,7 @@ SEditResult<int> CEditor::UiDoValueSelector(void *pID, CUIRect *pRect, const cha
 	const bool Inside = UI()->MouseInside(pRect);
 	const int Base = IsHex ? 16 : 10;
 	static bool s_Editing = false;
+	bool Manual = false;
 	EEditState State = EEditState::EDITING;
 
 	if(UI()->MouseButton(1) && UI()->HotItem() == pID)
@@ -347,7 +353,10 @@ SEditResult<int> CEditor::UiDoValueSelector(void *pID, CUIRect *pRect, const cha
 		s_pLastTextID = pID;
 		s_TextMode = true;
 		UI()->DisableMouseLock();
-		s_NumberInput.SetInteger(Current, Base);
+		if(!IsMixed)
+			s_NumberInput.SetInteger(Current, Base);
+		else
+			s_NumberInput.Set("");
 	}
 
 	if(UI()->CheckActiveItem(pID))
@@ -375,6 +384,7 @@ SEditResult<int> CEditor::UiDoValueSelector(void *pID, CUIRect *pRect, const cha
 			UI()->DisableMouseLock();
 			UI()->SetActiveItem(nullptr);
 			s_TextMode = false;
+			Manual = true;
 		}
 
 		if(UI()->ConsumeHotkey(CUI::HOTKEY_ESCAPE))
@@ -429,25 +439,34 @@ SEditResult<int> CEditor::UiDoValueSelector(void *pID, CUIRect *pRect, const cha
 
 		// render
 		char aBuf[128];
-		if(pLabel[0] != '\0')
+		if(!IsMixed)
 		{
-			if(ShowValue)
-				str_format(aBuf, sizeof(aBuf), "%s %d", pLabel, Current);
+			if(pLabel[0] != '\0')
+			{
+				if(ShowValue)
+					str_format(aBuf, sizeof(aBuf), "%s %d", pLabel, Current);
+				else
+					str_copy(aBuf, pLabel);
+			}
+			else if(IsDegree)
+				str_format(aBuf, sizeof(aBuf), "%d°", Current);
+			else if(IsHex)
+				str_format(aBuf, sizeof(aBuf), "#%06X", Current);
 			else
-				str_copy(aBuf, pLabel);
+				str_from_int(Current, aBuf);
 		}
-		else if(IsDegree)
-			str_format(aBuf, sizeof(aBuf), "%d°", Current);
-		else if(IsHex)
-			str_format(aBuf, sizeof(aBuf), "#%06X", Current);
 		else
-			str_from_int(Current, aBuf);
+		{
+			str_copy(aBuf, "Mixed");
+		}
 		pRect->Draw(pColor ? *pColor : GetButtonColor(pID, 0), Corners, 3.0f);
 		UI()->DoLabel(pRect, aBuf, 10, TEXTALIGN_MC);
 	}
 
 	if(!s_TextMode)
 		s_NumberInput.Clear();
+	else
+		Manual = true;
 
 	bool MouseLocked = UI()->CheckMouseLock();
 	if((MouseLocked || s_TextMode) && !s_Editing)
@@ -461,6 +480,9 @@ SEditResult<int> CEditor::UiDoValueSelector(void *pID, CUIRect *pRect, const cha
 		State = EEditState::END;
 		s_Editing = false;
 	}
+
+	if(pManual)
+		*pManual = Manual;
 
 	return SEditResult<int>{State, Current};
 }
@@ -534,6 +556,54 @@ void CEditor::AddSelectedLayer(int LayerIndex)
 	m_vSelectedLayers.push_back(LayerIndex);
 
 	m_QuadKnifeActive = false;
+}
+
+void CEditor::UpdateMultiLayersSelection()
+{
+	m_LayerPopupContext.m_vpLayers.clear();
+	m_LayerPopupContext.m_vpTileLayers.clear();
+	m_LayerPopupContext.m_vpQuadLayers.clear();
+	m_LayerPopupContext.m_vpSoundLayers.clear();
+	m_LayerPopupContext.m_vLayerIndices.clear();
+
+	if(m_vSelectedLayers.size() > 1)
+	{
+		SLayerPopupContext::ESelectionType SelectionType = SLayerPopupContext::SELECTION_MIXED;
+		int LastType = LAYERTYPE_INVALID;
+		for(auto &LayerIndex : m_vSelectedLayers)
+		{
+			int LayerType = m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]->m_Type;
+
+			if(LastType == LAYERTYPE_INVALID)
+			{
+				LastType = LayerType;
+				if(LayerType == LAYERTYPE_QUADS)
+					SelectionType = SLayerPopupContext::SELECTION_QUADS;
+				else if(LayerType == LAYERTYPE_TILES)
+					SelectionType = SLayerPopupContext::SELECTION_TILES;
+				else if(LayerType == LAYERTYPE_SOUNDS)
+					SelectionType = SLayerPopupContext::SELECTION_SOUNDS;
+				else
+					SelectionType = SLayerPopupContext::SELECTION_MIXED;
+			}
+			else if(LastType != LayerType)
+			{
+				SelectionType = SLayerPopupContext::SELECTION_MIXED;
+			}
+
+			if(LayerType == LAYERTYPE_TILES)
+				m_LayerPopupContext.m_vpTileLayers.push_back(std::static_pointer_cast<CLayerTiles>(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]));
+			else if(LayerType == LAYERTYPE_QUADS)
+				m_LayerPopupContext.m_vpQuadLayers.push_back(std::static_pointer_cast<CLayerQuads>(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]));
+			else if(LayerType == LAYERTYPE_SOUNDS)
+				m_LayerPopupContext.m_vpSoundLayers.push_back(std::static_pointer_cast<CLayerSounds>(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]));
+
+			m_LayerPopupContext.m_vpLayers.push_back(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]);
+			m_LayerPopupContext.m_vLayerIndices.push_back(LayerIndex);
+		}
+
+		m_LayerPopupContext.m_Type = SelectionType;
+	}
 }
 
 void CEditor::SelectQuad(int Index)
@@ -1237,7 +1307,9 @@ void CEditor::DoToolbarLayers(CUIRect ToolBar)
 			}
 
 			TB_Top.VSplitLeft(30.0f, &Button, &TB_Top);
-			auto RotationAmountRes = UiDoValueSelector(&s_RotationAmount, &Button, "", s_RotationAmount, TileLayer ? 90 : 1, 359, TileLayer ? 90 : 1, TileLayer ? 10.0f : 2.0f, "Rotation of the brush in degrees. Use left mouse button to drag and change the value. Hold shift to be more precise.", true, false, IGraphics::CORNER_NONE);
+			SEditorValueSelectorProps Props;
+			Props.m_IsDegree = true;
+			auto RotationAmountRes = UiDoValueSelector(&s_RotationAmount, &Button, "", s_RotationAmount, TileLayer ? 90 : 1, 359, TileLayer ? 90 : 1, TileLayer ? 10.0f : 2.0f, "Rotation of the brush in degrees. Use left mouse button to drag and change the value. Hold shift to be more precise.", nullptr, Props, IGraphics::CORNER_NONE);
 			s_RotationAmount = RotationAmountRes.m_Value;
 
 			TB_Top.VSplitLeft(25.0f, &Button, &TB_Top);
@@ -4078,8 +4150,7 @@ void CEditor::RenderLayers(CUIRect LayersBox)
 
 				if(s_Operation == OP_CLICK && Clicked)
 				{
-					static SLayerPopupContext s_LayerPopupContext = {};
-					s_LayerPopupContext.m_pEditor = this;
+					m_LayerPopupContext.m_pEditor = this;
 					if(Result == 1)
 					{
 						if(Input()->ShiftIsPressed() && m_SelectedGroup == g)
@@ -4097,38 +4168,12 @@ void CEditor::RenderLayers(CUIRect LayersBox)
 					}
 					else if(Result == 2)
 					{
-						s_LayerPopupContext.m_vpLayers.clear();
-						s_LayerPopupContext.m_vLayerIndices.clear();
-
 						if(!IsLayerSelected)
-						{
 							SelectLayer(i, g);
-						}
 
-						if(m_vSelectedLayers.size() > 1)
-						{
-							bool AllTile = true;
-							for(size_t j = 0; AllTile && j < m_vSelectedLayers.size(); j++)
-							{
-								int LayerIndex = m_vSelectedLayers[j];
-								if(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]->m_Type == LAYERTYPE_TILES)
-								{
-									s_LayerPopupContext.m_vpLayers.push_back(std::static_pointer_cast<CLayerTiles>(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[m_vSelectedLayers[j]]));
-									s_LayerPopupContext.m_vLayerIndices.push_back(LayerIndex);
-								}
-								else
-									AllTile = false;
-							}
+						UpdateMultiLayersSelection();
 
-							// Don't allow editing if all selected layers are not tile layers
-							if(!AllTile)
-							{
-								s_LayerPopupContext.m_vpLayers.clear();
-								s_LayerPopupContext.m_vLayerIndices.clear();
-							}
-						}
-
-						UI()->DoPopupMenu(&s_LayerPopupContext, UI()->MouseX(), UI()->MouseY(), 120, 270, &s_LayerPopupContext, PopupLayer);
+						UI()->DoPopupMenu(&m_LayerPopupContext, UI()->MouseX(), UI()->MouseY(), 120, 270, &m_LayerPopupContext, PopupLayer);
 					}
 
 					SetOperation(OP_NONE);
@@ -6356,7 +6401,9 @@ void CEditor::RenderEnvelopeEditor(CUIRect View)
 		}
 
 		static int s_EnvelopeSelector = 0;
-		auto NewValueRes = UiDoValueSelector(&s_EnvelopeSelector, &Shifter, aBuf, m_SelectedEnvelope + 1, 1, m_Map.m_vpEnvelopes.size(), 1, 1.0f, "Select Envelope", false, false, IGraphics::CORNER_NONE, &EnvColor, false);
+		SEditorValueSelectorProps Props;
+		Props.m_ShowValue = false;
+		auto NewValueRes = UiDoValueSelector(&s_EnvelopeSelector, &Shifter, aBuf, m_SelectedEnvelope + 1, 1, m_Map.m_vpEnvelopes.size(), 1, 1.0f, "Select Envelope", nullptr, Props, IGraphics::CORNER_NONE, &EnvColor);
 		int NewValue = NewValueRes.m_Value;
 		if(NewValue - 1 != m_SelectedEnvelope)
 		{

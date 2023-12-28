@@ -2311,6 +2311,7 @@ if(CLIENT)
     mapitems/envelope.h
     mapitems/image.cpp
     mapitems/image.h
+    mapitems/layer.cpp
     mapitems/layer.h
     mapitems/layer_front.cpp
     mapitems/layer_front.h

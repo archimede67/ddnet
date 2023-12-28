@@ -7,15 +7,28 @@ const ColorRGBA CEditor::ms_DefaultPropColor = ColorRGBA(1, 1, 1, 0.5f);
 
 int CEditor::DoProperties(CUIRect *pToolbox, CProperty *pProps, int *pIDs, int *pNewVal, const std::vector<ColorRGBA> &vColors)
 {
-	auto Res = DoPropertiesWithState<int>(pToolbox, pProps, pIDs, pNewVal, vColors);
-	return Res.m_Value;
+	auto [_, Value] = DoPropertiesWithState<int>(pToolbox, pProps, pIDs, pNewVal, vColors);
+	return Value;
 }
 
 template<typename E>
 SEditResult<E> CEditor::DoPropertiesWithState(CUIRect *pToolBox, CProperty *pProps, int *pIDs, int *pNewVal, const std::vector<ColorRGBA> &vColors)
 {
+	return DoPropertiesWithState<E>(pToolBox, pProps, pIDs, pNewVal, nullptr, vColors);
+}
+
+template<typename E>
+SEditResult<E> CEditor::DoPropertiesWithState(CUIRect *pToolBox, CProperty *pProps, int *pIDs, int *pNewVal, bool *pEditedManual, const std::vector<ColorRGBA> &vColors)
+{
 	int Change = -1;
 	EEditState State = EEditState::EDITING;
+	bool Manual = false;
+
+	static const char *s_pInputTooltip = "Use left mouse button to drag and change the value. Hold shift to be more precise. Use right mouse button to edit as text.";
+
+	const auto &&ValueSelectorType = [](const CProperty &Property) {
+		return Property.m_Mixed ? SEditorValueSelectorProps::VALUE_MIXED : SEditorValueSelectorProps::VALUE_NORMAL;
+	};
 
 	for(int i = 0; pProps[i].m_pName; i++)
 	{
@@ -31,15 +44,18 @@ SEditResult<E> CEditor::DoPropertiesWithState(CUIRect *pToolBox, CProperty *pPro
 		if(pProps[i].m_Type == PROPTYPE_INT_STEP)
 		{
 			CUIRect Inc, Dec;
-			char aBuf[64];
 
 			Shifter.VSplitRight(10.0f, &Shifter, &Inc);
 			Shifter.VSplitLeft(10.0f, &Dec, &Shifter);
-			str_from_int(pProps[i].m_Value, aBuf);
-			auto NewValueRes = UiDoValueSelector((char *)&pIDs[i], &Shifter, "", pProps[i].m_Value, pProps[i].m_Min, pProps[i].m_Max, 1, 1.0f, "Use left mouse button to drag and change the value. Hold shift to be more precise. Rightclick to edit as text.", false, false, 0, pColor);
+
+			SEditorValueSelectorProps Props;
+			Props.m_Type = ValueSelectorType(pProps[i]);
+			auto NewValueRes = UiDoValueSelector((char *)&pIDs[i], &Shifter, "", pProps[i].m_Value, pProps[i].m_Min, pProps[i].m_Max, 1, 1.0f, s_pInputTooltip, &Manual, Props, IGraphics::CORNER_NONE, pColor);
 			int NewValue = NewValueRes.m_Value;
 			if(NewValue != pProps[i].m_Value || NewValueRes.m_State != EEditState::EDITING)
 			{
+				if(pEditedManual)
+					*pEditedManual = Manual;
 				*pNewVal = NewValue;
 				Change = i;
 				State = NewValueRes.m_State;
@@ -61,13 +77,20 @@ SEditResult<E> CEditor::DoPropertiesWithState(CUIRect *pToolBox, CProperty *pPro
 		{
 			CUIRect No, Yes;
 			Shifter.VSplitMid(&No, &Yes);
-			if(DoButton_ButtonDec(&pIDs[i], "No", !pProps[i].m_Value, &No, 0, ""))
+
+			// Any value < 0 makes the input disabled
+			// Any value > 1 makes it so neither Yes nor No are checked
+			bool IsNo = pProps[i].m_Value == 0;
+			bool IsYes = pProps[i].m_Value == 1;
+			bool IsDisabled = pProps[i].m_Value < 0;
+
+			if(DoButton_ButtonDec(&pIDs[i], "No", IsDisabled ? -1 : IsNo, &No, 0, ""))
 			{
 				*pNewVal = 0;
 				Change = i;
 				State = EEditState::ONE_GO;
 			}
-			if(DoButton_ButtonInc(((char *)&pIDs[i]) + 1, "Yes", pProps[i].m_Value, &Yes, 0, ""))
+			if(DoButton_ButtonInc(((char *)&pIDs[i]) + 1, "Yes", IsDisabled ? -1 : IsYes, &Yes, 0, ""))
 			{
 				*pNewVal = 1;
 				Change = i;
@@ -76,10 +99,14 @@ SEditResult<E> CEditor::DoPropertiesWithState(CUIRect *pToolBox, CProperty *pPro
 		}
 		else if(pProps[i].m_Type == PROPTYPE_INT_SCROLL)
 		{
-			auto NewValueRes = UiDoValueSelector(&pIDs[i], &Shifter, "", pProps[i].m_Value, pProps[i].m_Min, pProps[i].m_Max, 1, 1.0f, "Use left mouse button to drag and change the value. Hold shift to be more precise. Rightclick to edit as text.");
+			SEditorValueSelectorProps Props;
+			Props.m_Type = ValueSelectorType(pProps[i]);
+			auto NewValueRes = UiDoValueSelector(&pIDs[i], &Shifter, "", pProps[i].m_Value, pProps[i].m_Min, pProps[i].m_Max, 1, 1.0f, s_pInputTooltip, &Manual, Props);
 			int NewValue = NewValueRes.m_Value;
 			if(NewValue != pProps[i].m_Value || NewValueRes.m_State != EEditState::EDITING)
 			{
+				if(pEditedManual)
+					*pEditedManual = Manual;
 				*pNewVal = NewValue;
 				Change = i;
 				State = NewValueRes.m_State;
@@ -94,7 +121,9 @@ SEditResult<E> CEditor::DoPropertiesWithState(CUIRect *pToolBox, CProperty *pPro
 			int Step = Shift ? 1 : 45;
 			int Value = pProps[i].m_Value;
 
-			auto NewValueRes = UiDoValueSelector(&pIDs[i], &Shifter, "", Value, pProps[i].m_Min, pProps[i].m_Max, Shift ? 1 : 45, Shift ? 1.0f : 10.0f, "Use left mouse button to drag and change the value. Hold shift to be more precise. Rightclick to edit as text.", false, false, 0);
+			SEditorValueSelectorProps Props;
+			Props.m_Type = ValueSelectorType(pProps[i]);
+			auto NewValueRes = UiDoValueSelector(&pIDs[i], &Shifter, "", Value, pProps[i].m_Min, pProps[i].m_Max, Shift ? 1 : 45, Shift ? 1.0f : 10.0f, s_pInputTooltip, &Manual, Props, IGraphics::CORNER_NONE);
 			int NewValue = NewValueRes.m_Value;
 			if(DoButton_ButtonDec(&pIDs[i] + 1, nullptr, 0, &Dec, 0, "Decrease"))
 			{
@@ -111,6 +140,8 @@ SEditResult<E> CEditor::DoPropertiesWithState(CUIRect *pToolBox, CProperty *pPro
 
 			if(NewValue != pProps[i].m_Value || NewValueRes.m_State != EEditState::EDITING)
 			{
+				if(pEditedManual)
+					*pEditedManual = Manual;
 				*pNewVal = NewValue % 360;
 				Change = i;
 				State = NewValueRes.m_State;
@@ -132,13 +163,15 @@ SEditResult<E> CEditor::DoPropertiesWithState(CUIRect *pToolBox, CProperty *pPro
 		else if(pProps[i].m_Type == PROPTYPE_IMAGE)
 		{
 			const char *pName;
-			if(pProps[i].m_Value < 0)
+			if(pProps[i].m_Mixed)
+				pName = "Mixed";
+			else if(pProps[i].m_Value < 0)
 				pName = "None";
 			else
 				pName = m_Map.m_vpImages[pProps[i].m_Value]->m_aName;
 
 			if(DoButton_Ex(&pIDs[i], pName, 0, &Shifter, 0, nullptr, IGraphics::CORNER_ALL))
-				PopupSelectImageInvoke(pProps[i].m_Value, UI()->MouseX(), UI()->MouseY());
+				PopupSelectImageInvoke(pProps[i].m_Mixed ? -100 : pProps[i].m_Value, UI()->MouseX(), UI()->MouseY());
 
 			int r = PopupSelectImageResult();
 			if(r >= -1)
@@ -188,7 +221,9 @@ SEditResult<E> CEditor::DoPropertiesWithState(CUIRect *pToolBox, CProperty *pPro
 		else if(pProps[i].m_Type == PROPTYPE_SOUND)
 		{
 			const char *pName;
-			if(pProps[i].m_Value < 0)
+			if(pProps[i].m_Mixed)
+				pName = "Mixed";
+			else if(pProps[i].m_Value < 0)
 				pName = "None";
 			else
 				pName = m_Map.m_vpSounds[pProps[i].m_Value]->m_aName;
@@ -207,7 +242,9 @@ SEditResult<E> CEditor::DoPropertiesWithState(CUIRect *pToolBox, CProperty *pPro
 		else if(pProps[i].m_Type == PROPTYPE_AUTOMAPPER)
 		{
 			const char *pName;
-			if(pProps[i].m_Value < 0 || pProps[i].m_Min < 0 || pProps[i].m_Min >= (int)m_Map.m_vpImages.size())
+			if(pProps[i].m_Mixed)
+				pName = "Mixed";
+			else if(pProps[i].m_Value < 0 || pProps[i].m_Min < 0 || pProps[i].m_Min >= (int)m_Map.m_vpImages.size())
 				pName = "None";
 			else
 				pName = m_Map.m_vpImages[pProps[i].m_Min]->m_AutoMapper.GetConfigName(pProps[i].m_Value);
@@ -246,22 +283,26 @@ SEditResult<E> CEditor::DoPropertiesWithState(CUIRect *pToolBox, CProperty *pPro
 			else
 				aBuf[0] = '\0';
 
-			auto NewValueRes = UiDoValueSelector((char *)&pIDs[i], &Shifter, aBuf, CurValue, 0, m_Map.m_vpEnvelopes.size(), 1, 1.0f, "Set Envelope", false, false, IGraphics::CORNER_NONE);
+			SEditorValueSelectorProps Props;
+			Props.m_Type = ValueSelectorType(pProps[i]);
+			auto NewValueRes = UiDoValueSelector((char *)&pIDs[i], &Shifter, aBuf, CurValue, 0, m_Map.m_vpEnvelopes.size(), 1, 1.0f, "Set envelope", &Manual, Props, IGraphics::CORNER_NONE);
 			int NewVal = NewValueRes.m_Value;
 			if(NewVal != CurValue || NewValueRes.m_State != EEditState::EDITING)
 			{
+				if(pEditedManual)
+					*pEditedManual = Manual;
 				*pNewVal = NewVal;
 				Change = i;
 				State = NewValueRes.m_State;
 			}
 
-			if(DoButton_ButtonDec((char *)&pIDs[i] + 1, nullptr, 0, &Dec, 0, "Previous Envelope"))
+			if(DoButton_ButtonDec((char *)&pIDs[i] + 1, nullptr, 0, &Dec, 0, "Previous envelope"))
 			{
 				*pNewVal = pProps[i].m_Value - 1;
 				Change = i;
 				State = EEditState::ONE_GO;
 			}
-			if(DoButton_ButtonInc(((char *)&pIDs[i]) + 2, nullptr, 0, &Inc, 0, "Next Envelope"))
+			if(DoButton_ButtonInc(((char *)&pIDs[i]) + 2, nullptr, 0, &Inc, 0, "Next envelope"))
 			{
 				*pNewVal = pProps[i].m_Value + 1;
 				Change = i;
@@ -284,3 +325,4 @@ template SEditResult<ELayerSoundsProp> CEditor::DoPropertiesWithState(CUIRect *,
 template SEditResult<EQuadProp> CEditor::DoPropertiesWithState(CUIRect *, CProperty *, int *, int *, const std::vector<ColorRGBA> &);
 template SEditResult<EQuadPointProp> CEditor::DoPropertiesWithState(CUIRect *, CProperty *, int *, int *, const std::vector<ColorRGBA> &);
 template SEditResult<ESoundProp> CEditor::DoPropertiesWithState(CUIRect *, CProperty *, int *, int *, const std::vector<ColorRGBA> &);
+template SEditResult<ELayerCommonProp> CEditor::DoPropertiesWithState(CUIRect *, CProperty *, int *, int *, const std::vector<ColorRGBA> &);

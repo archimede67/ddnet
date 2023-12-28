@@ -223,6 +223,123 @@ struct CProperty
 	int m_Type;
 	int m_Min;
 	int m_Max;
+	bool m_Mixed = false; // Is this a "mixed" property
+};
+
+template<typename TLayer, typename TValue, int MixedValue, bool AutoMixedValue = false>
+class CMultiPropertyValue
+{
+	static int DefaultTransformer(TValue Value) { return Value; }
+
+public:
+	template<typename ValueSelector>
+	CMultiPropertyValue(const std::vector<std::shared_ptr<TLayer>> &vpLayers, ValueSelector &&fnSelector) :
+		CMultiPropertyValue(vpLayers, fnSelector, DefaultTransformer)
+	{
+	}
+	template<typename TLayer, typename ValueSelector, typename ValueTransformer>
+	CMultiPropertyValue(const std::vector<std::shared_ptr<TLayer>> &vpLayers, ValueSelector &&fnSelector, ValueTransformer &&fnTransform)
+	{
+		m_pvpLayers = &vpLayers;
+		m_Mixed = false;
+		m_AutoMixedValue = 0;
+		m_AutoMixedValueIndex = -1;
+		for(int i = 0; i < (int)vpLayers.size(); i++)
+		{
+			const std::shared_ptr<TLayer> &pLayer = vpLayers.at(i);
+			TValue *pValue = fnSelector(pLayer);
+			TValue Value = fnTransform ? fnTransform(*pValue) : *pValue;
+
+			if(Value > m_AutoMixedValue || m_AutoMixedValueIndex == -1)
+			{
+				m_AutoMixedValue = Value;
+				m_AutoMixedValueIndex = i;
+			}
+
+			if(!m_vpValues.empty() && *m_vpValues[0] != Value)
+				m_Mixed = true;
+			m_vpValues.push_back(pValue);
+		}
+	}
+
+	TValue operator()() const { return m_Mixed && !AutoMixedValue ? MixedValue : m_AutoMixedValue; }
+
+	void operator=(TValue Value)
+	{
+		Set(Value);
+	}
+
+	bool Geq(TValue Value)
+	{
+		for(TValue *pValue : m_vpValues)
+			if(*pValue >= Value)
+				return true;
+		return false;
+	}
+
+	bool Lt(TValue Value)
+	{
+		for(TValue *pValue : m_vpValues)
+			if(*pValue < Value)
+				return true;
+		return false;
+	}
+
+	bool Neq(TValue Value, bool All)
+	{
+		for(TValue *pValue : m_vpValues)
+			if(*pValue != Value && !All)
+				return true;
+			else if(*pValue == Value && All)
+				return false;
+		return All ? true : false;
+	}
+
+	void Set(TValue Value)
+	{
+		for(TValue *pValue : m_vpValues)
+			*pValue = Value;
+		m_Mixed = false;
+		m_AutoMixedValue = Value;
+	}
+	void Set(size_t Value)
+	{
+		Set((int)Value);
+	}
+
+	template<typename FnApply>
+	void Apply(int Value, FnApply &&fnApply, bool Relative = false)
+	{
+		if(Relative)
+		{
+			dbg_assert(AutoMixedValue == true, "Cannot use relative without auto mixed value");
+			dbg_assert(std::is_arithmetic<TValue>::value, "Cannot use relative on non arithmetic value");
+		}
+
+		int BaseValue = *m_vpValues[m_AutoMixedValueIndex];
+		for(int i = 0; i < (int)m_pvpLayers->size(); i++)
+		{
+			int *pValue = m_vpValues[i];
+			fnApply((*m_pvpLayers)[i], Relative ? *pValue + (Value - BaseValue) : Value);
+		}
+	}
+
+	template<typename Setter>
+	void Set(Setter &&fnSetter)
+	{
+		for(TValue *pValue : m_vpValues)
+			*pValue = fnSetter(*pValue);
+		m_Mixed = false;
+	}
+
+	bool Mixed() const { return m_Mixed; }
+
+private:
+	bool m_Mixed;
+	std::vector<TValue *> m_vpValues;
+	TValue m_AutoMixedValue;
+	int m_AutoMixedValueIndex;
+	const std::vector<std::shared_ptr<TLayer>> *m_pvpLayers;
 };
 
 enum
@@ -482,6 +599,7 @@ public:
 	CSoundSource *GetSelectedSource() const;
 	void SelectLayer(int LayerIndex, int GroupIndex = -1);
 	void AddSelectedLayer(int LayerIndex);
+	void UpdateMultiLayersSelection();
 	void SelectQuad(int Index);
 	void ToggleSelectQuad(int Index);
 	void DeselectQuads();
@@ -510,6 +628,8 @@ public:
 	bool IsTangentSelected() const;
 	std::pair<int, int> EnvGetSelectedTimeAndValue() const;
 
+	template<typename E>
+	SEditResult<E> DoPropertiesWithState(CUIRect *pToolbox, CProperty *pProps, int *pIDs, int *pNewVal, bool *pEditedManual, const std::vector<ColorRGBA> &vColors = {});
 	template<typename E>
 	SEditResult<E> DoPropertiesWithState(CUIRect *pToolbox, CProperty *pProps, int *pIDs, int *pNewVal, const std::vector<ColorRGBA> &vColors = {});
 	int DoProperties(CUIRect *pToolbox, CProperty *pProps, int *pIDs, int *pNewVal, const std::vector<ColorRGBA> &vColors = {});
@@ -816,7 +936,25 @@ public:
 
 	void RenderBackground(CUIRect View, IGraphics::CTextureHandle Texture, float Size, float Brightness);
 
-	SEditResult<int> UiDoValueSelector(void *pID, CUIRect *pRect, const char *pLabel, int Current, int Min, int Max, int Step, float Scale, const char *pToolTip, bool IsDegree = false, bool IsHex = false, int corners = IGraphics::CORNER_ALL, const ColorRGBA *pColor = nullptr, bool ShowValue = true);
+	struct SEditorValueSelectorProps
+	{
+		bool m_IsDegree = false;
+		bool m_IsHex = false;
+		bool m_ShowValue = true;
+		enum EValueType
+		{
+			VALUE_NORMAL,
+			VALUE_MIXED,
+		};
+		EValueType m_Type = VALUE_NORMAL;
+	};
+	bool m_WasValueManualEdited;
+	SEditResult<int> UiDoValueSelector(void *pID, CUIRect *pRect, const char *pLabel, int Current, int Min, int Max, int Step, float Scale, const char *pToolTip, bool *pManual, const SEditorValueSelectorProps &Props = {}, int Corners = IGraphics::CORNER_ALL, const ColorRGBA *pColor = nullptr);
+
+	enum EPopupSelectedConstants
+	{
+		POPUP_SELECTED_NONE = -100
+	};
 
 	static CUI::EPopupMenuFunctionResult PopupMenuFile(void *pContext, CUIRect View, bool Active);
 	static CUI::EPopupMenuFunctionResult PopupMenuTools(void *pContext, CUIRect View, bool Active);
@@ -825,10 +963,24 @@ public:
 	struct SLayerPopupContext : public SPopupMenuId
 	{
 		CEditor *m_pEditor;
-		std::vector<std::shared_ptr<CLayerTiles>> m_vpLayers;
+
+		std::vector<std::shared_ptr<CLayer>> m_vpLayers;
+		std::vector<std::shared_ptr<CLayerTiles>> m_vpTileLayers;
+		std::vector<std::shared_ptr<CLayerQuads>> m_vpQuadLayers;
+		std::vector<std::shared_ptr<CLayerSounds>> m_vpSoundLayers;
+
 		std::vector<int> m_vLayerIndices;
 		CLayerTiles::SCommonPropState m_CommonPropState;
+		enum ESelectionType
+		{
+			SELECTION_TILES,
+			SELECTION_QUADS,
+			SELECTION_SOUNDS,
+			SELECTION_MIXED
+		};
+		ESelectionType m_Type;
 	};
+	SLayerPopupContext m_LayerPopupContext;
 	static CUI::EPopupMenuFunctionResult PopupLayer(void *pContext, CUIRect View, bool Active);
 	static CUI::EPopupMenuFunctionResult PopupQuad(void *pContext, CUIRect View, bool Active);
 	static CUI::EPopupMenuFunctionResult PopupSource(void *pContext, CUIRect View, bool Active);

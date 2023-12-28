@@ -686,7 +686,18 @@ CUI::EPopupMenuFunctionResult CEditor::PopupLayer(void *pContext, CUIRect View, 
 
 	if(pPopup->m_vpLayers.size() > 1)
 	{
-		return CLayerTiles::RenderCommonProperties(pPopup->m_CommonPropState, pEditor, &View, pPopup->m_vpLayers, pPopup->m_vLayerIndices);
+		// First render common properties: group, detail, and delete/duplicate buttons
+		CUI::EPopupMenuFunctionResult CommonResult = CLayer::RenderCommonProperties(pEditor, &View, pPopup->m_vpLayers, pPopup->m_vLayerIndices);
+
+		// Then render layer specific properties for same type selection (tiles, quads or sounds only)
+		if(pPopup->m_Type == SLayerPopupContext::SELECTION_TILES)
+			return CUI::JoinResults(CommonResult, CLayerTiles::RenderCommonProperties(pPopup->m_CommonPropState, pEditor, &View, pPopup->m_vpTileLayers, pPopup->m_vLayerIndices));
+		else if(pPopup->m_Type == SLayerPopupContext::SELECTION_QUADS)
+			return CUI::JoinResults(CommonResult, CLayerQuads::RenderCommonProperties(pEditor, &View, pPopup->m_vpQuadLayers, pPopup->m_vLayerIndices));
+		else if(pPopup->m_Type == SLayerPopupContext::SELECTION_SOUNDS)
+			return CUI::JoinResults(CommonResult, CLayerSounds::RenderCommonProperties(pEditor, &View, pPopup->m_vpSoundLayers, pPopup->m_vLayerIndices));
+
+		return CommonResult;
 	}
 
 	const bool EntitiesLayer = pCurrentLayer->IsEntitiesLayer();
@@ -711,7 +722,7 @@ CUI::EPopupMenuFunctionResult CEditor::PopupLayer(void *pContext, CUIRect View, 
 				pEditor->m_Map.m_pSwitchLayer = nullptr;
 			if(pCurrentLayer == pEditor->m_Map.m_pTuneLayer)
 				pEditor->m_Map.m_pTuneLayer = nullptr;
-			pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->DeleteLayer(pEditor->m_vSelectedLayers[0]);
+			pCurrentGroup->DeleteLayer(pEditor->m_vSelectedLayers[0]);
 
 			return CUI::POPUP_CLOSE_CURRENT;
 		}
@@ -726,7 +737,7 @@ CUI::EPopupMenuFunctionResult CEditor::PopupLayer(void *pContext, CUIRect View, 
 		static int s_DuplicationButton = 0;
 		if(pEditor->DoButton_Editor(&s_DuplicationButton, "Duplicate layer", 0, &DuplicateButton, 0, "Duplicates the layer"))
 		{
-			pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->DuplicateLayer(pEditor->m_vSelectedLayers[0]);
+			pCurrentGroup->DuplicateLayer(pEditor->m_vSelectedLayers[0]);
 			pEditor->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(pEditor, pEditor->m_SelectedGroup, pEditor->m_vSelectedLayers[0] + 1, true));
 			return CUI::POPUP_CLOSE_CURRENT;
 		}
@@ -2158,8 +2169,8 @@ CUI::EPopupMenuFunctionResult CEditor::PopupEvent(void *pContext, CUIRect View, 
 	return CUI::POPUP_KEEP_OPEN;
 }
 
-static int g_SelectImageSelected = -100;
-static int g_SelectImageCurrent = -100;
+static int g_SelectImageSelected = CEditor::POPUP_SELECTED_NONE;
+static int g_SelectImageCurrent = CEditor::POPUP_SELECTED_NONE;
 
 CUI::EPopupMenuFunctionResult CEditor::PopupSelectImage(void *pContext, CUIRect View, bool Active)
 {
@@ -2226,23 +2237,23 @@ CUI::EPopupMenuFunctionResult CEditor::PopupSelectImage(void *pContext, CUIRect 
 void CEditor::PopupSelectImageInvoke(int Current, float x, float y)
 {
 	static SPopupMenuId s_PopupSelectImageId;
-	g_SelectImageSelected = -100;
+	g_SelectImageSelected = CEditor::POPUP_SELECTED_NONE;
 	g_SelectImageCurrent = Current;
 	UI()->DoPopupMenu(&s_PopupSelectImageId, x, y, 450, 300, this, PopupSelectImage);
 }
 
 int CEditor::PopupSelectImageResult()
 {
-	if(g_SelectImageSelected == -100)
-		return -100;
+	if(g_SelectImageSelected == CEditor::POPUP_SELECTED_NONE)
+		return CEditor::POPUP_SELECTED_NONE;
 
 	g_SelectImageCurrent = g_SelectImageSelected;
-	g_SelectImageSelected = -100;
+	g_SelectImageSelected = CEditor::POPUP_SELECTED_NONE;
 	return g_SelectImageCurrent;
 }
 
-static int g_SelectSoundSelected = -100;
-static int g_SelectSoundCurrent = -100;
+static int g_SelectSoundSelected = CEditor::POPUP_SELECTED_NONE;
+static int g_SelectSoundCurrent = CEditor::POPUP_SELECTED_NONE;
 
 CUI::EPopupMenuFunctionResult CEditor::PopupSelectSound(void *pContext, CUIRect View, bool Active)
 {
@@ -2281,18 +2292,18 @@ CUI::EPopupMenuFunctionResult CEditor::PopupSelectSound(void *pContext, CUIRect 
 void CEditor::PopupSelectSoundInvoke(int Current, float x, float y)
 {
 	static SPopupMenuId s_PopupSelectSoundId;
-	g_SelectSoundSelected = -100;
+	g_SelectSoundSelected = CEditor::POPUP_SELECTED_NONE;
 	g_SelectSoundCurrent = Current;
 	UI()->DoPopupMenu(&s_PopupSelectSoundId, x, y, 150, 300, this, PopupSelectSound);
 }
 
 int CEditor::PopupSelectSoundResult()
 {
-	if(g_SelectSoundSelected == -100)
-		return -100;
+	if(g_SelectSoundSelected == CEditor::POPUP_SELECTED_NONE)
+		return CEditor::POPUP_SELECTED_NONE;
 
 	g_SelectSoundCurrent = g_SelectSoundSelected;
-	g_SelectSoundSelected = -100;
+	g_SelectSoundSelected = CEditor::POPUP_SELECTED_NONE;
 	return g_SelectSoundCurrent;
 }
 
@@ -2349,8 +2360,8 @@ int CEditor::PopupSelectGameTileOpResult()
 	return Result;
 }
 
-static int s_AutoMapConfigSelected = -100;
-static int s_AutoMapConfigCurrent = -100;
+static int s_AutoMapConfigSelected = CEditor::POPUP_SELECTED_NONE;
+static int s_AutoMapConfigCurrent = CEditor::POPUP_SELECTED_NONE;
 
 CUI::EPopupMenuFunctionResult CEditor::PopupSelectConfigAutoMap(void *pContext, CUIRect View, bool Active)
 {
@@ -2391,7 +2402,7 @@ CUI::EPopupMenuFunctionResult CEditor::PopupSelectConfigAutoMap(void *pContext, 
 void CEditor::PopupSelectConfigAutoMapInvoke(int Current, float x, float y)
 {
 	static SPopupMenuId s_PopupSelectConfigAutoMapId;
-	s_AutoMapConfigSelected = -100;
+	s_AutoMapConfigSelected = CEditor::POPUP_SELECTED_NONE;
 	s_AutoMapConfigCurrent = Current;
 	std::shared_ptr<CLayerTiles> pLayer = std::static_pointer_cast<CLayerTiles>(GetSelectedLayer(0));
 	const int ItemCount = minimum(m_Map.m_vpImages[pLayer->m_Image]->m_AutoMapper.ConfigNamesNum(), 10);
@@ -2401,11 +2412,11 @@ void CEditor::PopupSelectConfigAutoMapInvoke(int Current, float x, float y)
 
 int CEditor::PopupSelectConfigAutoMapResult()
 {
-	if(s_AutoMapConfigSelected == -100)
-		return -100;
+	if(s_AutoMapConfigSelected == CEditor::POPUP_SELECTED_NONE)
+		return CEditor::POPUP_SELECTED_NONE;
 
 	s_AutoMapConfigCurrent = s_AutoMapConfigSelected;
-	s_AutoMapConfigSelected = -100;
+	s_AutoMapConfigSelected = CEditor::POPUP_SELECTED_NONE;
 	return s_AutoMapConfigCurrent;
 }
 

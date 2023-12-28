@@ -252,6 +252,85 @@ CUI::EPopupMenuFunctionResult CLayerQuads::RenderProperties(CUIRect *pToolBox)
 	return CUI::POPUP_KEEP_OPEN;
 }
 
+template<typename Tracker, class TLayer>
+class CMultiPropTracker
+{
+public:
+	CMultiPropTracker(CEditor *pEditor) :
+		m_pEditor(pEditor), m_Trackers() {}
+
+	template<typename E>
+	void Begin(E Prop, EEditState State)
+	{
+		if(static_cast<int>(Prop) == -1)
+			return;
+
+		if(State == EEditState::ONE_GO || State == EEditState::START)
+		{
+			// Allocate trackers on start
+			for(int i = 0; i < (int)m_pvpLayers->size(); i++)
+				m_Trackers.emplace_back(m_pEditor);
+		}
+
+		for(int i = 0; i < (int)m_pvpLayers->size(); i++)
+			m_Trackers[i].Begin((*m_pvpLayers)[i].get(), Prop, State);
+	}
+
+	template<typename E>
+	void End(E Prop, EEditState State)
+	{
+		if(static_cast<int>(Prop) == -1)
+			return;
+
+		for(auto &Tracker : m_Trackers)
+			Tracker.End(Prop, State);
+		m_Trackers.clear();
+	}
+
+	const std::vector<std::shared_ptr<TLayer>> *m_pvpLayers;
+
+protected:
+	std::vector<Tracker> m_Trackers;
+	CEditor *m_pEditor;
+};
+
+CUI::EPopupMenuFunctionResult CLayerQuads::RenderCommonProperties(CEditor *pEditor, CUIRect *pToolbox, const std::vector<std::shared_ptr<CLayerQuads>> &vpLayers, const std::vector<int> &vLayerIndices)
+{
+	// Use a multi value for the image property
+	CMultiPropertyValue<CLayerQuads, int, CEditor::POPUP_SELECTED_NONE> Image(vpLayers, [](const std::shared_ptr<CLayerQuads> &pLayer) { return &pLayer->m_Image; });
+
+	CProperty aProps[] = {
+		{"Image", Image(), PROPTYPE_IMAGE, -1, 0, Image.Mixed()},
+		{nullptr},
+	};
+
+	static int s_aIds[(int)ELayerQuadsProp::NUM_PROPS] = {0};
+	int NewVal = 0;
+	auto [State, Prop] = pEditor->DoPropertiesWithState<ELayerQuadsProp>(pToolbox, aProps, s_aIds, &NewVal);
+	if(Prop != ELayerQuadsProp::PROP_NONE)
+		pEditor->m_Map.OnModify();
+
+	// TODO
+	//static CMultiPropTracker<CLayerQuadsPropTracker, CLayerQuads> s_Tracker(pEditor);
+	//s_Tracker.m_pvpLayers = &vpLayers;
+	//s_Tracker.Begin(Prop, State);
+
+	if(Prop == ELayerQuadsProp::PROP_IMAGE)
+	{
+		if(NewVal >= 0)
+			Image.Set(NewVal % pEditor->m_Map.m_vpImages.size());
+		else
+			Image.Set(-1);
+	}
+
+	//s_Tracker.End(Prop, State);
+	// IDEA: make a interface IPropTracker with all methods, then store some sort of a vector
+	// of trackers for each selected layer when building the popup context
+	// problem: its gonna mess up the layer selection probably
+
+	return CUI::POPUP_KEEP_OPEN;
+}
+
 void CLayerQuads::ModifyImageIndex(FIndexModifyFunction Func)
 {
 	Func(&m_Image);

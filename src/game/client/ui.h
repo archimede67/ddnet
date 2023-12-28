@@ -318,6 +318,8 @@ public:
 	 */
 	typedef std::function<void()> FPopupMenuClosedCallback;
 
+	static EPopupMenuFunctionResult JoinResults(EPopupMenuFunctionResult ResultOne, EPopupMenuFunctionResult ResultTwo);
+
 private:
 	bool m_Enabled;
 

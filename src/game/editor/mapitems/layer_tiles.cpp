@@ -1074,130 +1074,176 @@ CUI::EPopupMenuFunctionResult CLayerTiles::RenderProperties(CUIRect *pToolBox)
 	return CUI::POPUP_KEEP_OPEN;
 }
 
-CUI::EPopupMenuFunctionResult CLayerTiles::RenderCommonProperties(SCommonPropState &State, CEditor *pEditor, CUIRect *pToolbox, std::vector<std::shared_ptr<CLayerTiles>> &vpLayers, std::vector<int> &vLayerIndices)
+CUI::EPopupMenuFunctionResult CLayerTiles::RenderCommonProperties(SCommonPropState &State, CEditor *pEditor, CUIRect *pToolBox, std::vector<std::shared_ptr<CLayerTiles>> &vpLayers, std::vector<int> &vLayerIndices)
 {
-	if(State.m_Modified)
-	{
-		CUIRect Commit;
-		pToolbox->HSplitBottom(20.0f, pToolbox, &Commit);
-		static int s_CommitButton = 0;
-		if(pEditor->DoButton_Editor(&s_CommitButton, "Commit", 0, &Commit, 0, "Applies the changes"))
-		{
-			bool HasModifiedSize = (State.m_Modified & SCommonPropState::MODIFIED_SIZE) != 0;
-			bool HasModifiedColor = (State.m_Modified & SCommonPropState::MODIFIED_COLOR) != 0;
+	//if(State.m_Modified)
+	//{
+	//	CUIRect Commit;
+	//	pToolBox->HSplitBottom(20.0f, pToolBox, &Commit);
+	//	static int s_CommitButton = 0;
+	//	if(pEditor->DoButton_Editor(&s_CommitButton, "Commit", 0, &Commit, 0, "Applies the changes"))
+	//	{
+	//		bool HasModifiedSize = (State.m_Modified & SCommonPropState::MODIFIED_SIZE) != 0;
+	//		bool HasModifiedColor = (State.m_Modified & SCommonPropState::MODIFIED_COLOR) != 0;
 
-			std::vector<std::shared_ptr<IEditorAction>> vpActions;
-			int j = 0;
-			int GroupIndex = pEditor->m_SelectedGroup;
+	//		std::vector<std::shared_ptr<IEditorAction>> vpActions;
+	//		int j = 0;
+	//		int GroupIndex = pEditor->m_SelectedGroup;
+	//		for(auto &pLayer : vpLayers)
+	//		{
+	//			int LayerIndex = vLayerIndices[j++];
+	//			if(HasModifiedSize)
+	//			{
+	//				std::map<int, std::shared_ptr<CLayer>> SavedLayers;
+	//				SavedLayers[LAYERTYPE_TILES] = pLayer->Duplicate();
+	//				if(pLayer->m_Game || pLayer->m_Front || pLayer->m_Switch || pLayer->m_Speedup || pLayer->m_Tune || pLayer->m_Tele)
+	//				{ // Need to save all entities layers when any entity layer
+	//					if(pEditor->m_Map.m_pFrontLayer && !pLayer->m_Front)
+	//						SavedLayers[LAYERTYPE_FRONT] = pEditor->m_Map.m_pFrontLayer->Duplicate();
+	//					if(pEditor->m_Map.m_pTeleLayer && !pLayer->m_Tele)
+	//						SavedLayers[LAYERTYPE_TELE] = pEditor->m_Map.m_pTeleLayer->Duplicate();
+	//					if(pEditor->m_Map.m_pSwitchLayer && !pLayer->m_Switch)
+	//						SavedLayers[LAYERTYPE_SWITCH] = pEditor->m_Map.m_pSwitchLayer->Duplicate();
+	//					if(pEditor->m_Map.m_pSpeedupLayer && !pLayer->m_Speedup)
+	//						SavedLayers[LAYERTYPE_SPEEDUP] = pEditor->m_Map.m_pSpeedupLayer->Duplicate();
+	//					if(pEditor->m_Map.m_pTuneLayer && !pLayer->m_Tune)
+	//						SavedLayers[LAYERTYPE_TUNE] = pEditor->m_Map.m_pTuneLayer->Duplicate();
+	//					if(!pLayer->m_Game)
+	//						SavedLayers[LAYERTYPE_GAME] = pEditor->m_Map.m_pGameLayer->Duplicate();
+	//				}
+
+	//				int PrevW = pLayer->m_Width;
+	//				int PrevH = pLayer->m_Height;
+	//				pLayer->Resize(State.m_Width, State.m_Height);
+
+	//				if(PrevW != State.m_Width)
+	//				{
+	//					std::shared_ptr<CEditorActionEditLayerTilesProp> pAction;
+	//					vpActions.push_back(pAction = std::make_shared<CEditorActionEditLayerTilesProp>(pEditor, GroupIndex, LayerIndex, ETilesProp::PROP_WIDTH, PrevW, State.m_Width));
+	//					pAction->SetSavedLayers(SavedLayers);
+	//				}
+
+	//				if(PrevH != State.m_Height)
+	//				{
+	//					std::shared_ptr<CEditorActionEditLayerTilesProp> pAction;
+	//					vpActions.push_back(pAction = std::make_shared<CEditorActionEditLayerTilesProp>(pEditor, GroupIndex, LayerIndex, ETilesProp::PROP_HEIGHT, PrevH, State.m_Height));
+	//					pAction->SetSavedLayers(SavedLayers);
+	//				}
+	//			}
+
+	//			if(HasModifiedColor && !pLayer->IsEntitiesLayer())
+	//			{
+	//				int Color = 0;
+	//				Color |= pLayer->m_Color.r << 24;
+	//				Color |= pLayer->m_Color.g << 16;
+	//				Color |= pLayer->m_Color.b << 8;
+	//				Color |= pLayer->m_Color.a;
+
+	//				pLayer->m_Color.r = (State.m_Color >> 24) & 0xff;
+	//				pLayer->m_Color.g = (State.m_Color >> 16) & 0xff;
+	//				pLayer->m_Color.b = (State.m_Color >> 8) & 0xff;
+	//				pLayer->m_Color.a = State.m_Color & 0xff;
+
+	//				vpActions.push_back(std::make_shared<CEditorActionEditLayerTilesProp>(pEditor, GroupIndex, LayerIndex, ETilesProp::PROP_COLOR, Color, State.m_Color));
+	//			}
+
+	//			pLayer->FlagModified(0, 0, pLayer->m_Width, pLayer->m_Height);
+	//		}
+	//		State.m_Modified = 0;
+
+	//		char aDisplay[256];
+	//		str_format(aDisplay, sizeof(aDisplay), "Edit %d layers common properties: %s", (int)vpLayers.size(), HasModifiedColor && HasModifiedSize ? "color, size" : (HasModifiedColor ? "color" : "size"));
+	//		pEditor->m_EditorHistory.RecordAction(std::make_shared<CEditorActionBulk>(pEditor, vpActions, aDisplay));
+	//	}
+	//}
+	//else
+	//{
+	//	for(auto &pLayer : vpLayers)
+	//	{
+	//		if(pLayer->m_Width > State.m_Width)
+	//			State.m_Width = pLayer->m_Width;
+	//		if(pLayer->m_Height > State.m_Height)
+	//			State.m_Height = pLayer->m_Height;
+	//	}
+	//}
+
+	CMultiPropertyValue<CLayerTiles, int, 0, true> Width(vpLayers, [](const std::shared_ptr<CLayerTiles> &pLayer) { return &pLayer->m_Width; });
+	CMultiPropertyValue<CLayerTiles, int, 0, true> Height(vpLayers, [](const std::shared_ptr<CLayerTiles> &pLayer) { return &pLayer->m_Height; });
+	CMultiPropertyValue<CLayerTiles, int, CEditor::POPUP_SELECTED_NONE> Image(vpLayers, [](const std::shared_ptr<CLayerTiles> &pLayer) { return &pLayer->m_Image; });
+	CMultiPropertyValue<CLayerTiles, int, CEditor::POPUP_SELECTED_NONE> AutoMapperConfig(vpLayers, [](const std::shared_ptr<CLayerTiles> &pLayer) { return &pLayer->m_AutoMapperConfig; });
+	CMultiPropertyValue<CLayerTiles, int, 0, true> Seed(vpLayers, [](const std::shared_ptr<CLayerTiles> &pLayer) { return &pLayer->m_Seed; });
+	CMultiPropertyValue<CLayerTiles, bool, 0, true> AutoAutoMap(vpLayers, [](const std::shared_ptr<CLayerTiles> &pLayer) { return &pLayer->m_AutoAutoMap; });
+
+	const bool AnyEntities = std::any_of(vpLayers.begin(), vpLayers.end(), [](const std::shared_ptr<CLayerTiles> &pLayer) { return pLayer->IsEntitiesLayer(); });
+
+	if(!AnyEntities && Image.Geq(0) && Image.Lt(pEditor->m_Map.m_vpImages.size()) && AutoMapperConfig.Neq(-1, false))
+	{
+		CUIRect Button;
+		pToolBox->HSplitBottom(2.0f, pToolBox, nullptr);
+		pToolBox->HSplitBottom(12.0f, pToolBox, &Button);
+		if(Seed.Neq(0, true))
+		{
+			CUIRect ButtonAuto;
+			Button.VSplitRight(16.0f, &Button, &ButtonAuto);
+			Button.VSplitRight(2.0f, &Button, nullptr);
+			static int s_AutoMapperButtonAuto = 0;
+			if(pEditor->DoButton_Editor(&s_AutoMapperButtonAuto, "A", AutoAutoMap.Mixed() ? 0 : AutoAutoMap(), &ButtonAuto, 0, "Automatically run automap after modifications."))
+			{
+				if(AutoAutoMap.Mixed())
+					AutoAutoMap = true;
+				else
+					AutoAutoMap = !AutoAutoMap();
+			}
+		}
+
+		static int s_AutoMapperButton = 0;
+		if(pEditor->DoButton_Editor(&s_AutoMapperButton, "Automap", 0, &Button, 0, "Run the automapper"))
+		{
 			for(auto &pLayer : vpLayers)
 			{
-				int LayerIndex = vLayerIndices[j++];
-				if(HasModifiedSize)
+				if(pLayer->m_Image >= 0 && pLayer->m_Image < pEditor->m_Map.m_vpImages.size() && pEditor->m_Map.m_vpImages[pLayer->m_Image]->m_AutoMapper.IsLoaded() && pLayer->m_AutoMapperConfig != -1)
 				{
-					std::map<int, std::shared_ptr<CLayer>> SavedLayers;
-					SavedLayers[LAYERTYPE_TILES] = pLayer->Duplicate();
-					if(pLayer->m_Game || pLayer->m_Front || pLayer->m_Switch || pLayer->m_Speedup || pLayer->m_Tune || pLayer->m_Tele)
-					{ // Need to save all entities layers when any entity layer
-						if(pEditor->m_Map.m_pFrontLayer && !pLayer->m_Front)
-							SavedLayers[LAYERTYPE_FRONT] = pEditor->m_Map.m_pFrontLayer->Duplicate();
-						if(pEditor->m_Map.m_pTeleLayer && !pLayer->m_Tele)
-							SavedLayers[LAYERTYPE_TELE] = pEditor->m_Map.m_pTeleLayer->Duplicate();
-						if(pEditor->m_Map.m_pSwitchLayer && !pLayer->m_Switch)
-							SavedLayers[LAYERTYPE_SWITCH] = pEditor->m_Map.m_pSwitchLayer->Duplicate();
-						if(pEditor->m_Map.m_pSpeedupLayer && !pLayer->m_Speedup)
-							SavedLayers[LAYERTYPE_SPEEDUP] = pEditor->m_Map.m_pSpeedupLayer->Duplicate();
-						if(pEditor->m_Map.m_pTuneLayer && !pLayer->m_Tune)
-							SavedLayers[LAYERTYPE_TUNE] = pEditor->m_Map.m_pTuneLayer->Duplicate();
-						if(!pLayer->m_Game)
-							SavedLayers[LAYERTYPE_GAME] = pEditor->m_Map.m_pGameLayer->Duplicate();
-					}
-
-					int PrevW = pLayer->m_Width;
-					int PrevH = pLayer->m_Height;
-					pLayer->Resize(State.m_Width, State.m_Height);
-
-					if(PrevW != State.m_Width)
-					{
-						std::shared_ptr<CEditorActionEditLayerTilesProp> pAction;
-						vpActions.push_back(pAction = std::make_shared<CEditorActionEditLayerTilesProp>(pEditor, GroupIndex, LayerIndex, ETilesProp::PROP_WIDTH, PrevW, State.m_Width));
-						pAction->SetSavedLayers(SavedLayers);
-					}
-
-					if(PrevH != State.m_Height)
-					{
-						std::shared_ptr<CEditorActionEditLayerTilesProp> pAction;
-						vpActions.push_back(pAction = std::make_shared<CEditorActionEditLayerTilesProp>(pEditor, GroupIndex, LayerIndex, ETilesProp::PROP_HEIGHT, PrevH, State.m_Height));
-						pAction->SetSavedLayers(SavedLayers);
-					}
+					pEditor->m_Map.m_vpImages[pLayer->m_Image]->m_AutoMapper.Proceed(pLayer.get(), pLayer->m_AutoMapperConfig, pLayer->m_Seed);
 				}
-
-				if(HasModifiedColor && !pLayer->IsEntitiesLayer())
-				{
-					int Color = 0;
-					Color |= pLayer->m_Color.r << 24;
-					Color |= pLayer->m_Color.g << 16;
-					Color |= pLayer->m_Color.b << 8;
-					Color |= pLayer->m_Color.a;
-
-					pLayer->m_Color.r = (State.m_Color >> 24) & 0xff;
-					pLayer->m_Color.g = (State.m_Color >> 16) & 0xff;
-					pLayer->m_Color.b = (State.m_Color >> 8) & 0xff;
-					pLayer->m_Color.a = State.m_Color & 0xff;
-
-					vpActions.push_back(std::make_shared<CEditorActionEditLayerTilesProp>(pEditor, GroupIndex, LayerIndex, ETilesProp::PROP_COLOR, Color, State.m_Color));
-				}
-
-				pLayer->FlagModified(0, 0, pLayer->m_Width, pLayer->m_Height);
 			}
-			State.m_Modified = 0;
-
-			char aDisplay[256];
-			str_format(aDisplay, sizeof(aDisplay), "Edit %d layers common properties: %s", (int)vpLayers.size(), HasModifiedColor && HasModifiedSize ? "color, size" : (HasModifiedColor ? "color" : "size"));
-			pEditor->m_EditorHistory.RecordAction(std::make_shared<CEditorActionBulk>(pEditor, vpActions, aDisplay));
-		}
-	}
-	else
-	{
-		for(auto &pLayer : vpLayers)
-		{
-			if(pLayer->m_Width > State.m_Width)
-				State.m_Width = pLayer->m_Width;
-			if(pLayer->m_Height > State.m_Height)
-				State.m_Height = pLayer->m_Height;
+			// TODO
+			// record undo
+			//m_pEditor->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAutoMap>(m_pEditor, m_pEditor->m_SelectedGroup, m_pEditor->m_vSelectedLayers[0], m_TilesHistory));
+			//ClearHistory();
+			return CUI::POPUP_CLOSE_CURRENT;
 		}
 	}
 
-	{
-		CUIRect Warning;
-		pToolbox->HSplitTop(13.0f, &Warning, pToolbox);
-		Warning.HMargin(0.5f, &Warning);
-
-		pEditor->TextRender()->TextColor(ColorRGBA(1.0f, 0.0f, 0.0f, 1.0f));
-		SLabelProperties Props;
-		Props.m_MaxWidth = Warning.w;
-		pEditor->UI()->DoLabel(&Warning, "Editing multiple layers", 9.0f, TEXTALIGN_ML, Props);
-		pEditor->TextRender()->TextColor(ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f));
-		pToolbox->HSplitTop(2.0f, nullptr, pToolbox);
-	}
+	int Color = PackColor(vpLayers[0]->m_Color);
 
 	CProperty aProps[] = {
-		{"Width", State.m_Width, PROPTYPE_INT_SCROLL, 1, 100000},
-		{"Height", State.m_Height, PROPTYPE_INT_SCROLL, 1, 100000},
+		{"Width", Width(), PROPTYPE_INT_SCROLL, 1, 100000, Width.Mixed()},
+		{"Height", Height(), PROPTYPE_INT_SCROLL, 1, 100000, Height.Mixed()},
 		{"Shift", 0, PROPTYPE_SHIFT, 0, 0},
 		{"Shift by", pEditor->m_ShiftBy, PROPTYPE_INT_SCROLL, 1, 100000},
-		{"Color", State.m_Color, PROPTYPE_COLOR, 0, 0},
+		{"Image", Image(), PROPTYPE_IMAGE, 0, 0, Image.Mixed()},
+		{"Color", Color, PROPTYPE_COLOR, 0, 0},
+		{"Auto Rule", AutoMapperConfig(), PROPTYPE_AUTOMAPPER, Image(), 0, AutoMapperConfig.Mixed()},
+		{"Seed", Seed(), PROPTYPE_INT_SCROLL, 0, 1000000000, Seed.Mixed()},
 		{nullptr},
 	};
 
+	if(AnyEntities)
+	{
+		aProps[(int)ETilesCommonProp::PROP_IMAGE].m_pName = nullptr;
+		aProps[(int)ETilesCommonProp::PROP_COLOR].m_pName = nullptr;
+		aProps[(int)ETilesCommonProp::PROP_AUTOMAPPER].m_pName = nullptr;
+	}
+	if(Image.Mixed() || Image() == -1)
+	{
+		aProps[(int)ETilesCommonProp::PROP_AUTOMAPPER].m_pName = nullptr;
+		aProps[(int)ETilesCommonProp::PROP_SEED].m_pName = nullptr;
+	}
+
 	static int s_aIds[(int)ETilesCommonProp::NUM_PROPS] = {0};
 	int NewVal = 0;
-	auto [PropState, Prop] = pEditor->DoPropertiesWithState<ETilesCommonProp>(pToolbox, aProps, s_aIds, &NewVal);
-
-	static CLayerTilesCommonPropTracker s_Tracker(pEditor);
-	s_Tracker.m_vpLayers = vpLayers;
-	s_Tracker.m_vLayerIndices = vLayerIndices;
-
-	s_Tracker.Begin(nullptr, Prop, PropState);
+	bool Manual = false;
+	auto [PropState, Prop] = pEditor->DoPropertiesWithState<ETilesCommonProp>(pToolBox, aProps, s_aIds, &NewVal, &Manual);
 
 	if(Prop == ETilesCommonProp::PROP_WIDTH && NewVal > 1)
 	{
@@ -1207,7 +1253,14 @@ CUI::EPopupMenuFunctionResult CLayerTiles::RenderCommonProperties(SCommonPropSta
 			pEditor->m_PopupEventActivated = true;
 			pEditor->m_LargeLayerWasWarned = true;
 		}
-		State.m_Width = NewVal;
+
+		Width.Apply(
+			NewVal,
+			[](const std::shared_ptr<CLayerTiles> pLayer, int w) {
+				if(w > 1)
+					pLayer->Resize(w, pLayer->m_Height);
+			},
+			!(Manual && PropState == EEditState::END));
 	}
 	else if(Prop == ETilesCommonProp::PROP_HEIGHT && NewVal > 1)
 	{
@@ -1217,31 +1270,71 @@ CUI::EPopupMenuFunctionResult CLayerTiles::RenderCommonProperties(SCommonPropSta
 			pEditor->m_PopupEventActivated = true;
 			pEditor->m_LargeLayerWasWarned = true;
 		}
-		State.m_Height = NewVal;
+
+		Height.Apply(
+			NewVal,
+			[](const std::shared_ptr<CLayerTiles> pLayer, int h) {
+				if(h > 1)
+					pLayer->Resize(pLayer->m_Width, h);
+			},
+			!(Manual && PropState == EEditState::END));
+	}
+	else if(Prop == ETilesCommonProp::PROP_IMAGE)
+	{
+		Image = NewVal;
+		if(NewVal == -1)
+		{
+			Image = -1;
+		}
+		else
+		{
+			Image = NewVal % pEditor->m_Map.m_vpImages.size();
+			AutoMapperConfig = -1;
+
+			if(pEditor->m_Map.m_vpImages[NewVal]->m_Width % 16 != 0 || pEditor->m_Map.m_vpImages[NewVal]->m_Height % 16 != 0)
+			{
+				pEditor->m_PopupEventType = CEditor::POPEVENT_IMAGEDIV16;
+				pEditor->m_PopupEventActivated = true;
+				Image = -1;
+			}
+		}
+	}
+	else if(Prop == ETilesCommonProp::PROP_AUTOMAPPER)
+	{
+		if(Image() >= 0 && pEditor->m_Map.m_vpImages[Image()]->m_AutoMapper.ConfigNamesNum() > 0 && NewVal >= 0)
+			AutoMapperConfig.Set(NewVal % pEditor->m_Map.m_vpImages[Image()]->m_AutoMapper.ConfigNamesNum());
+		else
+			AutoMapperConfig.Set(-1);
+	}
+	else if(Prop == ETilesCommonProp::PROP_SEED)
+	{
+		Seed.Apply(
+			NewVal, [](const std::shared_ptr<CLayerTiles> &pLayer, int NewSeed) {
+				pLayer->m_Seed = maximum(0, NewSeed);
+			},
+			!(Manual && PropState == EEditState::END));
+	}
+	else if(Prop == ETilesCommonProp::PROP_SHIFT_BY)
+	{
+		pEditor->m_ShiftBy = NewVal;
 	}
 	else if(Prop == ETilesCommonProp::PROP_SHIFT)
 	{
 		for(auto &pLayer : vpLayers)
 			pLayer->Shift(NewVal);
 	}
-	else if(Prop == ETilesCommonProp::PROP_SHIFT_BY)
-	{
-		pEditor->m_ShiftBy = NewVal;
-	}
 	else if(Prop == ETilesCommonProp::PROP_COLOR)
 	{
-		State.m_Color = NewVal;
-	}
-
-	s_Tracker.End(Prop, PropState);
-
-	if(Prop == ETilesCommonProp::PROP_WIDTH || Prop == ETilesCommonProp::PROP_HEIGHT)
-	{
-		State.m_Modified |= SCommonPropState::MODIFIED_SIZE;
-	}
-	else if(Prop == ETilesCommonProp::PROP_COLOR)
-	{
-		State.m_Modified |= SCommonPropState::MODIFIED_COLOR;
+		if(NewVal != Color)
+		{
+			for(auto &pLayer : vpLayers)
+			{
+				pLayer->m_Color.r = (NewVal >> 24) & 0xff;
+				pLayer->m_Color.g = (NewVal >> 16) & 0xff;
+				pLayer->m_Color.b = (NewVal >> 8) & 0xff;
+				pLayer->m_Color.a = NewVal & 0xff;
+			}
+		}
 	}
 
 	return CUI::POPUP_KEEP_OPEN;

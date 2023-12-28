@@ -22,6 +22,7 @@ public:
 	void BrushRotate(float Amount) override;
 
 	CUI::EPopupMenuFunctionResult RenderProperties(CUIRect *pToolbox) override;
+	static CUI::EPopupMenuFunctionResult RenderCommonProperties(CEditor *pEditor, CUIRect *pToolbox, const std::vector<std::shared_ptr<CLayerQuads>> &vpLayers, const std::vector<int> &vLayerIndices);
 
 	void ModifyImageIndex(FIndexModifyFunction pfnFunc) override;
 	void ModifyEnvelopeIndex(FIndexModifyFunction pfnFunc) override;

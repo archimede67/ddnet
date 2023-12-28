@@ -2087,3 +2087,24 @@ void CEditorActionMoveSoundSource::Redo()
 	dbg_assert(m_pLayer->m_Type == LAYERTYPE_SOUNDS, "Layer type does not match a sound layer");
 	std::static_pointer_cast<CLayerSounds>(m_pLayer)->m_vSources[m_SourceIndex].m_Position = m_CurrentPosition;
 }
+
+// -------------
+
+CEditorActionEditMultipleLayers::CEditorActionEditMultipleLayers(CEditor *pEditor, const std::vector<std::shared_ptr<IEditorAction>> &vpActions, const std::vector<int> &vLayerIndices, const char *pDisplay, bool Reverse) :
+	CEditorActionBulk(pEditor, vpActions, pDisplay, Reverse), m_vOriginalLayerIndices(vLayerIndices), m_vCurrentLayerIndices(pEditor->m_vSelectedLayers)
+{
+}
+
+void CEditorActionEditMultipleLayers::Undo()
+{
+	CEditorActionBulk::Undo();
+	// Fix layers selection after undo
+	m_pEditor->m_vSelectedLayers = m_vOriginalLayerIndices;
+}
+
+void CEditorActionEditMultipleLayers::Redo()
+{
+	CEditorActionBulk::Redo();
+	// Fix layers selection after redo
+	m_pEditor->m_vSelectedLayers = m_vCurrentLayerIndices;
+}

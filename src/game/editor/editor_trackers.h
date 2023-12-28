@@ -212,7 +212,7 @@ class CLayerTilesPropTracker : public CPropTracker<CLayerTiles, ETilesProp>
 {
 public:
 	CLayerTilesPropTracker(CEditor *pEditor) :
-		CPropTracker<CLayerTiles, ETilesProp>(pEditor){};
+		CPropTracker<CLayerTiles, ETilesProp>(pEditor) {}
 
 protected:
 	void OnStart(ETilesProp Prop) override;
@@ -225,11 +225,33 @@ private:
 	std::map<int, std::shared_ptr<CLayer>> m_SavedLayers;
 };
 
+class CMultiLayerTilesPropTracker : public CPropTracker<CLayer, ELayerCommonProp>
+{
+public:
+	CMultiLayerTilesPropTracker(CEditor *pEditor) :
+		CPropTracker<CLayer, ELayerCommonProp>(pEditor) {}
+
+protected:
+	void OnStart(ELayerCommonProp Prop) override;
+	void OnEnd(ELayerCommonProp Prop, int Value) override;
+
+	int PropToValue(ELayerCommonProp Prop) override;
+
+public:
+	const std::vector<std::shared_ptr<CLayer>> *m_pvpLayers;
+	const std::vector<int> *m_pvLayerIndices;
+
+private:
+	std::vector<int> m_vOriginalValues;
+
+	int PropToValue(ELayerCommonProp Prop, int Index);
+};
+
 class CLayerTilesCommonPropTracker : public CPropTracker<CLayerTiles, ETilesCommonProp>
 {
 public:
 	CLayerTilesCommonPropTracker(CEditor *pEditor) :
-		CPropTracker<CLayerTiles, ETilesCommonProp>(pEditor){};
+		CPropTracker<CLayerTiles, ETilesCommonProp>(pEditor) {}
 
 protected:
 	void OnStart(ETilesCommonProp Prop) override;
@@ -250,7 +272,7 @@ class CLayerGroupPropTracker : public CPropTracker<CLayerGroup, EGroupProp>
 {
 public:
 	CLayerGroupPropTracker(CEditor *pEditor) :
-		CPropTracker<CLayerGroup, EGroupProp>(pEditor){};
+		CPropTracker<CLayerGroup, EGroupProp>(pEditor) {}
 
 protected:
 	void OnEnd(EGroupProp Prop, int Value) override;
@@ -261,7 +283,7 @@ class CLayerQuadsPropTracker : public CPropTracker<CLayerQuads, ELayerQuadsProp>
 {
 public:
 	CLayerQuadsPropTracker(CEditor *pEditor) :
-		CPropTracker<CLayerQuads, ELayerQuadsProp>(pEditor){};
+		CPropTracker<CLayerQuads, ELayerQuadsProp>(pEditor) {}
 
 protected:
 	void OnEnd(ELayerQuadsProp Prop, int Value) override;
@@ -272,7 +294,7 @@ class CLayerSoundsPropTracker : public CPropTracker<CLayerSounds, ELayerSoundsPr
 {
 public:
 	CLayerSoundsPropTracker(CEditor *pEditor) :
-		CPropTracker<CLayerSounds, ELayerSoundsProp>(pEditor){};
+		CPropTracker<CLayerSounds, ELayerSoundsProp>(pEditor) {}
 
 protected:
 	void OnEnd(ELayerSoundsProp Prop, int Value) override;

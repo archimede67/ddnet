@@ -98,6 +98,13 @@ IGraphics *CUIElementBase::Graphics() const { return s_pUI->Graphics(); }
 IInput *CUIElementBase::Input() const { return s_pUI->Input(); }
 ITextRender *CUIElementBase::TextRender() const { return s_pUI->TextRender(); }
 
+CUI::EPopupMenuFunctionResult CUI::JoinResults(CUI::EPopupMenuFunctionResult ResultA, CUI::EPopupMenuFunctionResult ResultB)
+{
+	if(ResultA == CUI::POPUP_KEEP_OPEN)
+		return ResultB;
+	return ResultA;
+}
+
 void CUI::Init(IKernel *pKernel)
 {
 	m_pClient = pKernel->RequestInterface<IClient>();

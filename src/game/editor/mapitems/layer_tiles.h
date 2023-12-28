@@ -145,7 +145,7 @@ public:
 		int m_Height = -1;
 		int m_Color = 0;
 	};
-	static CUI::EPopupMenuFunctionResult RenderCommonProperties(SCommonPropState &State, CEditor *pEditor, CUIRect *pToolbox, std::vector<std::shared_ptr<CLayerTiles>> &vpLayers, std::vector<int> &vLayerIndices);
+	static CUI::EPopupMenuFunctionResult RenderCommonProperties(SCommonPropState &State, CEditor *pEditor, CUIRect *pToolBox, std::vector<std::shared_ptr<CLayerTiles>> &vpLayers, std::vector<int> &vLayerIndices);
 
 	void ModifyImageIndex(FIndexModifyFunction pfnFunc) override;
 	void ModifyEnvelopeIndex(FIndexModifyFunction pfnFunc) override;

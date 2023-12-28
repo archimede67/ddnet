@@ -65,6 +65,14 @@ enum class ELayerProp
 	NUM_PROPS,
 };
 
+enum class ELayerCommonProp
+{
+	PROP_NONE = -1,
+	PROP_GROUP,
+	PROP_HQ,
+	NUM_PROPS
+};
+
 enum class ETilesProp
 {
 	PROP_NONE = -1,
@@ -88,7 +96,10 @@ enum class ETilesCommonProp
 	PROP_HEIGHT,
 	PROP_SHIFT,
 	PROP_SHIFT_BY,
+	PROP_IMAGE,
 	PROP_COLOR,
+	PROP_AUTOMAPPER,
+	PROP_SEED,
 	NUM_PROPS,
 };
 
