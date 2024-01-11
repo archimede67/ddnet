@@ -691,7 +691,7 @@ CUI::EPopupMenuFunctionResult CEditor::PopupLayer(void *pContext, CUIRect View, 
 
 		// Then render layer specific properties for same type selection (tiles, quads or sounds only)
 		if(pPopup->m_Type == SLayerPopupContext::SELECTION_TILES)
-			return CUI::JoinResults(CommonResult, CLayerTiles::RenderCommonProperties(pPopup->m_CommonPropState, pEditor, &View, pPopup->m_vpTileLayers, pPopup->m_vLayerIndices));
+			return CUI::JoinResults(CommonResult, CLayerTiles::RenderCommonProperties(pPopup->m_CommonPropState, pEditor, &View, pPopup->m_vpTileLayers, pPopup->m_vLayerIndices, pPopup->m_vLayersByColor));
 		else if(pPopup->m_Type == SLayerPopupContext::SELECTION_QUADS)
 			return CUI::JoinResults(CommonResult, CLayerQuads::RenderCommonProperties(pEditor, &View, pPopup->m_vpQuadLayers, pPopup->m_vLayerIndices));
 		else if(pPopup->m_Type == SLayerPopupContext::SELECTION_SOUNDS)

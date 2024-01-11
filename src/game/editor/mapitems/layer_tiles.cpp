@@ -4,6 +4,7 @@
 
 #include <engine/keys.h>
 #include <engine/shared/map.h>
+#include <game/client/ui_scrollregion.h>
 #include <game/editor/editor.h>
 #include <game/editor/editor_actions.h>
 
@@ -36,6 +37,7 @@ CLayerTiles::CLayerTiles(CEditor *pEditor, int w, int h) :
 	m_AutoMapperConfig = -1;
 	m_Seed = 0;
 	m_AutoAutoMap = false;
+	m_ColorRef = 0;
 
 	m_pTiles = new CTile[m_Width * m_Height];
 	mem_zero(m_pTiles, (size_t)m_Width * m_Height * sizeof(CTile));
@@ -63,6 +65,7 @@ CLayerTiles::CLayerTiles(const CLayerTiles &Other) :
 	m_Front = Other.m_Front;
 	m_Switch = Other.m_Switch;
 	m_Tune = Other.m_Tune;
+	m_ColorRef = 0;
 
 	mem_copy(m_aFileName, Other.m_aFileName, IO_MAX_PATH_LENGTH);
 }
@@ -1074,7 +1077,7 @@ CUI::EPopupMenuFunctionResult CLayerTiles::RenderProperties(CUIRect *pToolBox)
 	return CUI::POPUP_KEEP_OPEN;
 }
 
-CUI::EPopupMenuFunctionResult CLayerTiles::RenderCommonProperties(SCommonPropState &State, CEditor *pEditor, CUIRect *pToolBox, std::vector<std::shared_ptr<CLayerTiles>> &vpLayers, std::vector<int> &vLayerIndices)
+CUI::EPopupMenuFunctionResult CLayerTiles::RenderCommonProperties(SCommonPropState &State, CEditor *pEditor, CUIRect *pToolBox, std::vector<std::shared_ptr<CLayerTiles>> &vpLayers, std::vector<int> &vLayerIndices, std::vector<std::pair<int, std::vector<int>>> &vLayersByColor)
 {
 	//if(State.m_Modified)
 	//{
@@ -1214,15 +1217,12 @@ CUI::EPopupMenuFunctionResult CLayerTiles::RenderCommonProperties(SCommonPropSta
 		}
 	}
 
-	int Color = PackColor(vpLayers[0]->m_Color);
-
 	CProperty aProps[] = {
 		{"Width", Width(), PROPTYPE_INT_SCROLL, 1, 100000, Width.Mixed()},
 		{"Height", Height(), PROPTYPE_INT_SCROLL, 1, 100000, Height.Mixed()},
 		{"Shift", 0, PROPTYPE_SHIFT, 0, 0},
 		{"Shift by", pEditor->m_ShiftBy, PROPTYPE_INT_SCROLL, 1, 100000},
 		{"Image", Image(), PROPTYPE_IMAGE, 0, 0, Image.Mixed()},
-		{"Color", Color, PROPTYPE_COLOR, 0, 0},
 		{"Auto Rule", AutoMapperConfig(), PROPTYPE_AUTOMAPPER, Image(), 0, AutoMapperConfig.Mixed()},
 		{"Seed", Seed(), PROPTYPE_INT_SCROLL, 0, 1000000000, Seed.Mixed()},
 		{nullptr},
@@ -1323,18 +1323,73 @@ CUI::EPopupMenuFunctionResult CLayerTiles::RenderCommonProperties(SCommonPropSta
 		for(auto &pLayer : vpLayers)
 			pLayer->Shift(NewVal);
 	}
-	else if(Prop == ETilesCommonProp::PROP_COLOR)
+
+	if(!AnyEntities)
 	{
-		if(NewVal != Color)
+		CUIRect Slot, Label;
+		pToolBox->HSplitTop(13.0f, &Slot, pToolBox);
+		Slot.VSplitMid(&Label, nullptr);
+		pEditor->UI()->DoLabel(&Label, "Colors", 10.0f, TEXTALIGN_ML);
+		pToolBox->y -= 13.0f; // Move up so that the first color in the list is in front of "Colors"
+
+		CUIRect List;
+		int MaxColors = 5;
+		pToolBox->HSplitTop(13.0f * minimum(MaxColors, (int)vLayersByColor.size()), &List, pToolBox);
+		const bool ShouldHaveScroll = (int)vLayersByColor.size() > MaxColors;
+
+		static CScrollRegion s_ScrollRegion;
+		if(ShouldHaveScroll)
 		{
-			for(auto &pLayer : vpLayers)
+			vec2 ScrollOffset(0.0f, 0.0f);
+			CScrollRegionParams ScrollParams;
+			ScrollParams.m_ScrollbarWidth = 6.0f;
+			ScrollParams.m_ScrollbarMargin = 1.0f;
+			ScrollParams.m_ScrollUnit = 13.0f;
+			s_ScrollRegion.Begin(&List, &ScrollOffset, &ScrollParams);
+			List.y += ScrollOffset.y;
+			List.VSplitRight(8.0f, &List, nullptr);
+			List.x += 8.0f;
+		}
+
+		// TODO: fix multi layer quads & multi layer sounds (probably)
+		// 1 color input for each layer
+		for(auto &It = vLayersByColor.begin(); It != vLayersByColor.end(); It++)
+		{
+			auto &[Color, vLayers] = *It;
+			int NewVal = 0;
+
+			CProperty aColorProperties[] = {
+				{"", Color, PROPTYPE_COLOR, 0, 0},
+				{nullptr},
+			};
+			CUIRect RectPlaceholder{
+				List.x,
+				List.y,
+				List.w,
+				13.0f,
+			};
+			s_ScrollRegion.AddRect(RectPlaceholder);
+			pToolBox->HSplitTop(13.0f, &Slot, pToolBox);
+			auto [PropState, Prop] = pEditor->DoPropertiesWithState<int>(&List, aColorProperties, const_cast<int *>(&Color), &NewVal);
+
+			if(Prop == 0)
 			{
-				pLayer->m_Color.r = (NewVal >> 24) & 0xff;
-				pLayer->m_Color.g = (NewVal >> 16) & 0xff;
-				pLayer->m_Color.b = (NewVal >> 8) & 0xff;
-				pLayer->m_Color.a = NewVal & 0xff;
+				if(NewVal != Color)
+				{
+					for(auto &LayerIndex : vLayers)
+					{
+						vpLayers[LayerIndex]->m_Color.r = (NewVal >> 24) & 0xff;
+						vpLayers[LayerIndex]->m_Color.g = (NewVal >> 16) & 0xff;
+						vpLayers[LayerIndex]->m_Color.b = (NewVal >> 8) & 0xff;
+						vpLayers[LayerIndex]->m_Color.a = NewVal & 0xff;
+					}
+					Color = NewVal;
+				}
 			}
 		}
+
+		if(ShouldHaveScroll)
+			s_ScrollRegion.End();
 	}
 
 	return CUI::POPUP_KEEP_OPEN;

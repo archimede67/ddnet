@@ -565,6 +565,7 @@ void CEditor::UpdateMultiLayersSelection()
 	m_LayerPopupContext.m_vpQuadLayers.clear();
 	m_LayerPopupContext.m_vpSoundLayers.clear();
 	m_LayerPopupContext.m_vLayerIndices.clear();
+	m_LayerPopupContext.m_vLayersByColor.clear();
 
 	if(m_vSelectedLayers.size() > 1)
 	{
@@ -592,7 +593,19 @@ void CEditor::UpdateMultiLayersSelection()
 			}
 
 			if(LayerType == LAYERTYPE_TILES)
-				m_LayerPopupContext.m_vpTileLayers.push_back(std::static_pointer_cast<CLayerTiles>(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]));
+			{
+				auto AddLayerColor = [&](int Color, int LayerIndex) {
+					auto It = std::find_if(m_LayerPopupContext.m_vLayersByColor.begin(), m_LayerPopupContext.m_vLayersByColor.end(), [Color](auto &Pair) { return Pair.first == Color; });
+					if(It == m_LayerPopupContext.m_vLayersByColor.end())
+						m_LayerPopupContext.m_vLayersByColor.emplace_back(Color, std::vector<int>{LayerIndex});
+					else
+						It->second.emplace_back(LayerIndex);
+				};
+
+				std::shared_ptr<CLayerTiles> pTilesLayer = std::static_pointer_cast<CLayerTiles>(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]);
+				AddLayerColor(PackColor(pTilesLayer->m_Color), m_LayerPopupContext.m_vpTileLayers.size());
+				m_LayerPopupContext.m_vpTileLayers.push_back(pTilesLayer);
+			}
 			else if(LayerType == LAYERTYPE_QUADS)
 				m_LayerPopupContext.m_vpQuadLayers.push_back(std::static_pointer_cast<CLayerQuads>(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]));
 			else if(LayerType == LAYERTYPE_SOUNDS)
@@ -8645,6 +8658,11 @@ void CEditor::Init()
 	m_pBrush->m_pMap = &m_Map;
 
 	Reset(false);
+
+	// TODO: remove me
+	Load("maps/MultiLayerTest.map", IStorage::TYPE_ALL);
+	str_copy(m_aFileSaveName, "MultiLayerTest.map");
+	m_ValidSaveFilename = true;
 }
 
 void CEditor::PlaceBorderTiles()

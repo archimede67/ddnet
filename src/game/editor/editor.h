@@ -968,6 +968,7 @@ public:
 		std::vector<std::shared_ptr<CLayerTiles>> m_vpTileLayers;
 		std::vector<std::shared_ptr<CLayerQuads>> m_vpQuadLayers;
 		std::vector<std::shared_ptr<CLayerSounds>> m_vpSoundLayers;
+		std::vector<std::pair<int, std::vector<int>>> m_vLayersByColor;
 
 		std::vector<int> m_vLayerIndices;
 		CLayerTiles::SCommonPropState m_CommonPropState;
