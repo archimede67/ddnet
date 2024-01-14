@@ -226,8 +226,14 @@ struct CProperty
 	bool m_Mixed = false; // Is this a "mixed" property
 };
 
+class IMultiPropertyValue
+{
+public:
+	virtual void Resolve(const std::shared_ptr<CLayer> &pLayer) = 0;
+};
+
 template<typename TLayer, typename TValue, int MixedValue, bool AutoMixedValue = false>
-class CMultiPropertyValue
+class CMultiPropertyValue : IMultiPropertyValue
 {
 	static int DefaultTransformer(TValue Value) { return Value; }
 
@@ -334,12 +340,151 @@ public:
 
 	bool Mixed() const { return m_Mixed; }
 
+	void Resolve(const std::shared_ptr<CLayer> &pLayer) override
+	{
+	}
+
 private:
 	bool m_Mixed;
 	std::vector<TValue *> m_vpValues;
 	TValue m_AutoMixedValue;
 	int m_AutoMixedValueIndex;
 	const std::vector<std::shared_ptr<TLayer>> *m_pvpLayers;
+};
+
+class CMixedProperty
+{
+public:
+	enum EMixedType
+	{
+		MAX_VALUE,
+		MIN_VALUE,
+		DEF_VALUE,
+	};
+
+public:
+	template<typename TProp>
+	CMixedProperty(TProp Prop, EMixedType MixedType = EMixedType::MAX_VALUE) :
+		m_Prop(static_cast<int>(Prop)), m_vpValues(), m_MixedType(MixedType), m_MixedValue(0), m_pMixedValue(nullptr), m_Mixed(false)
+	{
+	}
+
+	template<typename TProp>
+	CMixedProperty(TProp Prop, int MixedValue) :
+		CMixedProperty(Prop, EMixedType::DEF_VALUE)
+	{
+		m_MixedValue = MixedValue;
+	}
+
+	int operator()()
+	{
+		dbg_assert(!m_vpValues.empty(), "Cannot call operator() on empty mixed property");
+		return m_Mixed ? m_MixedValue : *m_vpValues[0];
+	}
+
+	bool Mixed()
+	{
+		return m_Mixed;
+	}
+
+	void Set(int Value)
+	{
+		for(auto *pValue : m_vpValues)
+			*pValue = Value;
+	}
+
+	enum ECompare
+	{
+		LT, // Less than
+		LEQ, // Les than or equal
+		GT, // Greater than
+		GEQ, // Greather than or equal
+		EQ, // Equal
+		NEQ, // Not equal
+	};
+
+	template<ECompare CompareType, bool All = false>
+	bool Compare(int Other)
+	{
+		static auto s_CompareMap = std::map<ECompare, std::function<bool(int, int)>>{
+			{ECompare::EQ, [](int a, int b) { return a == b; }},
+			{ECompare::NEQ, [](int a, int b) { return a != b; }},
+			{ECompare::LT, [](int a, int b) { return a < b; }},
+			{ECompare::GT, [](int a, int b) { return a > b; }},
+			{ECompare::GEQ, [](int a, int b) { return a >= b; }},
+			{ECompare::LEQ, [](int a, int b) { return a <= b; }},
+		};
+
+		if(All)
+			return std::all_of(m_vpValues.begin(), m_vpValues.end(), [&](int *pValue) { return s_CompareMap[CompareType](*pValue, Other); });
+		else
+			return std::any_of(m_vpValues.begin(), m_vpValues.end(), [&](int *pValue) { return s_CompareMap[CompareType](*pValue, Other); });
+	}
+
+private:
+	void Add(int *pValue)
+	{
+		if(!m_vpValues.empty() && *pValue != *m_vpValues[0])
+			m_Mixed = true;
+
+		if(m_Mixed)
+		{
+			if(m_MixedType == EMixedType::MAX_VALUE)
+			{
+				if(!m_pMixedValue)
+					m_pMixedValue = pValue;
+				else if(*pValue > *m_pMixedValue)
+					m_pMixedValue = pValue;
+			}
+			else if(m_MixedType == EMixedType::MIN_VALUE)
+			{
+				if(!m_pMixedValue)
+					m_pMixedValue = pValue;
+				else if(*pValue < *m_pMixedValue)
+					m_pMixedValue = pValue;
+			}
+
+			if(m_MixedType != EMixedType::DEF_VALUE)
+				m_MixedValue = *m_pMixedValue;
+		}
+
+		m_vpValues.push_back(pValue);
+	}
+
+	int m_Prop;
+	std::vector<int *> m_vpValues;
+	EMixedType m_MixedType;
+	int m_MixedValue;
+	int *m_pMixedValue;
+	bool m_Mixed;
+
+	template<class TLayer, typename TProp>
+	friend class CMixedPropertyResolver;
+};
+
+template<class TLayer, typename TProp>
+class CMixedPropertyResolver
+{
+public:
+	CMixedPropertyResolver(const std::function<int *(TLayer &, TProp)> &fnAccessor)
+	{
+		m_fnAccessor = fnAccessor;
+	}
+
+	void Resolve(const std::vector<std::shared_ptr<TLayer>> &vpLayers, const std::vector<CMixedProperty *> vpProps)
+	{
+		for(auto &pLayer : vpLayers)
+		{
+			for(auto pProp : vpProps)
+			{
+				int *pValue = m_fnAccessor(*pLayer, static_cast<TProp>(pProp->m_Prop));
+				pProp->Add(pValue);
+			}
+		}
+	}
+
+private:
+	std::function<int *(TLayer &, TProp)> m_fnAccessor;
 };
 
 enum
@@ -378,6 +523,22 @@ public:
 
 	const char *GetRealFileName() const { return m_aRealFileName; }
 	const char *GetTempFileName() const { return m_aTempFileName; }
+};
+
+struct SMultiLayersInfo
+{
+	std::vector<std::shared_ptr<CLayer>> m_vpLayers;
+	std::vector<std::shared_ptr<CLayerTiles>> m_vpTileLayers;
+	std::vector<std::shared_ptr<CLayerQuads>> m_vpQuadLayers;
+	std::vector<std::shared_ptr<CLayerSounds>> m_vpSoundLayers;
+	std::vector<std::pair<int, std::vector<int>>> m_vLayersByColor;
+	CPropTrackerArray<CLayerTilesPropTracker> m_TrackerArray;
+	std::vector<int> m_vLayerIndices;
+
+	SMultiLayersInfo() :
+		m_vpLayers(), m_vpTileLayers(), m_vpQuadLayers(), m_vpSoundLayers(), m_vLayersByColor(), m_TrackerArray(), m_vLayerIndices()
+	{
+	}
 };
 
 class CEditor : public IEditor
@@ -600,17 +761,17 @@ public:
 	void SelectLayer(int LayerIndex, int GroupIndex = -1);
 	void AddSelectedLayer(int LayerIndex);
 	void UpdateMultiLayersSelection();
-	void SelectQuad(int Index);
-	void ToggleSelectQuad(int Index);
+	void SelectQuad(int LayerIndex, int Index);
+	void ToggleSelectQuad(int LayerIndex, int Index);
 	void DeselectQuads();
 	void DeselectQuadPoints();
-	void SelectQuadPoint(int QuadIndex, int Index);
-	void ToggleSelectQuadPoint(int QuadIndex, int Index);
+	void SelectQuadPoint(int LayerIndex, int QuadIndex, int Index);
+	void ToggleSelectQuadPoint(int LayerIndex, int QuadIndex, int Index);
 	void DeleteSelectedQuads();
-	bool IsQuadSelected(int Index) const;
-	bool IsQuadCornerSelected(int Index) const;
-	bool IsQuadPointSelected(int QuadIndex, int Index) const;
-	int FindSelectedQuadIndex(int Index) const;
+	bool IsQuadSelected(int LayerIndex, int Index) const;
+	bool IsQuadCornerSelected(int LayerIndex, int Index) const;
+	bool IsQuadPointSelected(int LayerIndex, int QuadIndex, int Index) const;
+	int FindSelectedQuadIndex(int LayerIndex, int Index) const;
 
 	int FindEnvPointIndex(int Index, int Channel) const;
 	void SelectEnvPoint(int Index);
@@ -852,11 +1013,11 @@ public:
 	bool m_ShowPicker;
 
 	std::vector<int> m_vSelectedLayers;
-	std::vector<int> m_vSelectedQuads;
+	std::map<int, std::vector<int>> m_SelectedQuads;
 	int m_SelectedQuadPoint;
 	int m_SelectedQuadIndex;
 	int m_SelectedGroup;
-	int m_SelectedQuadPoints;
+	std::map<int, int> m_SelectedQuadPoints;
 	int m_SelectedEnvelope;
 	std::vector<std::pair<int, int>> m_vSelectedEnvelopePoints;
 	int m_SelectedQuadEnvelope;
@@ -963,15 +1124,8 @@ public:
 	struct SLayerPopupContext : public SPopupMenuId
 	{
 		CEditor *m_pEditor;
+		SMultiLayersInfo m_MultiInfo;
 
-		std::vector<std::shared_ptr<CLayer>> m_vpLayers;
-		std::vector<std::shared_ptr<CLayerTiles>> m_vpTileLayers;
-		std::vector<std::shared_ptr<CLayerQuads>> m_vpQuadLayers;
-		std::vector<std::shared_ptr<CLayerSounds>> m_vpSoundLayers;
-		std::vector<std::pair<int, std::vector<int>>> m_vLayersByColor;
-
-		std::vector<int> m_vLayerIndices;
-		CLayerTiles::SCommonPropState m_CommonPropState;
 		enum ESelectionType
 		{
 			SELECTION_TILES,

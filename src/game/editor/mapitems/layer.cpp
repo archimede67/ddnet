@@ -3,7 +3,7 @@
 #include <game/editor/editor.h>
 #include <game/editor/editor_actions.h>
 
-CUI::EPopupMenuFunctionResult CLayer::RenderCommonProperties(CEditor *pEditor, CUIRect *pToolbox, const std::vector<std::shared_ptr<CLayer>> &vpLayers, const std::vector<int> &vLayerIndices)
+CUI::EPopupMenuFunctionResult CLayer::RenderCommonProperties(CEditor *pEditor, CUIRect *pToolbox, SMultiLayersInfo &Infos)
 {
 	std::shared_ptr<CLayerGroup> pCurrentGroup = pEditor->GetSelectedGroup();
 
@@ -22,6 +22,9 @@ CUI::EPopupMenuFunctionResult CLayer::RenderCommonProperties(CEditor *pEditor, C
 
 	bool AnyEntities = false;
 	bool AllEntities = true;
+
+	auto &vpLayers = Infos.m_vpLayers;
+	auto &vLayerIndices = Infos.m_vLayerIndices;
 
 	for(auto &pLayer : vpLayers)
 	{
@@ -129,11 +132,11 @@ CUI::EPopupMenuFunctionResult CLayer::RenderCommonProperties(CEditor *pEditor, C
 	if(Prop != ELayerCommonProp::PROP_NONE)
 		pEditor->m_Map.OnModify();
 
-	static CMultiLayerTilesPropTracker s_Tracker(pEditor);
+	//static CMultiLayerTilesPropTracker s_Tracker(pEditor);
 
-	s_Tracker.m_pvLayerIndices = &vLayerIndices;
-	s_Tracker.m_pvpLayers = &vpLayers;
-	s_Tracker.Begin(nullptr, Prop, State);
+	//s_Tracker.m_pvLayerIndices = &vLayerIndices;
+	//s_Tracker.m_pvpLayers = &vpLayers;
+	//s_Tracker.Begin(nullptr, Prop, State);
 
 	if(Prop == ELayerCommonProp::PROP_GROUP)
 	{
@@ -162,7 +165,7 @@ CUI::EPopupMenuFunctionResult CLayer::RenderCommonProperties(CEditor *pEditor, C
 		});
 	}
 
-	s_Tracker.End(Prop, State);
+	//s_Tracker.End(Prop, State);
 
 	return CUI::POPUP_KEEP_OPEN;
 }

@@ -252,55 +252,20 @@ CUI::EPopupMenuFunctionResult CLayerQuads::RenderProperties(CUIRect *pToolBox)
 	return CUI::POPUP_KEEP_OPEN;
 }
 
-template<typename Tracker, class TLayer>
-class CMultiPropTracker
+CUI::EPopupMenuFunctionResult CLayerQuads::RenderCommonProperties(CEditor *pEditor, CUIRect *pToolbox, SMultiLayersInfo &Infos)
 {
-public:
-	CMultiPropTracker(CEditor *pEditor) :
-		m_pEditor(pEditor), m_Trackers() {}
+	auto &vpLayers = Infos.m_vpQuadLayers;
 
-	template<typename E>
-	void Begin(E Prop, EEditState State)
-	{
-		if(static_cast<int>(Prop) == -1)
-			return;
+	// Definition of mixed properties
+	CMixedProperty ImageProperty(ELayerQuadsProp::PROP_IMAGE, CEditor::POPUP_SELECTED_NONE);
 
-		if(State == EEditState::ONE_GO || State == EEditState::START)
-		{
-			// Allocate trackers on start
-			for(int i = 0; i < (int)m_pvpLayers->size(); i++)
-				m_Trackers.emplace_back(m_pEditor);
-		}
+	// Resolve mixed properties values
+	static CMixedPropertyResolver<CLayerQuads, ELayerQuadsProp> s_Resolver(CLayerQuads::PropertyAccessor);
+	s_Resolver.Resolve(vpLayers, {&ImageProperty});
 
-		for(int i = 0; i < (int)m_pvpLayers->size(); i++)
-			m_Trackers[i].Begin((*m_pvpLayers)[i].get(), Prop, State);
-	}
-
-	template<typename E>
-	void End(E Prop, EEditState State)
-	{
-		if(static_cast<int>(Prop) == -1)
-			return;
-
-		for(auto &Tracker : m_Trackers)
-			Tracker.End(Prop, State);
-		m_Trackers.clear();
-	}
-
-	const std::vector<std::shared_ptr<TLayer>> *m_pvpLayers;
-
-protected:
-	std::vector<Tracker> m_Trackers;
-	CEditor *m_pEditor;
-};
-
-CUI::EPopupMenuFunctionResult CLayerQuads::RenderCommonProperties(CEditor *pEditor, CUIRect *pToolbox, const std::vector<std::shared_ptr<CLayerQuads>> &vpLayers, const std::vector<int> &vLayerIndices)
-{
-	// Use a multi value for the image property
-	CMultiPropertyValue<CLayerQuads, int, CEditor::POPUP_SELECTED_NONE> Image(vpLayers, [](const std::shared_ptr<CLayerQuads> &pLayer) { return &pLayer->m_Image; });
-
+	// Use the mixed properties
 	CProperty aProps[] = {
-		{"Image", Image(), PROPTYPE_IMAGE, -1, 0, Image.Mixed()},
+		{"Image", ImageProperty(), PROPTYPE_IMAGE, -1, 0, ImageProperty.Mixed()},
 		{nullptr},
 	};
 
@@ -318,9 +283,9 @@ CUI::EPopupMenuFunctionResult CLayerQuads::RenderCommonProperties(CEditor *pEdit
 	if(Prop == ELayerQuadsProp::PROP_IMAGE)
 	{
 		if(NewVal >= 0)
-			Image.Set(NewVal % pEditor->m_Map.m_vpImages.size());
+			ImageProperty.Set(NewVal % pEditor->m_Map.m_vpImages.size());
 		else
-			Image.Set(-1);
+			ImageProperty.Set(-1);
 	}
 
 	//s_Tracker.End(Prop, State);

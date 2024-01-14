@@ -11,6 +11,7 @@
 using FIndexModifyFunction = std::function<void(int *pIndex)>;
 
 class CLayerGroup;
+struct SMultiLayersInfo;
 
 class CLayer
 {
@@ -56,7 +57,7 @@ public:
 
 	virtual void Render(bool Tileset = false) {}
 	virtual CUI::EPopupMenuFunctionResult RenderProperties(CUIRect *pToolbox) { return CUI::POPUP_KEEP_OPEN; }
-	static CUI::EPopupMenuFunctionResult RenderCommonProperties(CEditor *pEditor, CUIRect *pToolbox, const std::vector<std::shared_ptr<CLayer>> &vpLayers, const std::vector<int> &vLayerIndices);
+	static CUI::EPopupMenuFunctionResult RenderCommonProperties(CEditor *pEditor, CUIRect *pToolbox, SMultiLayersInfo &Infos);
 
 	virtual void ModifyImageIndex(FIndexModifyFunction pfnFunc) {}
 	virtual void ModifyEnvelopeIndex(FIndexModifyFunction pfnFunc) {}

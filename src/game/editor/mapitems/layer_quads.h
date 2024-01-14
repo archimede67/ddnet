@@ -1,6 +1,8 @@
 #ifndef GAME_EDITOR_MAPITEMS_LAYER_QUADS_H
 #define GAME_EDITOR_MAPITEMS_LAYER_QUADS_H
 
+#include <game/editor/mapitems.h>
+
 #include "layer.h"
 
 class CLayerQuads : public CLayer
@@ -22,7 +24,7 @@ public:
 	void BrushRotate(float Amount) override;
 
 	CUI::EPopupMenuFunctionResult RenderProperties(CUIRect *pToolbox) override;
-	static CUI::EPopupMenuFunctionResult RenderCommonProperties(CEditor *pEditor, CUIRect *pToolbox, const std::vector<std::shared_ptr<CLayerQuads>> &vpLayers, const std::vector<int> &vLayerIndices);
+	static CUI::EPopupMenuFunctionResult RenderCommonProperties(CEditor *pEditor, CUIRect *pToolbox, SMultiLayersInfo &Infos);
 
 	void ModifyImageIndex(FIndexModifyFunction pfnFunc) override;
 	void ModifyEnvelopeIndex(FIndexModifyFunction pfnFunc) override;
@@ -33,6 +35,19 @@ public:
 
 	int m_Image;
 	std::vector<CQuad> m_vQuads;
+
+private:
+	static int *PropertyAccessor(CLayerQuads &LayerQuads, ELayerQuadsProp Property)
+	{
+		switch(Property)
+		{
+		case ELayerQuadsProp::PROP_IMAGE:
+			return &LayerQuads.m_Image;
+		default:
+			break;
+		}
+		return nullptr;
+	}
 };
 
 #endif

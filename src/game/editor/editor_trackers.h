@@ -175,6 +175,9 @@ public:
 		}
 	}
 
+	using TObject = T;
+	using TProp = E;
+
 protected:
 	virtual void OnStart(E Prop) {}
 	virtual void OnEnd(E Prop, int Value) {}
@@ -195,6 +198,52 @@ protected:
 	int m_CurrentLayerIndex;
 	int m_CurrentGroupIndex;
 	bool m_Tracking;
+};
+
+template<class TTracker>
+class CPropTrackerArray
+{
+public:
+	CEditor *m_pEditor;
+
+	CPropTrackerArray() :
+		m_pEditor(nullptr), m_vTrackers()
+	{
+	}
+
+	void Clear()
+	{
+		m_vTrackers.clear();
+	}
+
+	void Add(int LayerIndex)
+	{
+		m_vTrackers.emplace_back(std::pair<int, TTracker>(LayerIndex, TTracker(m_pEditor)));
+	}
+
+	void Begin(std::vector<std::shared_ptr<typename TTracker::TObject>> vObjects, typename TTracker::TProp Prop, EEditState State)
+	{
+		if(Prop == static_cast<typename TTracker::TProp>(-1))
+			return;
+		for(int Index = 0; Index < m_vTrackers.size(); Index++)
+		{
+			auto &[LayerIndex, Tracker] = m_vTrackers[Index];
+			Tracker.Begin(vObjects[Index].get(), Prop, State, LayerIndex);
+		}
+	}
+
+	void End(typename TTracker::TProp Prop, EEditState State)
+	{
+		if(Prop == static_cast<typename TTracker::TProp>(-1))
+			return;
+		for(auto &[_, Tracker] : m_vTrackers)
+		{
+			Tracker.End(Prop, State);
+		}
+	}
+
+protected:
+	std::vector<std::pair<int, TTracker>> m_vTrackers;
 };
 
 class CLayerPropTracker : public CPropTracker<CLayer, ELayerProp>
@@ -223,49 +272,6 @@ protected:
 
 private:
 	std::map<int, std::shared_ptr<CLayer>> m_SavedLayers;
-};
-
-class CMultiLayerTilesPropTracker : public CPropTracker<CLayer, ELayerCommonProp>
-{
-public:
-	CMultiLayerTilesPropTracker(CEditor *pEditor) :
-		CPropTracker<CLayer, ELayerCommonProp>(pEditor) {}
-
-protected:
-	void OnStart(ELayerCommonProp Prop) override;
-	void OnEnd(ELayerCommonProp Prop, int Value) override;
-
-	int PropToValue(ELayerCommonProp Prop) override;
-
-public:
-	const std::vector<std::shared_ptr<CLayer>> *m_pvpLayers;
-	const std::vector<int> *m_pvLayerIndices;
-
-private:
-	std::vector<int> m_vOriginalValues;
-
-	int PropToValue(ELayerCommonProp Prop, int Index);
-};
-
-class CLayerTilesCommonPropTracker : public CPropTracker<CLayerTiles, ETilesCommonProp>
-{
-public:
-	CLayerTilesCommonPropTracker(CEditor *pEditor) :
-		CPropTracker<CLayerTiles, ETilesCommonProp>(pEditor) {}
-
-protected:
-	void OnStart(ETilesCommonProp Prop) override;
-	void OnEnd(ETilesCommonProp Prop, int Value) override;
-	bool EndChecker(ETilesCommonProp Prop, EEditState State, int Value) override;
-
-	int PropToValue(ETilesCommonProp Prop) override;
-
-private:
-	std::map<std::shared_ptr<CLayerTiles>, std::map<int, std::shared_ptr<CLayer>>> m_SavedLayers;
-
-public:
-	std::vector<std::shared_ptr<CLayerTiles>> m_vpLayers;
-	std::vector<int> m_vLayerIndices;
 };
 
 class CLayerGroupPropTracker : public CPropTracker<CLayerGroup, EGroupProp>

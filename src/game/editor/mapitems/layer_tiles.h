@@ -30,6 +30,7 @@ struct RECTi
 	int w, h;
 };
 
+struct SMultiLayersInfo;
 class CLayerTiles : public CLayer
 {
 protected:
@@ -95,6 +96,22 @@ protected:
 				std::swap(pTiles[y * m_Width + x], pTiles[(m_Height - 1 - y) * m_Width + x]);
 	}
 
+	static int *PropertyAccessor(CLayerTiles &TilesLayer, ETilesProp Property)
+	{
+		switch(Property)
+		{
+		case ETilesProp::PROP_WIDTH: return &TilesLayer.m_Width;
+		case ETilesProp::PROP_HEIGHT: return &TilesLayer.m_Height;
+		case ETilesProp::PROP_IMAGE: return &TilesLayer.m_Image;
+		case ETilesProp::PROP_AUTOMAPPER: return &TilesLayer.m_AutoMapperConfig;
+		case ETilesProp::PROP_SEED: return &TilesLayer.m_Seed;
+		case ETilesProp::PROP_AUTO_AUTOMAP: return (int *)&TilesLayer.m_AutoAutoMap;
+		default:
+			break;
+		}
+		return nullptr;
+	}
+
 public:
 	CLayerTiles(CEditor *pEditor, int w, int h);
 	CLayerTiles(const CLayerTiles &Other);
@@ -133,19 +150,7 @@ public:
 	virtual void ShowInfo();
 	CUI::EPopupMenuFunctionResult RenderProperties(CUIRect *pToolbox) override;
 
-	struct SCommonPropState
-	{
-		enum
-		{
-			MODIFIED_SIZE = 1 << 0,
-			MODIFIED_COLOR = 1 << 1,
-		};
-		int m_Modified = 0;
-		int m_Width = -1;
-		int m_Height = -1;
-		int m_Color = 0;
-	};
-	static CUI::EPopupMenuFunctionResult RenderCommonProperties(SCommonPropState &State, CEditor *pEditor, CUIRect *pToolBox, std::vector<std::shared_ptr<CLayerTiles>> &vpLayers, std::vector<int> &vLayerIndices, std::vector<std::pair<int, std::vector<int>>> &vLayersByColor);
+	static CUI::EPopupMenuFunctionResult RenderCommonProperties(CEditor *pEditor, CUIRect *pToolBox, SMultiLayersInfo &Infos);
 
 	void ModifyImageIndex(FIndexModifyFunction pfnFunc) override;
 	void ModifyEnvelopeIndex(FIndexModifyFunction pfnFunc) override;

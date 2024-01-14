@@ -3,6 +3,8 @@
 
 #include "layer.h"
 
+struct SMultiLayersInfo;
+
 class CLayerSounds : public CLayer
 {
 public:
@@ -18,7 +20,7 @@ public:
 	void BrushPlace(std::shared_ptr<CLayer> pBrush, float wx, float wy) override;
 
 	CUI::EPopupMenuFunctionResult RenderProperties(CUIRect *pToolbox) override;
-	static CUI::EPopupMenuFunctionResult RenderCommonProperties(CEditor *pEditor, CUIRect *pToolbox, const std::vector<std::shared_ptr<CLayerSounds>> &vpLayers, const std::vector<int> &vLayerIndices);
+	static CUI::EPopupMenuFunctionResult RenderCommonProperties(CEditor *pEditor, CUIRect *pToolbox, SMultiLayersInfo &Infos);
 
 	void ModifyEnvelopeIndex(FIndexModifyFunction pfnFunc) override;
 	void ModifySoundIndex(FIndexModifyFunction pfnFunc) override;

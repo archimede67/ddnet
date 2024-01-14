@@ -684,18 +684,18 @@ CUI::EPopupMenuFunctionResult CEditor::PopupLayer(void *pContext, CUIRect View, 
 	std::shared_ptr<CLayerGroup> pCurrentGroup = pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup];
 	std::shared_ptr<CLayer> pCurrentLayer = pEditor->GetSelectedLayer(0);
 
-	if(pPopup->m_vpLayers.size() > 1)
+	if(pPopup->m_MultiInfo.m_vpLayers.size() > 1)
 	{
 		// First render common properties: group, detail, and delete/duplicate buttons
-		CUI::EPopupMenuFunctionResult CommonResult = CLayer::RenderCommonProperties(pEditor, &View, pPopup->m_vpLayers, pPopup->m_vLayerIndices);
+		CUI::EPopupMenuFunctionResult CommonResult = CLayer::RenderCommonProperties(pEditor, &View, pPopup->m_MultiInfo);
 
 		// Then render layer specific properties for same type selection (tiles, quads or sounds only)
 		if(pPopup->m_Type == SLayerPopupContext::SELECTION_TILES)
-			return CUI::JoinResults(CommonResult, CLayerTiles::RenderCommonProperties(pPopup->m_CommonPropState, pEditor, &View, pPopup->m_vpTileLayers, pPopup->m_vLayerIndices, pPopup->m_vLayersByColor));
+			return CUI::JoinResults(CommonResult, CLayerTiles::RenderCommonProperties(pEditor, &View, pPopup->m_MultiInfo));
 		else if(pPopup->m_Type == SLayerPopupContext::SELECTION_QUADS)
-			return CUI::JoinResults(CommonResult, CLayerQuads::RenderCommonProperties(pEditor, &View, pPopup->m_vpQuadLayers, pPopup->m_vLayerIndices));
+			return CUI::JoinResults(CommonResult, CLayerQuads::RenderCommonProperties(pEditor, &View, pPopup->m_MultiInfo));
 		else if(pPopup->m_Type == SLayerPopupContext::SELECTION_SOUNDS)
-			return CUI::JoinResults(CommonResult, CLayerSounds::RenderCommonProperties(pEditor, &View, pPopup->m_vpSoundLayers, pPopup->m_vLayerIndices));
+			return CUI::JoinResults(CommonResult, CLayerSounds::RenderCommonProperties(pEditor, &View, pPopup->m_MultiInfo));
 
 		return CommonResult;
 	}

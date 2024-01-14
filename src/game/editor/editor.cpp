@@ -560,12 +560,16 @@ void CEditor::AddSelectedLayer(int LayerIndex)
 
 void CEditor::UpdateMultiLayersSelection()
 {
-	m_LayerPopupContext.m_vpLayers.clear();
-	m_LayerPopupContext.m_vpTileLayers.clear();
-	m_LayerPopupContext.m_vpQuadLayers.clear();
-	m_LayerPopupContext.m_vpSoundLayers.clear();
-	m_LayerPopupContext.m_vLayerIndices.clear();
-	m_LayerPopupContext.m_vLayersByColor.clear();
+	SMultiLayersInfo &Infos = m_LayerPopupContext.m_MultiInfo;
+	Infos.m_TrackerArray.m_pEditor = this;
+
+	Infos.m_vpLayers.clear();
+	Infos.m_vpTileLayers.clear();
+	Infos.m_vpQuadLayers.clear();
+	Infos.m_vpSoundLayers.clear();
+	Infos.m_vLayerIndices.clear();
+	Infos.m_vLayersByColor.clear();
+	Infos.m_TrackerArray.Clear();
 
 	if(m_vSelectedLayers.size() > 1)
 	{
@@ -594,78 +598,80 @@ void CEditor::UpdateMultiLayersSelection()
 
 			if(LayerType == LAYERTYPE_TILES)
 			{
-				auto AddLayerColor = [&](int Color, int LayerIndex) {
-					auto It = std::find_if(m_LayerPopupContext.m_vLayersByColor.begin(), m_LayerPopupContext.m_vLayersByColor.end(), [Color](auto &Pair) { return Pair.first == Color; });
-					if(It == m_LayerPopupContext.m_vLayersByColor.end())
-						m_LayerPopupContext.m_vLayersByColor.emplace_back(Color, std::vector<int>{LayerIndex});
+				auto AddLayerColor = [&](int Color, int Idx) {
+					auto It = std::find_if(Infos.m_vLayersByColor.begin(), Infos.m_vLayersByColor.end(), [Color](auto &Pair) { return Pair.first == Color; });
+					if(It == Infos.m_vLayersByColor.end())
+						Infos.m_vLayersByColor.emplace_back(Color, std::vector<int>{Idx});
 					else
-						It->second.emplace_back(LayerIndex);
+						It->second.emplace_back(Idx);
 				};
 
 				std::shared_ptr<CLayerTiles> pTilesLayer = std::static_pointer_cast<CLayerTiles>(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]);
-				AddLayerColor(PackColor(pTilesLayer->m_Color), m_LayerPopupContext.m_vpTileLayers.size());
-				m_LayerPopupContext.m_vpTileLayers.push_back(pTilesLayer);
+				AddLayerColor(PackColor(pTilesLayer->m_Color), Infos.m_vpTileLayers.size());
+				Infos.m_vpTileLayers.push_back(pTilesLayer);
+				Infos.m_TrackerArray.Add(LayerIndex);
 			}
 			else if(LayerType == LAYERTYPE_QUADS)
-				m_LayerPopupContext.m_vpQuadLayers.push_back(std::static_pointer_cast<CLayerQuads>(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]));
+				Infos.m_vpQuadLayers.push_back(std::static_pointer_cast<CLayerQuads>(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]));
 			else if(LayerType == LAYERTYPE_SOUNDS)
-				m_LayerPopupContext.m_vpSoundLayers.push_back(std::static_pointer_cast<CLayerSounds>(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]));
+				Infos.m_vpSoundLayers.push_back(std::static_pointer_cast<CLayerSounds>(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]));
 
-			m_LayerPopupContext.m_vpLayers.push_back(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]);
-			m_LayerPopupContext.m_vLayerIndices.push_back(LayerIndex);
+			Infos.m_vpLayers.push_back(m_Map.m_vpGroups[m_SelectedGroup]->m_vpLayers[LayerIndex]);
+			Infos.m_vLayerIndices.push_back(LayerIndex);
 		}
 
 		m_LayerPopupContext.m_Type = SelectionType;
 	}
 }
 
-void CEditor::SelectQuad(int Index)
+void CEditor::SelectQuad(int LayerIndex, int Index)
 {
-	m_vSelectedQuads.clear();
-	m_vSelectedQuads.push_back(Index);
+	m_SelectedQuads[LayerIndex].clear();
+	m_SelectedQuads[LayerIndex].push_back(Index);
 }
 
-void CEditor::ToggleSelectQuad(int Index)
+void CEditor::ToggleSelectQuad(int LayerIndex, int Index)
 {
-	int ListIndex = FindSelectedQuadIndex(Index);
+	int ListIndex = FindSelectedQuadIndex(LayerIndex, Index);
 	if(ListIndex < 0)
-		m_vSelectedQuads.push_back(Index);
+		m_SelectedQuads[LayerIndex].push_back(Index);
 	else
-		m_vSelectedQuads.erase(m_vSelectedQuads.begin() + ListIndex);
+		m_SelectedQuads[LayerIndex].erase(m_SelectedQuads[LayerIndex].begin() + ListIndex);
 }
 
 void CEditor::DeselectQuads()
 {
-	m_vSelectedQuads.clear();
+	m_SelectedQuads.clear();
 }
 
 void CEditor::DeselectQuadPoints()
 {
-	m_SelectedQuadPoints = 0;
+	m_SelectedQuadPoints.clear();
+	//m_SelectedQuadPoints = 0;
 }
 
-void CEditor::SelectQuadPoint(int QuadIndex, int Index)
+void CEditor::SelectQuadPoint(int LayerIndex, int QuadIndex, int Index)
 {
-	SelectQuad(QuadIndex);
-	m_SelectedQuadPoints = 1 << Index;
+	SelectQuad(LayerIndex, QuadIndex);
+	m_SelectedQuadPoints[LayerIndex] = 1 << Index;
 }
 
-void CEditor::ToggleSelectQuadPoint(int QuadIndex, int Index)
+void CEditor::ToggleSelectQuadPoint(int LayerIndex, int QuadIndex, int Index)
 {
 	if(IsQuadPointSelected(QuadIndex, Index))
 	{
-		m_SelectedQuadPoints ^= 1 << Index;
+		m_SelectedQuadPoints[LayerIndex] ^= 1 << Index;
 	}
 	else
 	{
-		if(!IsQuadSelected(QuadIndex))
+		if(!IsQuadSelected(LayerIndex, QuadIndex))
 		{
-			ToggleSelectQuad(QuadIndex);
+			ToggleSelectQuad(LayerIndex, QuadIndex);
 		}
 
-		if(!(m_SelectedQuadPoints & 1 << Index))
+		if(!(m_SelectedQuadPoints[LayerIndex] & 1 << Index))
 		{
-			m_SelectedQuadPoints ^= 1 << Index;
+			m_SelectedQuadPoints[LayerIndex] ^= 1 << Index;
 		}
 	}
 }
@@ -676,45 +682,50 @@ void CEditor::DeleteSelectedQuads()
 	if(!pLayer)
 		return;
 
-	std::vector<int> vSelectedQuads(m_vSelectedQuads);
+	// TODO
+	//std::vector<int> vSelectedQuads(m_vSelectedQuads);
 	std::vector<CQuad> vDeletedQuads;
 
-	for(int i = 0; i < (int)m_vSelectedQuads.size(); ++i)
+	for(auto &[LayerIndex, vSelectedQuads] : m_SelectedQuads)
 	{
-		auto const &Quad = pLayer->m_vQuads[m_vSelectedQuads[i]];
-		vDeletedQuads.push_back(Quad);
+		for(int i = 0; i < (int)vSelectedQuads.size(); ++i)
+		{
+			auto const &Quad = pLayer->m_vQuads[vSelectedQuads[i]];
+			vDeletedQuads.push_back(Quad);
 
-		pLayer->m_vQuads.erase(pLayer->m_vQuads.begin() + m_vSelectedQuads[i]);
-		for(int j = i + 1; j < (int)m_vSelectedQuads.size(); ++j)
-			if(m_vSelectedQuads[j] > m_vSelectedQuads[i])
-				m_vSelectedQuads[j]--;
+			pLayer->m_vQuads.erase(pLayer->m_vQuads.begin() + vSelectedQuads[i]);
+			for(int j = i + 1; j < (int)vSelectedQuads.size(); ++j)
+				if(vSelectedQuads[j] > vSelectedQuads[i])
+					vSelectedQuads[j]--;
 
-		m_vSelectedQuads.erase(m_vSelectedQuads.begin() + i);
-		i--;
+			vSelectedQuads.erase(vSelectedQuads.begin() + i);
+			i--;
+		}
 	}
 
-	m_EditorHistory.RecordAction(std::make_shared<CEditorActionDeleteQuad>(this, m_SelectedGroup, m_vSelectedLayers[0], vSelectedQuads, vDeletedQuads));
+	//m_EditorHistory.RecordAction(std::make_shared<CEditorActionDeleteQuad>(this, m_SelectedGroup, m_vSelectedLayers[0], vSelectedQuads, vDeletedQuads));
 }
 
-bool CEditor::IsQuadSelected(int Index) const
+bool CEditor::IsQuadSelected(int LayerIndex, int Index) const
 {
-	return FindSelectedQuadIndex(Index) >= 0;
+	return FindSelectedQuadIndex(LayerIndex, Index) >= 0;
 }
 
-bool CEditor::IsQuadCornerSelected(int Index) const
+bool CEditor::IsQuadCornerSelected(int LayerIndex, int Index) const
 {
-	return m_SelectedQuadPoints & (1 << Index);
+	return m_SelectedQuadPoints.at(LayerIndex) & (1 << Index);
 }
 
-bool CEditor::IsQuadPointSelected(int QuadIndex, int Index) const
+bool CEditor::IsQuadPointSelected(int LayerIndex, int QuadIndex, int Index) const
 {
-	return IsQuadSelected(QuadIndex) && IsQuadCornerSelected(Index);
+	return IsQuadSelected(LayerIndex, QuadIndex) && IsQuadCornerSelected(LayerIndex, Index);
 }
 
-int CEditor::FindSelectedQuadIndex(int Index) const
+int CEditor::FindSelectedQuadIndex(int LayerIndex, int Index) const
 {
-	for(size_t i = 0; i < m_vSelectedQuads.size(); ++i)
-		if(m_vSelectedQuads[i] == Index)
+	auto &vSelectedQuads = m_SelectedQuads.at(LayerIndex);
+	for(size_t i = 0; i < vSelectedQuads.size(); ++i)
+		if(vSelectedQuads[i] == Index)
 			return i;
 	return -1;
 }

@@ -217,8 +217,10 @@ CUI::EPopupMenuFunctionResult CLayerSounds::RenderProperties(CUIRect *pToolBox)
 	return CUI::POPUP_KEEP_OPEN;
 }
 
-CUI::EPopupMenuFunctionResult CLayerSounds::RenderCommonProperties(CEditor *pEditor, CUIRect *pToolbox, const std::vector<std::shared_ptr<CLayerSounds>> &vpLayers, const std::vector<int> &vLayerIndices)
+CUI::EPopupMenuFunctionResult CLayerSounds::RenderCommonProperties(CEditor *pEditor, CUIRect *pToolbox, SMultiLayersInfo &Infos)
 {
+	auto &vpLayers = Infos.m_vpSoundLayers;
+
 	CMultiPropertyValue<CLayerSounds, int, CEditor::POPUP_SELECTED_NONE> Sound(vpLayers, [](const std::shared_ptr<CLayerSounds> &pLayer) { return &pLayer->m_Sound; });
 
 	CProperty aProps[] = {
