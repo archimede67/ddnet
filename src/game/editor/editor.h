@@ -23,6 +23,7 @@
 #include <game/editor/mapitems/layer_tele.h>
 #include <game/editor/mapitems/layer_tiles.h>
 #include <game/editor/mapitems/layer_tune.h>
+#include <game/editor/mapitems/parent_group.h>
 
 #include <engine/console.h>
 #include <engine/editor.h>
@@ -97,6 +98,8 @@ public:
 	std::vector<std::shared_ptr<CEditorImage>> m_vpImages;
 	std::vector<std::shared_ptr<CEnvelope>> m_vpEnvelopes;
 	std::vector<std::shared_ptr<CEditorSound>> m_vpSounds;
+	std::vector<CEditorGroupInfo> m_vGroupInfos;
+	std::vector<std::shared_ptr<CEditorParentGroup>> m_vpGroupParents;
 
 	class CMapInfo
 	{
@@ -143,12 +146,34 @@ public:
 	template<typename F>
 	void VisitEnvelopeReferences(F &&Visitor);
 
-	std::shared_ptr<CLayerGroup> NewGroup()
+	std::shared_ptr<CLayerGroup> NewGroup(bool CreateInfo = true)
 	{
+		const int Index = (int)m_vpGroups.size();
+
 		OnModify();
 		std::shared_ptr<CLayerGroup> pGroup = std::make_shared<CLayerGroup>();
 		pGroup->m_pMap = this;
 		m_vpGroups.push_back(pGroup);
+
+		// Insert a group info for each layers group
+		if(CreateInfo)
+		{
+			CEditorGroupInfo Info;
+			Info.m_GroupIndex = Index;
+			Info.m_Type = CEditorGroupInfo::LAYER_GROUP;
+			m_vGroupInfos.push_back(Info);
+		}
+
+		// TODO: removeme
+		//std::shared_ptr<CEditorParentGroup> pGroupParent = std::make_shared<CEditorParentGroup>();
+		//str_copy(pGroupParent->m_aName, "Test Parent");
+		//CEditorGroupInfo ParentInfo;
+		//ParentInfo.m_GroupIndex = (int)m_vpGroupParents.size();
+		//ParentInfo.m_Children.push_back(m_vGroupInfos.size() - 1);
+		//ParentInfo.m_Type = CEditorGroupInfo::PARENT_GROUP;
+		//m_vpGroupParents.push_back(pGroupParent);
+		//m_vGroupInfos.push_back(ParentInfo);
+
 		return pGroup;
 	}
 

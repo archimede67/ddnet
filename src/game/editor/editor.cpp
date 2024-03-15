@@ -3808,10 +3808,9 @@ void CEditor::RenderLayers(CUIRect LayersBox)
 	const bool ScrollToSelection = LayerSelector()->SelectByTile() || s_ScrollToSelectionNext;
 	s_ScrollToSelectionNext = false;
 
-	// render layers
-	for(int g = 0; g < (int)m_Map.m_vpGroups.size(); g++)
-	{
-		if(s_Operation == OP_LAYER_DRAG && g > 0 && !DraggedPositionFound && Ui()->MouseY() < LayersBox.y + RowHeight / 2)
+	static auto RenderLayersGroup = [&](CUIRect *pRect, const CEditorGroupInfo &Info) {
+		int g = Info.m_GroupIndex;
+		if(s_Operation == OP_LAYER_DRAG && g > 0 && !DraggedPositionFound && Ui()->MouseY() < pRect->y + RowHeight / 2)
 		{
 			DraggedPositionFound = true;
 			GroupAfterDraggedLayer = g;
@@ -3819,7 +3818,7 @@ void CEditor::RenderLayers(CUIRect LayersBox)
 			LayerAfterDraggedLayer = m_Map.m_vpGroups[g - 1]->m_vpLayers.size();
 
 			CUIRect Slot;
-			LayersBox.HSplitTop(m_vSelectedLayers.size() * (RowHeight + 2.0f), &Slot, &LayersBox);
+			pRect->HSplitTop(m_vSelectedLayers.size() * (RowHeight + 2.0f), &Slot, pRect);
 			s_ScrollRegion.AddRect(Slot);
 		}
 
@@ -3831,25 +3830,25 @@ void CEditor::RenderLayers(CUIRect LayersBox)
 				UnscrolledLayersBox.HSplitTop(RowHeight, &Slot, &UnscrolledLayersBox);
 				UnscrolledLayersBox.HSplitTop(2.0f, nullptr, &UnscrolledLayersBox);
 			}
-			else if(!DraggedPositionFound && Ui()->MouseY() < LayersBox.y + RowHeight * vButtonsPerGroup[g] / 2 + 3.0f)
+			else if(!DraggedPositionFound && Ui()->MouseY() < pRect->y + RowHeight * vButtonsPerGroup[g] / 2 + 3.0f)
 			{
 				DraggedPositionFound = true;
 				GroupAfterDraggedLayer = g;
 
 				CUIRect TmpSlot;
 				if(m_Map.m_vpGroups[m_SelectedGroup]->m_Collapse)
-					LayersBox.HSplitTop(RowHeight + 7.0f, &TmpSlot, &LayersBox);
+					pRect->HSplitTop(RowHeight + 7.0f, &TmpSlot, pRect);
 				else
-					LayersBox.HSplitTop(vButtonsPerGroup[m_SelectedGroup] * (RowHeight + 2.0f) + 5.0f, &TmpSlot, &LayersBox);
+					pRect->HSplitTop(vButtonsPerGroup[m_SelectedGroup] * (RowHeight + 2.0f) + 5.0f, &TmpSlot, pRect);
 				s_ScrollRegion.AddRect(TmpSlot, false);
 			}
 		}
 		if(s_Operation != OP_GROUP_DRAG || g != m_SelectedGroup)
 		{
-			LayersBox.HSplitTop(RowHeight, &Slot, &LayersBox);
+			pRect->HSplitTop(RowHeight, &Slot, pRect);
 
 			CUIRect TmpRect;
-			LayersBox.HSplitTop(2.0f, &TmpRect, &LayersBox);
+			pRect->HSplitTop(2.0f, &TmpRect, pRect);
 			s_ScrollRegion.AddRect(TmpRect);
 		}
 
@@ -3952,25 +3951,25 @@ void CEditor::RenderLayers(CUIRect LayersBox)
 				}
 				else
 				{
-					if(!DraggedPositionFound && Ui()->MouseY() < LayersBox.y + RowHeight / 2)
+					if(!DraggedPositionFound && Ui()->MouseY() < pRect->y + RowHeight / 2)
 					{
 						DraggedPositionFound = true;
 						GroupAfterDraggedLayer = g + 1;
 						LayerAfterDraggedLayer = i;
 						for(size_t j = 0; j < m_vSelectedLayers.size(); j++)
 						{
-							LayersBox.HSplitTop(RowHeight + 2.0f, nullptr, &LayersBox);
+							pRect->HSplitTop(RowHeight + 2.0f, nullptr, pRect);
 							s_ScrollRegion.AddRect(Slot);
 						}
 					}
-					LayersBox.HSplitTop(RowHeight + 2.0f, &Slot, &LayersBox);
+					pRect->HSplitTop(RowHeight + 2.0f, &Slot, pRect);
 					if(!s_ScrollRegion.AddRect(Slot, ScrollToSelection && IsLayerSelected))
 						continue;
 				}
 			}
 			else
 			{
-				LayersBox.HSplitTop(RowHeight + 2.0f, &Slot, &LayersBox);
+				pRect->HSplitTop(RowHeight + 2.0f, &Slot, pRect);
 				if(!s_ScrollRegion.AddRect(Slot, ScrollToSelection && IsLayerSelected))
 					continue;
 			}
@@ -4120,8 +4119,89 @@ void CEditor::RenderLayers(CUIRect LayersBox)
 
 		if(s_Operation != OP_GROUP_DRAG || g != m_SelectedGroup)
 		{
-			LayersBox.HSplitTop(5.0f, &Slot, &LayersBox);
+			pRect->HSplitTop(5.0f, &Slot, pRect);
 			s_ScrollRegion.AddRect(Slot);
+		}
+	};
+
+	// TODO: you can select group parents but you can't do anything in the map view if so
+
+	static std::function<void(CUIRect *, const CEditorGroupInfo &)> RenderParentGroup = [&](CUIRect *pRect, const CEditorGroupInfo &Info) -> void {
+		int g = Info.m_GroupIndex;
+		std::shared_ptr<CEditorParentGroup> &pGroupParent = m_Map.m_vpGroupParents.at(g);
+		// Render name element
+
+		{
+			CUIRect Slot, VisibleToggle;
+			pRect->HSplitTop(RowHeight, &Slot, pRect);
+
+			CUIRect TmpRect;
+			pRect->HSplitTop(2.0f, &TmpRect, pRect);
+			s_ScrollRegion.AddRect(TmpRect);
+
+			if(s_ScrollRegion.AddRect(Slot))
+			{
+				Slot.VSplitLeft(15.0f, &VisibleToggle, &Slot);
+				if(DoButton_FontIcon(&m_Map.m_vpGroups[g]->m_Visible, m_Map.m_vpGroups[g]->m_Visible ? FONT_ICON_EYE : FONT_ICON_EYE_SLASH, m_Map.m_vpGroups[g]->m_Collapse ? 1 : 0, &VisibleToggle, 0, "Toggle group visibility", IGraphics::CORNER_L, 8.0f))
+				{
+					// TODO
+				}
+
+				str_format(aBuf, sizeof(aBuf), "%s", pGroupParent->m_aName);
+
+				bool Clicked;
+				bool Abrupted;
+				if(int Result = DoButton_DraggableEx(pGroupParent.get(), aBuf, false, &Slot, &Clicked, &Abrupted, BUTTON_CONTEXT, "Something I guess", IGraphics::CORNER_R))
+				{
+				}
+			}
+
+			pRect->HSplitTop(5.0f, &Slot, pRect);
+			s_ScrollRegion.AddRect(Slot);
+		}
+
+		// Render childrens
+		CUIRect ChildrenBox = *pRect;
+		ChildrenBox.VSplitLeft(20.0f, nullptr, &ChildrenBox);
+		for(int Child : Info.m_Children)
+		{
+			CEditorGroupInfo &ChildInfo = m_Map.m_vGroupInfos.at(Child);
+			if(ChildInfo.m_Type == CEditorGroupInfo::LAYER_GROUP)
+			{
+				RenderLayersGroup(&ChildrenBox, ChildInfo);
+			}
+			else if(ChildInfo.m_Type == CEditorGroupInfo::PARENT_GROUP)
+			{
+				RenderParentGroup(&ChildrenBox, ChildInfo);
+			}
+		}
+		pRect->y = ChildrenBox.y;
+	};
+
+	// find root nodes
+	std::vector<bool> vNodesVisited(m_Map.m_vGroupInfos.size());
+	for(int g = 0; g < (int)m_Map.m_vGroupInfos.size(); g++)
+	{
+		auto &GroupInfo = m_Map.m_vGroupInfos.at(g);
+		for(int &Child : GroupInfo.m_Children)
+			vNodesVisited[Child] = true;
+	}
+
+	// render layers
+	for(int GroupInfoIndex = 0; GroupInfoIndex < (int)m_Map.m_vGroupInfos.size(); GroupInfoIndex++)
+	{
+		if(vNodesVisited[GroupInfoIndex])
+			continue;
+
+		const CEditorGroupInfo &Info = m_Map.m_vGroupInfos.at(GroupInfoIndex);
+
+		if(Info.m_Type == CEditorGroupInfo::LAYER_GROUP)
+		{
+			RenderLayersGroup(&LayersBox, Info);
+		}
+		else if(Info.m_Type == CEditorGroupInfo::PARENT_GROUP)
+		{
+			RenderParentGroup(&LayersBox, Info);
 		}
 	}
 

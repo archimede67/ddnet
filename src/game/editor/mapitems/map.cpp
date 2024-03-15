@@ -100,6 +100,8 @@ void CEditorMap::Clean()
 	m_vpEnvelopes.clear();
 	m_vpImages.clear();
 	m_vpSounds.clear();
+	m_vGroupInfos.clear();
+	m_vpGroupParents.clear();
 
 	m_MapInfo.Reset();
 	m_MapInfoTmp.Reset();

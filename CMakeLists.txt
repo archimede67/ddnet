@@ -2359,6 +2359,8 @@ if(CLIENT)
     mapitems/layer_tune.h
     mapitems/map.cpp
     mapitems/map_io.cpp
+    mapitems/parent_group.cpp
+    mapitems/parent_group.h
     mapitems/sound.cpp
     mapitems/sound.h
     popups.cpp

@@ -11,19 +11,6 @@ enum
 	END_MAPITEMTYPES_UUID,
 };
 
-struct CMapItemTest
-{
-	enum
-	{
-		CURRENT_VERSION = 1
-	};
-
-	int m_Version;
-	int m_aFields[2];
-	int m_Field3;
-	int m_Field4;
-};
-
 struct CMapItemAutoMapperConfig
 {
 	enum
@@ -41,6 +28,32 @@ struct CMapItemAutoMapperConfig
 	int m_AutomapperConfig;
 	int m_AutomapperSeed;
 	int m_Flags;
+};
+
+// Map item to store infos about a group
+struct CMapItemGroupInfo
+{
+	enum
+	{
+		CURRENT_VERSION = 1
+	};
+
+	int m_Version; // Version of the map item
+	int m_Type; // Type of the group
+	int m_Index; // Index of the group
+	int m_Children; // List of child group indices of this parent group
+};
+
+struct CMapItemParentGroup
+{
+	enum
+	{
+		CURRENT_VERSION = 1
+	};
+
+	int m_Version; // Version of the map item
+	int m_Name; // Name of the group
+	// Extra info here (maybe)
 };
 
 void RegisterMapItemTypeUuids(class CUuidManager *pManager);

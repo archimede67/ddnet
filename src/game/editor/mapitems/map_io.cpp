@@ -412,6 +412,33 @@ bool CEditorMap::Save(const char *pFileName)
 		free(pPointsBezier);
 	}
 
+	// save extra group data
+	for(size_t i = 0; i < m_vGroupInfos.size(); i++)
+	{
+		auto &Info = m_vGroupInfos.at(i);
+
+		CMapItemGroupInfo InfoMI;
+		InfoMI.m_Version = CMapItemGroupInfo::CURRENT_VERSION;
+		InfoMI.m_Type = Info.m_Type;
+		InfoMI.m_Index = Info.m_GroupIndex;
+
+		InfoMI.m_Children = -1;
+		if(!Info.m_Children.empty())
+			InfoMI.m_Children = Writer.AddDataSwapped(Info.m_Children.size() * sizeof(int), Info.m_Children.data());
+
+		Writer.AddItem(MAPITEMTYPE_GROUP_INFO, i, sizeof(CMapItemGroupInfo), &InfoMI);
+	}
+
+	for(size_t i = 0; i < m_vpGroupParents.size(); i++)
+	{
+		auto &pGroupParent = m_vpGroupParents.at(i);
+
+		CMapItemParentGroup ParentGroup;
+		ParentGroup.m_Version = CMapItemParentGroup::CURRENT_VERSION;
+		ParentGroup.m_Name = Writer.AddDataString(pGroupParent->m_aName);
+		Writer.AddItem(MAPITEMTYPE_PARENT_GROUP, i, sizeof(CMapItemParentGroup), &ParentGroup);
+	}
+
 	// finish the data file
 	std::shared_ptr<CDataFileWriterFinishJob> pWriterFinishJob = std::make_shared<CDataFileWriterFinishJob>(pFileName, aFileNameTmp, std::move(Writer));
 	m_pEditor->Engine()->AddJob(pWriterFinishJob);
@@ -628,7 +655,7 @@ bool CEditorMap::Load(const char *pFileName, int StorageType, const std::functio
 			if(pGItem->m_Version < 1 || pGItem->m_Version > CMapItemGroup::CURRENT_VERSION)
 				continue;
 
-			std::shared_ptr<CLayerGroup> pGroup = NewGroup();
+			std::shared_ptr<CLayerGroup> pGroup = NewGroup(false);
 			pGroup->m_ParallaxX = pGItem->m_ParallaxX;
 			pGroup->m_ParallaxY = pGItem->m_ParallaxY;
 			pGroup->m_OffsetX = pGItem->m_OffsetX;
@@ -1004,6 +1031,57 @@ bool CEditorMap::Load(const char *pFileName, int StorageType, const std::functio
 					}
 				}
 			}
+		}
+	}
+
+	// load extra group infos
+	{
+		// load parent groups
+		int ParentGroupsStart, ParentGroupsNum;
+		DataFile.GetType(MAPITEMTYPE_PARENT_GROUP, &ParentGroupsStart, &ParentGroupsNum);
+
+		for(int g = 0; g < ParentGroupsNum; g++)
+		{
+			CMapItemParentGroup *pGroupParentMI = (CMapItemParentGroup *)DataFile.GetItem(ParentGroupsStart + g);
+
+			std::shared_ptr<CEditorParentGroup> pGroupParent = std::make_shared<CEditorParentGroup>();
+			const char *pName = DataFile.GetDataString(pGroupParentMI->m_Name);
+			if(pName == nullptr || pName[0] == '\0')
+			{
+				char aBuf[128];
+				str_format(aBuf, sizeof(aBuf), "Error: Failed to read name of parent group %d.", g);
+				ErrorHandler(aBuf);
+			}
+			else
+				str_copy(pGroupParent->m_aName, pName);
+
+			m_vpGroupParents.emplace_back(pGroupParent);
+		}
+
+		// load group infos
+		int GroupInfoStart, GroupInfoNum;
+		DataFile.GetType(MAPITEMTYPE_GROUP_INFO, &GroupInfoStart, &GroupInfoNum);
+
+		for(int g = 0; g < GroupInfoNum; g++)
+		{
+			CMapItemGroupInfo *pGroupInfo = (CMapItemGroupInfo *)DataFile.GetItem(GroupInfoStart + g);
+
+			m_vGroupInfos.emplace_back();
+			CEditorGroupInfo &Info = m_vGroupInfos.back();
+
+			Info.m_Type = (CEditorGroupInfo::EType)pGroupInfo->m_Type;
+			Info.m_GroupIndex = pGroupInfo->m_Index;
+
+			if(pGroupInfo->m_Children < 0)
+				continue;
+
+			const unsigned Size = DataFile.GetDataSize(pGroupInfo->m_Children) / sizeof(int);
+			int *pChildren = (int *)DataFile.GetDataSwapped(pGroupInfo->m_Children);
+
+			if(pChildren)
+				Info.m_Children.assign(pChildren, pChildren + Size);
+
+			DataFile.UnloadData(pGroupInfo->m_Children);
 		}
 	}
 
