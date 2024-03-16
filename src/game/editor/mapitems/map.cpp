@@ -178,3 +178,184 @@ void CEditorMap::MakeTuneLayer(const std::shared_ptr<CLayer> &pLayer)
 	m_pTuneLayer = std::static_pointer_cast<CLayerTune>(pLayer);
 	m_pTuneLayer->m_pEditor = m_pEditor;
 }
+
+std::shared_ptr<CLayerGroup> CEditorMap::NewGroup(bool CreateInfo)
+{
+	const int Index = (int)m_vpGroups.size();
+
+	OnModify();
+	std::shared_ptr<CLayerGroup> pGroup = std::make_shared<CLayerGroup>();
+	pGroup->m_pMap = this;
+	m_vpGroups.push_back(pGroup);
+
+	if(CreateInfo)
+	{
+		// Insert a group info for each layers group
+		CEditorGroupInfo Info;
+		Info.m_GroupIndex = Index;
+		Info.m_Type = CEditorGroupInfo::TYPE_LAYER_GROUP;
+		Info.m_ParentIndex = CEditorGroupInfo::PARENT_NONE;
+		m_vGroupInfos.push_back(Info);
+	}
+
+	// TODO: removeme
+	//std::shared_ptr<CEditorParentGroup> pGroupParent = std::make_shared<CEditorParentGroup>();
+	//str_format(pGroupParent->m_aName, sizeof(pGroupParent->m_aName), "Test Parent #%d", (int)m_vpGroupParents.size());
+	//CEditorGroupInfo ParentInfo;
+	//ParentInfo.m_GroupIndex = (int)m_vpGroupParents.size();
+	//ParentInfo.m_Children.push_back(m_vGroupInfos.size() - 1);
+	//ParentInfo.m_Type = CEditorGroupInfo::PARENT_GROUP;
+	//m_vpGroupParents.push_back(pGroupParent);
+	//m_vGroupInfos.push_back(ParentInfo);
+
+	return pGroup;
+}
+
+CEditorGroupInfo &CEditorMap::GroupSelection(const std::vector<int> &vSelectedGroupItems)
+{
+	int TargetIndex = vSelectedGroupItems[0];
+	int ParentIndex = m_vGroupInfos[TargetIndex].m_ParentIndex;
+
+	// Create a new ParentGroup
+	CEditorGroupInfo &Info = NewParentGroup();
+	int NewTargetIndex = m_vGroupInfos.size() - 1;
+
+	// Fix the index pointers
+	for(auto &GroupInfo : m_vGroupInfos)
+	{
+		if(GroupInfo.m_ParentIndex == TargetIndex)
+			GroupInfo.m_ParentIndex = NewTargetIndex;
+	}
+
+	// Change the parent of the selection to this new GroupInfo
+	for(int Selected : vSelectedGroupItems)
+		m_vGroupInfos[Selected].m_ParentIndex = TargetIndex;
+
+	// Change the parent of the newly created GroupInfo to be the parent of the first selected element
+	Info.m_ParentIndex = ParentIndex;
+
+	// Swap the group info to be at the position of the first element in the
+	std::swap(m_vGroupInfos[TargetIndex], m_vGroupInfos[NewTargetIndex]);
+
+	return Info;
+}
+
+void CEditorMap::UngroupSelection(const std::vector<int> &vSelectedGroupItems)
+{
+	std::vector<int> vSortedSelectedGroupItems = vSelectedGroupItems;
+	std::sort(vSortedSelectedGroupItems.begin(), vSortedSelectedGroupItems.end());
+
+	// Ungroup : assign the parent of each children of the item in the selection to the parent of that item
+	for(size_t i = 0; i < vSortedSelectedGroupItems.size(); i++)
+	{
+		int Selected = vSortedSelectedGroupItems[i];
+		int SelectedGroupIndex = m_vGroupInfos[Selected].m_GroupIndex;
+
+		int NewParent = m_vGroupInfos[Selected].m_ParentIndex;
+		NewParent = NewParent > Selected ? NewParent - 1 : NewParent;
+
+		for(size_t k = 0; k < m_vGroupInfos.size(); k++)
+		{
+			if(m_vGroupInfos[k].m_ParentIndex == Selected)
+				m_vGroupInfos[k].m_ParentIndex = NewParent;
+
+			// Shift indices
+			if(m_vGroupInfos[k].m_ParentIndex > Selected)
+				m_vGroupInfos[k].m_ParentIndex--;
+
+			if(m_vGroupInfos[k].m_GroupIndex > SelectedGroupIndex && m_vGroupInfos[k].m_Type == CEditorGroupInfo::TYPE_PARENT_GROUP)
+				m_vGroupInfos[k].m_GroupIndex--;
+		}
+
+		// Remove group info & parent group
+		m_vpGroupParents.erase(m_vpGroupParents.begin() + SelectedGroupIndex);
+		m_vGroupInfos.erase(m_vGroupInfos.begin() + Selected);
+
+		// Shift selection indices
+		for(size_t k = i + 1; k < vSortedSelectedGroupItems.size(); k++)
+			vSortedSelectedGroupItems[k]--;
+	}
+}
+
+void CEditorMap::NewGroups(const std::vector<int> &vSelectedGroupItems)
+{
+	// Add a new layers group for each selected group
+	for(int Selected : vSelectedGroupItems)
+	{
+		NewGroup(true);
+		CEditorGroupInfo &Info = m_vGroupInfos.back();
+		Info.m_ParentIndex = Selected;
+	}
+}
+
+void CEditorMap::NewNestedGroups(const std::vector<int> &vSelectedGroupItems)
+{
+	// Add a new parent group inside each selected group
+	for(int Selected : vSelectedGroupItems)
+	{
+		CEditorGroupInfo &Info = NewParentGroup();
+		Info.m_ParentIndex = Selected;
+	}
+}
+
+CEditorGroupInfo &CEditorMap::NewParentGroup()
+{
+	// Create a new ParentGroup
+	std::shared_ptr<CEditorParentGroup> pGroupParent = std::make_shared<CEditorParentGroup>();
+	str_copy(pGroupParent->m_aName, "New group");
+	pGroupParent->m_Collapse = false;
+	pGroupParent->m_Visible = true;
+	int Index = m_vpGroupParents.size();
+	m_vpGroupParents.push_back(pGroupParent);
+
+	// Create a GroupInfo pointing to this new ParentGroup
+	CEditorGroupInfo Info;
+	Info.m_Type = CEditorGroupInfo::TYPE_PARENT_GROUP;
+	Info.m_GroupIndex = Index;
+	Info.m_ParentIndex = CEditorGroupInfo::PARENT_NONE;
+	int GroupInfoIndex = m_vGroupInfos.size();
+	m_vGroupInfos.push_back(Info);
+
+	return m_vGroupInfos.back();
+}
+
+void CEditorMap::DeleteGroup(int Index)
+{
+	if(Index < 0 || Index >= (int)m_vpGroups.size())
+		return;
+	OnModify();
+	m_vpGroups.erase(m_vpGroups.begin() + Index);
+
+	// Remove linked GroupInfo
+	auto GroupInfoPos = std::find_if(m_vGroupInfos.begin(), m_vGroupInfos.end(), [Index](const CEditorGroupInfo &Info) {
+		return Info.m_GroupIndex == Index;
+	});
+
+	if(GroupInfoPos != m_vGroupInfos.end())
+	{
+		const int GroupInfoIndex = GroupInfoPos - m_vGroupInfos.begin();
+		m_vGroupInfos.erase(GroupInfoPos);
+
+		// Shift indices
+		for(size_t k = 0; k < m_vGroupInfos.size(); k++)
+		{
+			if(m_vGroupInfos[k].m_ParentIndex >= GroupInfoIndex)
+				m_vGroupInfos[k].m_ParentIndex--;
+			if(m_vGroupInfos[k].m_Type == CEditorGroupInfo::TYPE_LAYER_GROUP && m_vGroupInfos[k].m_GroupIndex >= Index)
+				m_vGroupInfos[k].m_GroupIndex--;
+		}
+	}
+}
+
+int CEditorMap::GroupInfoIndex(CEditorGroupInfo::EType Type, int GroupIndex)
+{
+	// Gets a group info index from a group index
+	auto GroupInfoPos = std::find_if(m_vGroupInfos.begin(), m_vGroupInfos.end(), [Type, GroupIndex](const CEditorGroupInfo &Info) {
+		return Info.m_Type == Type && Info.m_GroupIndex == GroupIndex;
+	});
+
+	if(GroupInfoPos == m_vGroupInfos.end())
+		return -1;
+
+	return GroupInfoPos - m_vGroupInfos.begin();
+}

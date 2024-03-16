@@ -64,6 +64,9 @@ private:
 
 	vec2 m_WorldOffset;
 	vec2 m_EditorOffset;
+
+private:
+	bool ResolveVisibility(int GroupIndex);
 };
 
 #endif

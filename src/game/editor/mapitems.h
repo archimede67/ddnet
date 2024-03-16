@@ -108,6 +108,13 @@ enum class EGroupProp
 	NUM_PROPS,
 };
 
+enum class EParentGroupProp
+{
+	PROP_NONE = -1,
+	PROP_ORDER,
+	NUM_PROPS
+};
+
 enum class ELayerQuadsProp
 {
 	PROP_NONE = -1,

@@ -298,7 +298,7 @@ struct CMapItemGroup : public CMapItemGroup_v1
 {
 	enum
 	{
-		CURRENT_VERSION = 3
+		CURRENT_VERSION = 4
 	};
 
 	int m_UseClipping;

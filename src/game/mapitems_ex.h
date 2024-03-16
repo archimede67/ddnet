@@ -41,7 +41,8 @@ struct CMapItemGroupInfo
 	int m_Version; // Version of the map item
 	int m_Type; // Type of the group
 	int m_Index; // Index of the group
-	int m_Children; // List of child group indices of this parent group
+	//int m_Children; // List of child group indices of this parent group
+	int m_Parent; // Parent of this group
 };
 
 struct CMapItemParentGroup
@@ -54,6 +55,8 @@ struct CMapItemParentGroup
 	int m_Version; // Version of the map item
 	int m_Name; // Name of the group
 	// Extra info here (maybe)
+	int m_Visible;
+	int m_Collapse;
 };
 
 void RegisterMapItemTypeUuids(class CUuidManager *pManager);

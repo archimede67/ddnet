@@ -18,8 +18,10 @@
 
 #include "editor.h"
 #include "editor_actions.h"
+#include "popups.h"
 
 using namespace FontIcons;
+using namespace EditorPopups;
 
 CUi::EPopupMenuFunctionResult CEditor::PopupMenuFile(void *pContext, CUIRect View, bool Active)
 {
@@ -386,8 +388,26 @@ CUi::EPopupMenuFunctionResult CEditor::PopupGroup(void *pContext, CUIRect View, 
 {
 	CEditor *pEditor = static_cast<CEditor *>(pContext);
 
-	// remove group button
 	CUIRect Button;
+
+	// group button
+	View.HSplitBottom(12.0f, &View, &Button);
+	static int s_GroupButton = 0;
+	if(pEditor->DoButton_Editor(&s_GroupButton, "Group", 0, &Button, 0, "Adds this group to a parent group"))
+	{
+		const int SelectedGroupInfoIndex = pEditor->m_Map.GroupInfoIndex(CEditorGroupInfo::TYPE_LAYER_GROUP, pEditor->m_SelectedGroup);
+		pEditor->m_Map.GroupSelection({SelectedGroupInfoIndex});
+		return CUi::POPUP_CLOSE_CURRENT;
+	}
+
+	// separator
+	CUIRect Separator;
+	View.HSplitBottom(4.0f, &View, nullptr);
+	View.HSplitBottom(1.0f, &View, &Separator);
+	View.HSplitBottom(4.0f, &View, nullptr);
+	Separator.Draw(ColorRGBA(0.6f, 0.6f, 0.6f, 0.6f), IGraphics::CORNER_NONE, 0.0f);
+
+	// remove group button
 	View.HSplitBottom(12.0f, &View, &Button);
 	static int s_DeleteButton = 0;
 
@@ -2852,6 +2872,95 @@ CUi::EPopupMenuFunctionResult CEditor::PopupAnimateSettings(void *pContext, CUIR
 	{
 		pEditor->m_AnimateSpeed = clamp(s_SpeedInput.GetFloat(), MIN_ANIM_SPEED, MAX_ANIM_SPEED);
 	}
+
+	return CUi::POPUP_KEEP_OPEN;
+}
+
+CUi::EPopupMenuFunctionResult CEditor::PopupParentGroup(void *pContext, CUIRect View, bool Active)
+{
+	SParentGroupPopupContext *pGroupContext = static_cast<SParentGroupPopupContext *>(pContext);
+	int GroupInfoIndex = pGroupContext->m_GroupInfoIndex;
+	CEditor *pEditor = pGroupContext->m_pEditor;
+	if(!in_range(GroupInfoIndex, 0, (int)pEditor->m_Map.m_vGroupInfos.size() - 1))
+		return CUi::POPUP_CLOSE_CURRENT;
+
+	int GroupIndex = pEditor->m_Map.m_vGroupInfos[GroupInfoIndex].m_GroupIndex;
+	std::shared_ptr<CEditorParentGroup> &pGroupParent = pEditor->m_Map.m_vpGroupParents.at(GroupIndex);
+
+	CUIRect Button;
+	constexpr float ButtonHeight = 12.0f;
+
+	// group button
+	View.HSplitBottom(ButtonHeight, &View, &Button);
+	static int s_GroupButton = 0;
+	if(pEditor->DoButton_Editor(&s_GroupButton, "Group", 0, &Button, 0, "Adds this group to a parent group"))
+	{
+		pEditor->m_Map.GroupSelection({GroupInfoIndex});
+		return CUi::POPUP_CLOSE_CURRENT;
+	}
+
+	// ungroup button
+	View.HSplitBottom(5.0f, &View, nullptr);
+	View.HSplitBottom(ButtonHeight, &View, &Button);
+	static int s_DeleteButton = 0;
+	if(pEditor->DoButton_Editor(&s_DeleteButton, "Ungroup", 0, &Button, 0, "Remove this group while keeping its contents"))
+	{
+		pEditor->m_Map.UngroupSelection({GroupInfoIndex});
+		return CUi::POPUP_CLOSE_CURRENT;
+	}
+
+	// new parent group
+	View.HSplitBottom(5.0f, &View, nullptr);
+	View.HSplitBottom(ButtonHeight, &View, &Button);
+	static int s_NewParentGroupButton = 0;
+	if(pEditor->DoButton_Editor(&s_NewParentGroupButton, "Add parent group", 0, &Button, 0, "Creates a new parent group within this group"))
+	{
+		pEditor->m_Map.NewNestedGroups({GroupInfoIndex});
+		return CUi::POPUP_CLOSE_CURRENT;
+	}
+
+	// new layers group
+	View.HSplitBottom(5.0f, &View, nullptr);
+	View.HSplitBottom(ButtonHeight, &View, &Button);
+	static int s_NewLayersGroupButton = 0;
+	if(pEditor->DoButton_Editor(&s_NewLayersGroupButton, "Add layers group", 0, &Button, 0, "Creates a new layers group within this group"))
+	{
+		pEditor->m_Map.NewGroups({GroupInfoIndex});
+		return CUi::POPUP_CLOSE_CURRENT;
+	}
+
+	// group name
+	View.HSplitBottom(5.0f, &View, nullptr);
+	View.HSplitBottom(ButtonHeight, &View, &Button);
+	pEditor->Ui()->DoLabel(&Button, "Name:", 10.0f, TEXTALIGN_ML);
+	Button.VSplitLeft(40.0f, nullptr, &Button);
+	static CLineInput s_NameInput;
+	s_NameInput.SetBuffer(pGroupParent->m_aName, sizeof(pGroupParent->m_aName));
+	if(pEditor->DoEditBox(&s_NameInput, &Button, 10.0f))
+		pEditor->m_Map.OnModify();
+
+	CProperty aProps[] = {
+		{"Order", pEditor->m_SelectedGroup, PROPTYPE_INT, 0, (int)pEditor->m_Map.m_vpGroups.size() - 1},
+		{nullptr},
+	};
+
+	int NewVal = 0;
+	static int s_aIds[(int)EParentGroupProp::NUM_PROPS] = {0};
+	auto [State, Prop] = pEditor->DoPropertiesWithState<EParentGroupProp>(&View, aProps, s_aIds, &NewVal);
+
+	if(Prop != EParentGroupProp::PROP_NONE)
+		pEditor->m_Map.OnModify();
+
+	//static CLayerGroupPropTracker s_Tracker(pEditor);
+	//s_Tracker.Begin(pEditor->GetSelectedGroup().get(), Prop, State);
+
+	if(Prop == EParentGroupProp::PROP_ORDER)
+	{
+		// Changing order is changing group infos
+		//pEditor->m_SelectedGroup = pEditor->m_Map.SwapGroups(pEditor->m_SelectedGroup, NewVal);
+	}
+
+	//s_Tracker.End(Prop, State);
 
 	return CUi::POPUP_KEEP_OPEN;
 }

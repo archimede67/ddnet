@@ -421,10 +421,7 @@ bool CEditorMap::Save(const char *pFileName)
 		InfoMI.m_Version = CMapItemGroupInfo::CURRENT_VERSION;
 		InfoMI.m_Type = Info.m_Type;
 		InfoMI.m_Index = Info.m_GroupIndex;
-
-		InfoMI.m_Children = -1;
-		if(!Info.m_Children.empty())
-			InfoMI.m_Children = Writer.AddDataSwapped(Info.m_Children.size() * sizeof(int), Info.m_Children.data());
+		InfoMI.m_Parent = Info.m_ParentIndex;
 
 		Writer.AddItem(MAPITEMTYPE_GROUP_INFO, i, sizeof(CMapItemGroupInfo), &InfoMI);
 	}
@@ -436,6 +433,8 @@ bool CEditorMap::Save(const char *pFileName)
 		CMapItemParentGroup ParentGroup;
 		ParentGroup.m_Version = CMapItemParentGroup::CURRENT_VERSION;
 		ParentGroup.m_Name = Writer.AddDataString(pGroupParent->m_aName);
+		ParentGroup.m_Visible = pGroupParent->m_Visible;
+		ParentGroup.m_Collapse = pGroupParent->m_Collapse;
 		Writer.AddItem(MAPITEMTYPE_PARENT_GROUP, i, sizeof(CMapItemParentGroup), &ParentGroup);
 	}
 
@@ -655,7 +654,7 @@ bool CEditorMap::Load(const char *pFileName, int StorageType, const std::functio
 			if(pGItem->m_Version < 1 || pGItem->m_Version > CMapItemGroup::CURRENT_VERSION)
 				continue;
 
-			std::shared_ptr<CLayerGroup> pGroup = NewGroup(false);
+			std::shared_ptr<CLayerGroup> pGroup = NewGroup(pGItem->m_Version < 4);
 			pGroup->m_ParallaxX = pGItem->m_ParallaxX;
 			pGroup->m_ParallaxY = pGItem->m_ParallaxY;
 			pGroup->m_OffsetX = pGItem->m_OffsetX;
@@ -1055,6 +1054,9 @@ bool CEditorMap::Load(const char *pFileName, int StorageType, const std::functio
 			else
 				str_copy(pGroupParent->m_aName, pName);
 
+			pGroupParent->m_Visible = pGroupParentMI->m_Visible;
+			pGroupParent->m_Collapse = pGroupParentMI->m_Collapse;
+
 			m_vpGroupParents.emplace_back(pGroupParent);
 		}
 
@@ -1071,17 +1073,7 @@ bool CEditorMap::Load(const char *pFileName, int StorageType, const std::functio
 
 			Info.m_Type = (CEditorGroupInfo::EType)pGroupInfo->m_Type;
 			Info.m_GroupIndex = pGroupInfo->m_Index;
-
-			if(pGroupInfo->m_Children < 0)
-				continue;
-
-			const unsigned Size = DataFile.GetDataSize(pGroupInfo->m_Children) / sizeof(int);
-			int *pChildren = (int *)DataFile.GetDataSwapped(pGroupInfo->m_Children);
-
-			if(pChildren)
-				Info.m_Children.assign(pChildren, pChildren + Size);
-
-			DataFile.UnloadData(pGroupInfo->m_Children);
+			Info.m_ParentIndex = pGroupInfo->m_Parent;
 		}
 	}
 

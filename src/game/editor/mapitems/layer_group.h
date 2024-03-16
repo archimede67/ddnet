@@ -1,12 +1,13 @@
 #ifndef GAME_EDITOR_MAPITEMS_LAYER_GROUP_H
 #define GAME_EDITOR_MAPITEMS_LAYER_GROUP_H
 
+#include "group.h"
 #include "layer.h"
 
 #include <memory>
 #include <vector>
 
-class CLayerGroup
+class CLayerGroup : public IGroup
 {
 public:
 	class CEditorMap *m_pMap;
@@ -27,8 +28,6 @@ public:
 
 	char m_aName[12];
 	bool m_GameGroup;
-	bool m_Visible;
-	bool m_Collapse;
 
 	CLayerGroup();
 	~CLayerGroup();

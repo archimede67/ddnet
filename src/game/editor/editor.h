@@ -12,6 +12,7 @@
 #include <game/mapitems.h>
 
 #include <game/editor/mapitems/envelope.h>
+#include <game/editor/mapitems/group_ex.h>
 #include <game/editor/mapitems/layer.h>
 #include <game/editor/mapitems/layer_front.h>
 #include <game/editor/mapitems/layer_game.h>
@@ -23,7 +24,6 @@
 #include <game/editor/mapitems/layer_tele.h>
 #include <game/editor/mapitems/layer_tiles.h>
 #include <game/editor/mapitems/layer_tune.h>
-#include <game/editor/mapitems/parent_group.h>
 
 #include <engine/console.h>
 #include <engine/editor.h>
@@ -34,6 +34,7 @@
 
 #include <game/editor/components/auto_map.h>
 #include <game/editor/components/layer_selector.h>
+#include <game/editor/components/layers_view.h>
 #include <game/editor/components/map_view.h>
 
 #include "editor_history.h"
@@ -64,6 +65,11 @@ enum
 	DIALOG_NONE = 0,
 	DIALOG_FILE,
 	DIALOG_MAPSETTINGS_ERROR
+};
+
+enum
+{
+	BUTTON_CONTEXT = 1,
 };
 
 class CEditorImage;
@@ -146,36 +152,14 @@ public:
 	template<typename F>
 	void VisitEnvelopeReferences(F &&Visitor);
 
-	std::shared_ptr<CLayerGroup> NewGroup(bool CreateInfo = true)
-	{
-		const int Index = (int)m_vpGroups.size();
+	std::shared_ptr<CLayerGroup> NewGroup(bool CreateInfo = true);
 
-		OnModify();
-		std::shared_ptr<CLayerGroup> pGroup = std::make_shared<CLayerGroup>();
-		pGroup->m_pMap = this;
-		m_vpGroups.push_back(pGroup);
-
-		// Insert a group info for each layers group
-		if(CreateInfo)
-		{
-			CEditorGroupInfo Info;
-			Info.m_GroupIndex = Index;
-			Info.m_Type = CEditorGroupInfo::LAYER_GROUP;
-			m_vGroupInfos.push_back(Info);
-		}
-
-		// TODO: removeme
-		//std::shared_ptr<CEditorParentGroup> pGroupParent = std::make_shared<CEditorParentGroup>();
-		//str_copy(pGroupParent->m_aName, "Test Parent");
-		//CEditorGroupInfo ParentInfo;
-		//ParentInfo.m_GroupIndex = (int)m_vpGroupParents.size();
-		//ParentInfo.m_Children.push_back(m_vGroupInfos.size() - 1);
-		//ParentInfo.m_Type = CEditorGroupInfo::PARENT_GROUP;
-		//m_vpGroupParents.push_back(pGroupParent);
-		//m_vGroupInfos.push_back(ParentInfo);
-
-		return pGroup;
-	}
+	CEditorGroupInfo &GroupSelection(const std::vector<int> &vSelectedGroupItems);
+	void UngroupSelection(const std::vector<int> &vSelectedGroupItems);
+	void NewGroups(const std::vector<int> &vSelectedGroupItems);
+	void NewNestedGroups(const std::vector<int> &vSelectedGroupItems);
+	CEditorGroupInfo &NewParentGroup();
+	int GroupInfoIndex(CEditorGroupInfo::EType Type, int GroupIndex);
 
 	int SwapGroups(int Index0, int Index1)
 	{
@@ -190,13 +174,7 @@ public:
 		return Index1;
 	}
 
-	void DeleteGroup(int Index)
-	{
-		if(Index < 0 || Index >= (int)m_vpGroups.size())
-			return;
-		OnModify();
-		m_vpGroups.erase(m_vpGroups.begin() + Index);
-	}
+	void DeleteGroup(int Index);
 
 	void ModifyImageIndex(FIndexModifyFunction pfnFunc)
 	{
@@ -305,6 +283,7 @@ class CEditor : public IEditor
 	std::vector<std::reference_wrapper<CEditorComponent>> m_vComponents;
 	CMapView m_MapView;
 	CLayerSelector m_LayerSelector;
+	CLayersView m_LayersView;
 
 	bool m_EditorWasUsedBefore = false;
 
@@ -345,6 +324,7 @@ public:
 	CMapView *MapView() { return &m_MapView; }
 	const CMapView *MapView() const { return &m_MapView; }
 	CLayerSelector *LayerSelector() { return &m_LayerSelector; }
+	CLayersView *LayersView() { return &m_LayersView; }
 
 	CEditor() :
 		m_ZoomEnvelopeX(1.0f, 0.1f, 600.0f),
@@ -896,6 +876,7 @@ public:
 	static CUi::EPopupMenuFunctionResult PopupEntities(void *pContext, CUIRect View, bool Active);
 	static CUi::EPopupMenuFunctionResult PopupProofMode(void *pContext, CUIRect View, bool Active);
 	static CUi::EPopupMenuFunctionResult PopupAnimateSettings(void *pContext, CUIRect View, bool Active);
+	static CUi::EPopupMenuFunctionResult PopupParentGroup(void *pContext, CUIRect View, bool Active);
 
 	static bool CallbackOpenMap(const char *pFileName, int StorageType, void *pUser);
 	static bool CallbackAppendMap(const char *pFileName, int StorageType, void *pUser);

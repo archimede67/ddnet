@@ -82,39 +82,42 @@ void CMapView::RenderGroupBorder()
 
 void CMapView::RenderMap()
 {
+	CEditorMap &Map = Editor()->m_Map;
+
 	if(Editor()->m_Dialog == DIALOG_NONE && CLineInput::GetActiveInput() == nullptr && Input()->ShiftIsPressed() && !Input()->ModifierIsPressed() && Input()->KeyPress(KEY_G))
 	{
 		const bool AnyHidden =
-			!Editor()->m_Map.m_pGameLayer->m_Visible ||
-			(Editor()->m_Map.m_pFrontLayer && !Editor()->m_Map.m_pFrontLayer->m_Visible) ||
-			(Editor()->m_Map.m_pTeleLayer && !Editor()->m_Map.m_pTeleLayer->m_Visible) ||
-			(Editor()->m_Map.m_pSpeedupLayer && !Editor()->m_Map.m_pSpeedupLayer->m_Visible) ||
-			(Editor()->m_Map.m_pTuneLayer && !Editor()->m_Map.m_pTuneLayer->m_Visible) ||
-			(Editor()->m_Map.m_pSwitchLayer && !Editor()->m_Map.m_pSwitchLayer->m_Visible);
-		Editor()->m_Map.m_pGameLayer->m_Visible = AnyHidden;
-		if(Editor()->m_Map.m_pFrontLayer)
-			Editor()->m_Map.m_pFrontLayer->m_Visible = AnyHidden;
-		if(Editor()->m_Map.m_pTeleLayer)
-			Editor()->m_Map.m_pTeleLayer->m_Visible = AnyHidden;
-		if(Editor()->m_Map.m_pSpeedupLayer)
-			Editor()->m_Map.m_pSpeedupLayer->m_Visible = AnyHidden;
-		if(Editor()->m_Map.m_pTuneLayer)
-			Editor()->m_Map.m_pTuneLayer->m_Visible = AnyHidden;
-		if(Editor()->m_Map.m_pSwitchLayer)
-			Editor()->m_Map.m_pSwitchLayer->m_Visible = AnyHidden;
+			!Map.m_pGameLayer->m_Visible ||
+			(Map.m_pFrontLayer && !Map.m_pFrontLayer->m_Visible) ||
+			(Map.m_pTeleLayer && !Map.m_pTeleLayer->m_Visible) ||
+			(Map.m_pSpeedupLayer && !Map.m_pSpeedupLayer->m_Visible) ||
+			(Map.m_pTuneLayer && !Map.m_pTuneLayer->m_Visible) ||
+			(Map.m_pSwitchLayer && !Map.m_pSwitchLayer->m_Visible);
+		Map.m_pGameLayer->m_Visible = AnyHidden;
+		if(Map.m_pFrontLayer)
+			Map.m_pFrontLayer->m_Visible = AnyHidden;
+		if(Map.m_pTeleLayer)
+			Map.m_pTeleLayer->m_Visible = AnyHidden;
+		if(Map.m_pSpeedupLayer)
+			Map.m_pSpeedupLayer->m_Visible = AnyHidden;
+		if(Map.m_pTuneLayer)
+			Map.m_pTuneLayer->m_Visible = AnyHidden;
+		if(Map.m_pSwitchLayer)
+			Map.m_pSwitchLayer->m_Visible = AnyHidden;
 	}
 
-	for(auto &pGroup : Editor()->m_Map.m_vpGroups)
+	for(int g = 0; g < (int)Map.m_vpGroups.size(); g++)
 	{
-		if(pGroup->m_Visible)
-			pGroup->Render();
+		if(ResolveVisibility(g))
+			Map.m_vpGroups.at(g)->Render();
 	}
 
 	// render the game, tele, speedup, front, tune and switch above everything else
-	if(Editor()->m_Map.m_pGameGroup->m_Visible)
+	int GameGroupIndex = std::find(Map.m_vpGroups.begin(), Map.m_vpGroups.end(), Map.m_pGameGroup) - Map.m_vpGroups.begin();
+	if(ResolveVisibility(GameGroupIndex))
 	{
-		Editor()->m_Map.m_pGameGroup->MapScreen();
-		for(auto &pLayer : Editor()->m_Map.m_pGameGroup->m_vpLayers)
+		Map.m_pGameGroup->MapScreen();
+		for(auto &pLayer : Map.m_pGameGroup->m_vpLayers)
 		{
 			if(pLayer->m_Visible && pLayer->IsEntitiesLayer())
 				pLayer->Render();
@@ -233,4 +236,36 @@ vec2 CMapView::GetEditorOffset() const
 float CMapView::GetWorldZoom() const
 {
 	return m_WorldZoom;
+}
+
+bool CMapView::ResolveVisibility(int GroupIndex)
+{
+	CEditorMap &Map = Editor()->m_Map;
+
+	// If group is not visible, then simply return false
+	if(!Map.m_vpGroups[GroupIndex]->m_Visible)
+		return false;
+
+	// Otherwise, we need to check for parent groups
+
+	// First find the corresponding group info
+	int GroupInfoIndex = Map.GroupInfoIndex(CEditorGroupInfo::TYPE_LAYER_GROUP, GroupIndex);
+	int Parent = Map.m_vGroupInfos[GroupInfoIndex].m_ParentIndex;
+
+	// Traverse the parents from bottom to up
+	while(Parent != CEditorGroupInfo::PARENT_NONE)
+	{
+		CEditorGroupInfo &Info = Map.m_vGroupInfos.at(Parent);
+		if(Info.m_Type != CEditorGroupInfo::TYPE_PARENT_GROUP)
+			continue;
+
+		// If we find a parent that shouldn't be visible, then return false
+		if(!Map.m_vpGroupParents[Info.m_GroupIndex]->m_Visible)
+			return false;
+
+		Parent = Info.m_ParentIndex;
+	}
+
+	// If all parents are visible, it means the group is visible
+	return true;
 }

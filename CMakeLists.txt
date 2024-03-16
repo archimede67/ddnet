@@ -2334,6 +2334,8 @@ if(CLIENT)
     mapitems.h
     mapitems/envelope.cpp
     mapitems/envelope.h
+    mapitems/group.h
+    mapitems/group_ex.h
     mapitems/image.cpp
     mapitems/image.h
     mapitems/layer.h
@@ -2359,11 +2361,10 @@ if(CLIENT)
     mapitems/layer_tune.h
     mapitems/map.cpp
     mapitems/map_io.cpp
-    mapitems/parent_group.cpp
-    mapitems/parent_group.h
     mapitems/sound.cpp
     mapitems/sound.h
     popups.cpp
+    popups.h
     smooth_value.cpp
     smooth_value.h
     tileart.cpp

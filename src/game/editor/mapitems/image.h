@@ -3,8 +3,8 @@
 
 #include <engine/graphics.h>
 
-#include <game/editor/auto_map.h>
 #include <game/editor/component.h>
+#include <game/editor/components/auto_map.h>
 
 class CEditorImage : public CImageInfo, public CEditorComponent
 {
