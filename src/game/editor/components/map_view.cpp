@@ -6,7 +6,7 @@
 #include <game/client/render.h>
 #include <game/client/ui.h>
 
-#include "editor.h"
+#include <game/editor/editor.h>
 
 void CMapView::Init(CEditor *pEditor)
 {

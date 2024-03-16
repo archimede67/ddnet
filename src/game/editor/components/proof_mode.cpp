@@ -2,7 +2,7 @@
 
 #include <game/client/components/menu_background.h>
 
-#include "editor.h"
+#include <game/editor/editor.h>
 
 void CProofMode::Init(CEditor *pEditor)
 {

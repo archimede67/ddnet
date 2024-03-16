@@ -1,7 +1,7 @@
 #ifndef GAME_EDITOR_PROOF_MODE_H
 #define GAME_EDITOR_PROOF_MODE_H
 
-#include "component.h"
+#include <game/editor/component.h>
 
 class CProofMode : public CEditorComponent
 {

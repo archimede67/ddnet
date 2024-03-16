@@ -32,11 +32,11 @@
 #include <game/generated/client_data.h>
 #include <game/localization.h>
 
+#include <game/editor/components/auto_map.h>
 #include <game/editor/editor_history.h>
 #include <game/editor/mapitems/image.h>
 #include <game/editor/mapitems/sound.h>
 
-#include "auto_map.h"
 #include "editor.h"
 #include "editor_actions.h"
 

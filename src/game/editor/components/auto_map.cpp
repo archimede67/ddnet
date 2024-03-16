@@ -8,8 +8,9 @@
 #include <game/editor/mapitems/layer_tiles.h>
 #include <game/mapitems.h>
 
+#include <game/editor/editor_actions.h>
+
 #include "auto_map.h"
-#include "editor_actions.h"
 
 // Based on triple32inc from https://github.com/skeeto/hash-prospector/tree/79a6074062a84907df6e45b756134b74e2956760
 static uint32_t HashUInt32(uint32_t Num)

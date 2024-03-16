@@ -31,13 +31,14 @@
 #include <engine/shared/datafile.h>
 #include <engine/shared/jobs.h>
 
-#include "auto_map.h"
+#include <game/editor/components/auto_map.h>
+#include <game/editor/components/layer_selector.h>
+#include <game/editor/components/map_view.h>
+
 #include "editor_history.h"
 #include "editor_server_settings.h"
 #include "editor_trackers.h"
 #include "editor_ui.h"
-#include "layer_selector.h"
-#include "map_view.h"
 #include "smooth_value.h"
 
 #include <deque>

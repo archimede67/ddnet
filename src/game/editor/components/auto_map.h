@@ -3,7 +3,7 @@
 
 #include <vector>
 
-#include "component.h"
+#include <game/editor/component.h>
 
 class CAutoMapper : public CEditorComponent
 {

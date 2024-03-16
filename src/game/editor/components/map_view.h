@@ -3,10 +3,11 @@
 
 #include <base/vmath.h>
 
-#include "component.h"
+#include <game/editor/component.h>
+#include <game/editor/smooth_value.h>
+
 #include "map_grid.h"
 #include "proof_mode.h"
-#include "smooth_value.h"
 
 class CLayerGroup;
 

@@ -1,4 +1,4 @@
-#include "editor.h"
+#include <game/editor/editor.h>
 
 #include "layer_selector.h"
 

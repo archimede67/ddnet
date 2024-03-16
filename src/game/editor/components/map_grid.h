@@ -1,7 +1,7 @@
 #ifndef GAME_EDITOR_MAP_GRID_H
 #define GAME_EDITOR_MAP_GRID_H
 
-#include "component.h"
+#include <game/editor/component.h>
 
 #include <game/client/ui.h>
 

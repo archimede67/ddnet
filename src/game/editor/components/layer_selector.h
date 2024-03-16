@@ -1,7 +1,7 @@
 #ifndef GAME_EDITOR_LAYER_SELECTOR_H
 #define GAME_EDITOR_LAYER_SELECTOR_H
 
-#include "component.h"
+#include <game/editor/component.h>
 
 class CLayerSelector : public CEditorComponent
 {

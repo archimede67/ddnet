@@ -2,7 +2,7 @@
 
 #include <engine/keys.h>
 
-#include "editor.h"
+#include <game/editor/editor.h>
 
 static constexpr int MIN_GRID_FACTOR = 1;
 static constexpr int MAX_GRID_FACTOR = 15;

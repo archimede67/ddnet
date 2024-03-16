@@ -2301,10 +2301,20 @@ if(CLIENT)
     ui_scrollregion.h
   )
   set_src(GAME_EDITOR GLOB_RECURSE src/game/editor
-    auto_map.cpp
-    auto_map.h
     component.cpp
     component.h
+    components/auto_map.cpp
+    components/auto_map.h
+    components/layer_selector.cpp
+    components/layer_selector.h
+    components/layers_view.cpp
+    components/layers_view.h
+    components/map_grid.cpp
+    components/map_grid.h
+    components/map_view.cpp
+    components/map_view.h
+    components/proof_mode.cpp
+    components/proof_mode.h
     editor.cpp
     editor.h
     editor_action.h
@@ -2321,12 +2331,6 @@ if(CLIENT)
     editor_trackers.h
     editor_ui.h
     explanations.cpp
-    layer_selector.cpp
-    layer_selector.h
-    map_grid.cpp
-    map_grid.h
-    map_view.cpp
-    map_view.h
     mapitems.h
     mapitems/envelope.cpp
     mapitems/envelope.h
@@ -2358,8 +2362,6 @@ if(CLIENT)
     mapitems/sound.cpp
     mapitems/sound.h
     popups.cpp
-    proof_mode.cpp
-    proof_mode.h
     smooth_value.cpp
     smooth_value.h
     tileart.cpp
