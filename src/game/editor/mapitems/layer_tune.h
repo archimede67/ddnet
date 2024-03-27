@@ -43,6 +43,8 @@ public:
 	std::shared_ptr<CLayer> Duplicate() const override;
 	const char *TypeName() const override;
 
+	inline const char *Icon() const override { return FONT_ICON_SLIDERS_H; }
+
 private:
 	void RecordStateChange(int x, int y, STuneTileStateChange::SData Previous, STuneTileStateChange::SData Current);
 };

@@ -2,11 +2,14 @@
 #define GAME_EDITOR_MAPITEMS_LAYER_H
 
 #include <base/system.h>
+#include <engine/textrender.h>
 #include <game/client/ui.h>
 #include <game/client/ui_rect.h>
 #include <game/mapitems.h>
 
 #include <memory>
+
+using namespace FontIcons;
 
 using FIndexModifyFunction = std::function<void(int *pIndex)>;
 
@@ -63,6 +66,7 @@ public:
 
 	virtual std::shared_ptr<CLayer> Duplicate() const = 0;
 	virtual const char *TypeName() const = 0;
+	virtual inline const char *Icon() const = 0;
 
 	virtual void GetSize(float *pWidth, float *pHeight)
 	{

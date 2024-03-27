@@ -14,6 +14,8 @@ public:
 	const char *TypeName() const override;
 
 	CUi::EPopupMenuFunctionResult RenderProperties(CUIRect *pToolbox) override;
+
+	inline const char *Icon() const override { return FONT_ICON_BORDER_NONE; }
 };
 
 #endif

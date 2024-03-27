@@ -9,13 +9,55 @@
 #include <game/editor/mapitems/group_ex.h>
 
 using namespace EditorPopups;
-class CEditorMap;
 
-struct SObjectSelection
+class CEditorMap;
+class CLayer;
+
+class CToggleFlags
 {
+public:
+	enum EToggle
+	{
+		TOGGLE_VISIBILE,
+		TOGGLE_COLLAPSE,
+		NUM_TOGGLES
+	};
+
+	CToggleFlags() :
+		m_vpFlags(NUM_TOGGLES)
+	{
+		std::fill(m_vpFlags.begin(), m_vpFlags.end(), nullptr);
+	}
+
+	bool *&operator[](EToggle Toggle)
+	{
+		dbg_assert(Toggle != NUM_TOGGLES, "Invalid toggle flag");
+		return m_vpFlags[Toggle];
+	}
+
+	bool *operator[](EToggle Toggle) const
+	{
+		dbg_assert(Toggle != NUM_TOGGLES, "Invalid toggle flag");
+		return m_vpFlags.at(Toggle);
+	}
+
+private:
+	std::vector<bool *> m_vpFlags;
+};
+
+struct SEditorSelectableInfo
+{
+	enum EType
+	{
+		TYPE_GROUP_INFO,
+		TYPE_LAYER
+	};
+
 	int m_Type;
 	int m_Index;
 };
+
+// TODO: have an object that points to anything based on a type enum, used to render? So we can store bounding box/rect used to render
 
 class CLayersView : public CEditorComponent
 {
@@ -23,6 +65,7 @@ public:
 	void Init(CEditor *pEditor) override;
 
 	void Render(CUIRect LayersBox);
+	void OnRender(CUIRect View) override;
 
 private:
 	struct SDragContext
@@ -43,10 +86,9 @@ private:
 		bool m_ScrollToSelection;
 	};
 
-	struct SCommonGroupProps
+	struct SExtraRenderInfo
 	{
-		bool *m_pVisible;
-		bool *m_pCollapse;
+		const char *m_pIcon = nullptr;
 	};
 
 private:
@@ -70,7 +112,7 @@ private:
 	SRenderContext m_RenderContext;
 	SParentGroupPopupContext m_ParentPopupContext;
 
-	std::vector<SObjectSelection> m_vSelection;
+	std::vector<SEditorSelectableInfo> m_vSelection;
 
 private:
 	void RenderLayersGroup(CUIRect *pRect, const CEditorGroupInfo &Info);
@@ -80,8 +122,14 @@ private:
 	inline void ResetDragContext();
 	inline void ResetRenderContext();
 
-	int DoGroupButton(const CEditorGroupInfo *pGroupInfo, const char *pText, int Checked, const CUIRect *pRect, bool *pClicked, bool *pAbrupted, const char *pToolTip);
-	std::shared_ptr<IGroup> GetGroupBase(const CEditorGroupInfo *pGroupInfo);
+	int DoSelectable(const void *pId, const char *pText, const CToggleFlags &Flags, int Checked, const CUIRect *pRect, const char *pToolTip, const SExtraRenderInfo &Extra = {});
+	std::shared_ptr<IGroup> GetGroupBase(const CEditorGroupInfo &pGroupInfo);
+
+	int DoToggleIconButton(const void *pButtonId, const void *pParentId, const char *pIcon, bool Checked, const CUIRect *pRect, const char *pToolTip);
+	void DoIcon(const char *pIcon, const CUIRect *pRect, float FontSize);
+
+	CToggleFlags GroupFlags(const CEditorGroupInfo &pGroupInfo);
+	CToggleFlags LayerFlags(const std::shared_ptr<CLayer> &pLayer);
 
 private:
 	static constexpr float MIN_DRAG_DISTANCE = 5.0f;

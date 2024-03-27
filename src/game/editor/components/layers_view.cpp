@@ -297,8 +297,8 @@ void CLayersView::Render(CUIRect LayersBox)
 		if(Editor()->DoButton_Editor(&s_AddGroupButton, "Add group", 0, &AddGroupButton, IGraphics::CORNER_R, "Adds a new group"))
 		{
 			Map.NewGroup();
-			SelectedGroup = Map.m_vpGroups.size() - 1;
-			Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionGroup>(Editor(), SelectedGroup, false));
+			//SelectedGroup = Map.m_vpGroups.size() - 1;
+			//Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionGroup>(Editor(), SelectedGroup, false));
 		}
 	}
 
@@ -306,32 +306,32 @@ void CLayersView::Render(CUIRect LayersBox)
 
 	if(m_Operation == OP_NONE)
 	{
-		if(m_PreviousOperation == OP_GROUP_DRAG)
-		{
-			m_PreviousOperation = OP_NONE;
-			Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionEditGroupProp>(Editor(), SelectedGroup, EGroupProp::PROP_ORDER, s_InitialGroupIndex, SelectedGroup));
-		}
-		else if(m_PreviousOperation == OP_LAYER_DRAG)
-		{
-			if(s_InitialGroupIndex != SelectedGroup)
-			{
-				Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionEditLayersGroupAndOrder>(Editor(), s_InitialGroupIndex, s_vInitialLayerIndices, SelectedGroup, vSelectedLayers));
-			}
-			else
-			{
-				std::vector<std::shared_ptr<IEditorAction>> vpActions;
-				std::vector<int> vLayerIndices = vSelectedLayers;
-				std::sort(vLayerIndices.begin(), vLayerIndices.end());
-				std::sort(s_vInitialLayerIndices.begin(), s_vInitialLayerIndices.end());
-				for(int k = 0; k < (int)vLayerIndices.size(); k++)
-				{
-					int LayerIndex = vLayerIndices[k];
-					vpActions.push_back(std::make_shared<CEditorActionEditLayerProp>(Editor(), SelectedGroup, LayerIndex, ELayerProp::PROP_ORDER, s_vInitialLayerIndices[k], LayerIndex));
-				}
-				Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionBulk>(Editor(), vpActions, nullptr, true));
-			}
-			m_PreviousOperation = OP_NONE;
-		}
+		//if(m_PreviousOperation == OP_GROUP_DRAG)
+		//{
+		//	m_PreviousOperation = OP_NONE;
+		//	Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionEditGroupProp>(Editor(), SelectedGroup, EGroupProp::PROP_ORDER, s_InitialGroupIndex, SelectedGroup));
+		//}
+		//else if(m_PreviousOperation == OP_LAYER_DRAG)
+		//{
+		//	if(s_InitialGroupIndex != SelectedGroup)
+		//	{
+		//		Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionEditLayersGroupAndOrder>(Editor(), s_InitialGroupIndex, s_vInitialLayerIndices, SelectedGroup, vSelectedLayers));
+		//	}
+		//	else
+		//	{
+		//		std::vector<std::shared_ptr<IEditorAction>> vpActions;
+		//		std::vector<int> vLayerIndices = vSelectedLayers;
+		//		std::sort(vLayerIndices.begin(), vLayerIndices.end());
+		//		std::sort(s_vInitialLayerIndices.begin(), s_vInitialLayerIndices.end());
+		//		for(int k = 0; k < (int)vLayerIndices.size(); k++)
+		//		{
+		//			int LayerIndex = vLayerIndices[k];
+		//			vpActions.push_back(std::make_shared<CEditorActionEditLayerProp>(Editor(), SelectedGroup, LayerIndex, ELayerProp::PROP_ORDER, s_vInitialLayerIndices[k], LayerIndex));
+		//		}
+		//		Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionBulk>(Editor(), vpActions, nullptr, true));
+		//	}
+		//	m_PreviousOperation = OP_NONE;
+		//}
 	}
 }
 
@@ -361,9 +361,10 @@ void CLayersView::RenderParentGroup(CUIRect *pRect, int Index, const CEditorGrou
 	{
 		str_format(aBuf, sizeof(aBuf), "%s", pGroupParent->m_aName);
 
-		bool Clicked;
-		bool Abrupted;
-		if(int Result = DoGroupButton(&Info, aBuf, 0, &Slot, &Clicked, &Abrupted, "Something I guess"))
+		bool Clicked = false;
+		bool Abrupted = false;
+
+		if(int Result = DoSelectable(&Info, aBuf, GroupFlags(Info), 0, &Slot, "Something I guess"))
 		{
 			if(Clicked)
 			{
@@ -422,6 +423,7 @@ void CLayersView::RenderLayersGroup(CUIRect *pRect, const CEditorGroupInfo &Info
 	auto &[UnscrolledLayersBox, vButtonsPerGroup, ScrollToSelection] = m_RenderContext;
 
 	int g = Info.m_GroupIndex;
+
 	if(m_Operation == OP_LAYER_DRAG && g > 0 && !DraggedPositionFound && Ui()->MouseY() < pRect->y + ROW_HEIGHT / 2)
 	{
 		DraggedPositionFound = true;
@@ -466,16 +468,17 @@ void CLayersView::RenderLayersGroup(CUIRect *pRect, const CEditorGroupInfo &Info
 
 	if(m_ScrollRegion.AddRect(Slot))
 	{
-		Slot.VSplitLeft(15.0f, &VisibleToggle, &Slot);
-		if(Editor()->DoButton_FontIcon(&Map.m_vpGroups[g]->m_Visible, Map.m_vpGroups[g]->m_Visible ? FONT_ICON_EYE : FONT_ICON_EYE_SLASH, Map.m_vpGroups[g]->m_Collapse ? 1 : 0, &VisibleToggle, 0, "Toggle group visibility", IGraphics::CORNER_L, 8.0f))
-			Map.m_vpGroups[g]->m_Visible = !Map.m_vpGroups[g]->m_Visible;
+		//Slot.VSplitLeft(15.0f, &VisibleToggle, &Slot);
+		//if(Editor()->DoButton_FontIcon(&Map.m_vpGroups[g]->m_Visible, Map.m_vpGroups[g]->m_Visible ? FONT_ICON_EYE : FONT_ICON_EYE_SLASH, Map.m_vpGroups[g]->m_Collapse ? 1 : 0, &VisibleToggle, 0, "Toggle group visibility", IGraphics::CORNER_L, 8.0f))
+		//	Map.m_vpGroups[g]->m_Visible = !Map.m_vpGroups[g]->m_Visible;
 
 		str_format(aBuf, sizeof(aBuf), "#%d %s", g, Map.m_vpGroups[g]->m_aName);
 
-		bool Clicked;
-		bool Abrupted;
-		if(int Result = Editor()->DoButton_DraggableEx(&Map.m_vpGroups[g], aBuf, g == SelectedGroup, &Slot, &Clicked, &Abrupted,
-			   BUTTON_CONTEXT, Map.m_vpGroups[g]->m_Collapse ? "Select group. Shift click to select all layers. Double click to expand." : "Select group. Shift click to select all layers. Double click to collapse.", IGraphics::CORNER_R))
+		bool Clicked = false;
+		bool Abrupted = false;
+		SExtraRenderInfo Extra;
+		Extra.m_pIcon = FONT_ICON_LAYER_GROUP;
+		if(int Result = DoSelectable(&Map.m_vpGroups[g], aBuf, GroupFlags(Info), g == SelectedGroup, &Slot, Map.m_vpGroups[g]->m_Collapse ? "Select group. Shift click to select all layers. Double click to expand." : "Select group. Shift click to select all layers. Double click to collapse.", Extra))
 		{
 			if(m_Operation == OP_NONE)
 			{
@@ -538,6 +541,8 @@ void CLayersView::RenderLayersGroup(CUIRect *pRect, const CEditorGroupInfo &Info
 		if(Map.m_vpGroups[g]->m_Collapse)
 			continue;
 
+		std::shared_ptr<CLayer> &pLayer = Map.m_vpGroups[g]->m_vpLayers.at(i);
+
 		bool IsLayerSelected = false;
 		if(SelectedGroup == g)
 		{
@@ -589,43 +594,44 @@ void CLayersView::RenderLayersGroup(CUIRect *pRect, const CEditorGroupInfo &Info
 		Slot.HSplitTop(ROW_HEIGHT, &Slot, nullptr);
 
 		CUIRect Button;
-		Slot.VSplitLeft(INDENT, nullptr, &Slot);
-		Slot.VSplitLeft(15.0f, &VisibleToggle, &Button);
+		Slot.VSplitLeft(INDENT, nullptr, &Button);
+		//Slot.VSplitLeft(15.0f, &VisibleToggle, &Button);
 
-		if(Editor()->DoButton_FontIcon(&Map.m_vpGroups[g]->m_vpLayers[i]->m_Visible, Map.m_vpGroups[g]->m_vpLayers[i]->m_Visible ? FONT_ICON_EYE : FONT_ICON_EYE_SLASH, 0, &VisibleToggle, 0, "Toggle layer visibility", IGraphics::CORNER_L, 8.0f))
-			Map.m_vpGroups[g]->m_vpLayers[i]->m_Visible = !Map.m_vpGroups[g]->m_vpLayers[i]->m_Visible;
+		//if(Editor()->DoButton_FontIcon(&Map.m_vpGroups[g]->m_vpLayers[i]->m_Visible, Map.m_vpGroups[g]->m_vpLayers[i]->m_Visible ? FONT_ICON_EYE : FONT_ICON_EYE_SLASH, 0, &VisibleToggle, 0, "Toggle layer visibility", IGraphics::CORNER_L, 8.0f))
+		//Map.m_vpGroups[g]->m_vpLayers[i]->m_Visible = !Map.m_vpGroups[g]->m_vpLayers[i]->m_Visible;
 
-		if(Map.m_vpGroups[g]->m_vpLayers[i]->m_aName[0])
-			str_copy(aBuf, Map.m_vpGroups[g]->m_vpLayers[i]->m_aName);
+		if(pLayer->m_aName[0])
+			str_copy(aBuf, pLayer->m_aName);
 		else
 		{
-			if(Map.m_vpGroups[g]->m_vpLayers[i]->m_Type == LAYERTYPE_TILES)
+			if(pLayer->m_Type == LAYERTYPE_TILES)
 			{
-				std::shared_ptr<CLayerTiles> pTiles = std::static_pointer_cast<CLayerTiles>(Map.m_vpGroups[g]->m_vpLayers[i]);
+				std::shared_ptr<CLayerTiles> pTiles = std::static_pointer_cast<CLayerTiles>(pLayer);
 				str_copy(aBuf, pTiles->m_Image >= 0 ? Map.m_vpImages[pTiles->m_Image]->m_aName : "Tiles");
 			}
-			else if(Map.m_vpGroups[g]->m_vpLayers[i]->m_Type == LAYERTYPE_QUADS)
+			else if(pLayer->m_Type == LAYERTYPE_QUADS)
 			{
-				std::shared_ptr<CLayerQuads> pQuads = std::static_pointer_cast<CLayerQuads>(Map.m_vpGroups[g]->m_vpLayers[i]);
+				std::shared_ptr<CLayerQuads> pQuads = std::static_pointer_cast<CLayerQuads>(pLayer);
 				str_copy(aBuf, pQuads->m_Image >= 0 ? Map.m_vpImages[pQuads->m_Image]->m_aName : "Quads");
 			}
-			else if(Map.m_vpGroups[g]->m_vpLayers[i]->m_Type == LAYERTYPE_SOUNDS)
+			else if(pLayer->m_Type == LAYERTYPE_SOUNDS)
 			{
-				std::shared_ptr<CLayerSounds> pSounds = std::static_pointer_cast<CLayerSounds>(Map.m_vpGroups[g]->m_vpLayers[i]);
+				std::shared_ptr<CLayerSounds> pSounds = std::static_pointer_cast<CLayerSounds>(pLayer);
 				str_copy(aBuf, pSounds->m_Sound >= 0 ? Map.m_vpSounds[pSounds->m_Sound]->m_aName : "Sounds");
 			}
 		}
 
 		int Checked = IsLayerSelected ? 1 : 0;
-		if(Map.m_vpGroups[g]->m_vpLayers[i]->IsEntitiesLayer())
+		if(pLayer->IsEntitiesLayer())
 		{
 			Checked += 6;
 		}
 
-		bool Clicked;
-		bool Abrupted;
-		if(int Result = Editor()->DoButton_DraggableEx(Map.m_vpGroups[g]->m_vpLayers[i].get(), aBuf, Checked, &Button, &Clicked, &Abrupted,
-			   BUTTON_CONTEXT, "Select layer. Shift click to select multiple.", IGraphics::CORNER_R))
+		bool Clicked = false;
+		bool Abrupted = false;
+		SExtraRenderInfo Extra;
+		Extra.m_pIcon = pLayer->Icon();
+		if(int Result = DoSelectable(&pLayer, aBuf, LayerFlags(pLayer), Checked, &Button, "Select layer. Shift click to select multiple.", Extra))
 		{
 			if(m_Operation == OP_NONE)
 			{
@@ -657,7 +663,7 @@ void CLayersView::RenderLayersGroup(CUIRect *pRect, const CEditorGroupInfo &Info
 				if(!EntitiesLayerSelected)
 					StartDragLayer = true;
 
-				m_pDraggedButton = Map.m_vpGroups[g]->m_vpLayers[i].get();
+				m_pDraggedButton = pLayer.get();
 			}
 
 			if(m_Operation == OP_CLICK && Clicked)
@@ -723,7 +729,7 @@ void CLayersView::RenderLayersGroup(CUIRect *pRect, const CEditorGroupInfo &Info
 				MoveLayers = true;
 			}
 		}
-		else if(m_pDraggedButton == Map.m_vpGroups[g]->m_vpLayers[i].get())
+		else if(m_pDraggedButton == pLayer.get())
 		{
 			SetOperation(OP_NONE);
 		}
@@ -766,36 +772,301 @@ void CLayersView::ResetRenderContext()
 	m_RenderContext.m_ScrollToSelection = false;
 }
 
-int CLayersView::DoGroupButton(const CEditorGroupInfo *pGroupInfo, const char *pText, int Checked, const CUIRect *pRect, bool *pClicked, bool *pAbrupted, const char *pToolTip)
+int CLayersView::DoSelectable(const void *pId, const char *pText, const CToggleFlags &Flags, int Checked, const CUIRect *pRect, const char *pToolTip, const SExtraRenderInfo &Extra)
 {
 	CEditorMap &Map = Editor()->m_Map;
-	std::shared_ptr<IGroup> pGroupBase = GetGroupBase(pGroupInfo);
-	if(!pGroupBase)
-		return -1;
 
-	CUIRect Button, VisibleToggle;
+	CUIRect Button = *pRect;
+	CUIRect VisibleToggle;
 
-	pRect->VSplitLeft(15.0f, &VisibleToggle, &Button);
+	auto pCollapse = Flags[CToggleFlags::TOGGLE_COLLAPSE];
+	auto pVisible = Flags[CToggleFlags::TOGGLE_VISIBILE];
 
-	if(Editor()->DoButton_FontIcon(&pGroupBase->m_Visible, pGroupBase->m_Visible ? FONT_ICON_EYE : FONT_ICON_EYE_SLASH, 0, &VisibleToggle, 0, "Toggle group visibility", IGraphics::CORNER_L, 8.0f))
+	bool RenderIcon = Extra.m_pIcon != nullptr;
+
+	if(pCollapse)
 	{
-		// TODO
-		pGroupBase->m_Visible = !pGroupBase->m_Visible;
+		CUIRect CollapseToggle;
+		Button.VSplitLeft(15.0f, &CollapseToggle, &Button);
+
+		if(Editor()->DoButton_FontIcon(pCollapse, RenderIcon ? Extra.m_pIcon : (*pCollapse ? FONT_ICON_FOLDER : FONT_ICON_FOLDER_OPEN), RenderIcon ? *pCollapse : 0, &CollapseToggle, 0, "Collapse", IGraphics::CORNER_L, 8.0f))
+			*pCollapse = !*pCollapse;
+
+		RenderIcon = false;
 	}
 
-	return Editor()->DoButton_DraggableEx(pGroupInfo, pText, Checked, &Button, pClicked, pAbrupted, BUTTON_CONTEXT, pToolTip, IGraphics::CORNER_R);
+	auto Color = Editor()->GetButtonColor(pId, Checked, Ui()->MouseInside(&Button));
+	if(pVisible && !*pVisible)
+	{
+		TextRender()->TextColor(ColorRGBA(1.0f, 1.0f, 1.0f, 0.8f));
+		Color.r *= 0.8f;
+		Color.g *= 0.7f;
+		Color.b *= 0.7f;
+	}
+	Button.Draw(Color, pCollapse ? IGraphics::CORNER_R : IGraphics::CORNER_ALL, 3.0f);
+
+	if(RenderIcon)
+	{
+		CUIRect Icon;
+		Button.VSplitLeft(12.0f, &Icon, &Button);
+		DoIcon(Extra.m_pIcon, &Icon, 8.0f);
+	}
+
+	static bool s_Drag = false;
+
+	CUIRect Rect;
+	Button.VMargin(1.0f, &Rect);
+
+	SLabelProperties Props;
+	Props.m_MaxWidth = Rect.w - 15.0f;
+	Props.m_EllipsisAtEnd = true;
+	Props.m_EnableWidthCheck = false;
+	Ui()->DoLabel(&Rect, pText, 10.0f, TEXTALIGN_ML, Props);
+
+	if(Ui()->MouseInside(&Button))
+		Editor()->ms_pUiGotContext = pId;
+
+	Editor()->UpdateTooltip(pId, &Button, pToolTip);
+	bool Clicked, Abrupted;
+	int Result = Ui()->DoDraggableButtonLogic(pId, Checked, &Button, &Clicked, &Abrupted);
+
+	//if(Result)
+	//{
+	//	if(Clicked)
+	//}
+
+	CUIRect ButtonBar;
+	Button.VMargin(1.0f, &ButtonBar);
+
+	if(pVisible)
+	{
+		ButtonBar.VSplitRight(15.0f, &ButtonBar, &VisibleToggle);
+
+		if(DoToggleIconButton(pVisible, pId, *pVisible ? FONT_ICON_EYE : FONT_ICON_EYE_SLASH, !*pVisible, &VisibleToggle, "Toggle visibility"))
+			*pVisible = !*pVisible;
+	}
+
+	TextRender()->TextColor(TextRender()->DefaultTextColor());
+
+	return Result;
 }
 
-std::shared_ptr<IGroup> CLayersView::GetGroupBase(const CEditorGroupInfo *pGroupInfo)
+std::shared_ptr<IGroup> CLayersView::GetGroupBase(const CEditorGroupInfo &GroupInfo)
 {
-	switch(pGroupInfo->m_Type)
+	switch(GroupInfo.m_Type)
 	{
 	case CEditorGroupInfo::TYPE_LAYER_GROUP:
-		return std::static_pointer_cast<IGroup>(Editor()->m_Map.m_vpGroups.at(pGroupInfo->m_GroupIndex));
+		return std::static_pointer_cast<IGroup>(Editor()->m_Map.m_vpGroups.at(GroupInfo.m_GroupIndex));
 		return nullptr;
 	case CEditorGroupInfo::TYPE_PARENT_GROUP:
-		return std::static_pointer_cast<IGroup>(Editor()->m_Map.m_vpGroupParents.at(pGroupInfo->m_GroupIndex));
+		return std::static_pointer_cast<IGroup>(Editor()->m_Map.m_vpGroupParents.at(GroupInfo.m_GroupIndex));
 	default:
 		return nullptr;
 	}
+}
+
+int CLayersView::DoToggleIconButton(const void *pButtonId, const void *pParentId, const char *pIcon, bool Checked, const CUIRect *pRect, const char *pToolTip)
+{
+	if(Checked || (pParentId != nullptr && Ui()->HotItem() == pParentId) || Ui()->HotItem() == pButtonId)
+		DoIcon(pIcon, pRect, 8.0f);
+
+	Editor()->UpdateTooltip(pButtonId, pRect, pToolTip);
+	return Ui()->DoButtonLogic(pButtonId, 0, pRect);
+}
+
+void CLayersView::DoIcon(const char *pIcon, const CUIRect *pRect, float FontSize)
+{
+	TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
+	TextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_ONLY_ADVANCE_WIDTH | ETextRenderFlags::TEXT_RENDER_FLAG_NO_X_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_Y_BEARING);
+	Ui()->DoLabel(pRect, pIcon, FontSize, TEXTALIGN_MC);
+	TextRender()->SetRenderFlags(0);
+	TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
+}
+
+CToggleFlags CLayersView::GroupFlags(const CEditorGroupInfo &GroupInfo)
+{
+	std::shared_ptr<IGroup> pGroupBase = GetGroupBase(GroupInfo);
+
+	CToggleFlags Flags;
+	Flags[CToggleFlags::TOGGLE_COLLAPSE] = &pGroupBase->m_Collapse;
+	Flags[CToggleFlags::TOGGLE_VISIBILE] = &pGroupBase->m_Visible;
+
+	return Flags;
+}
+
+CToggleFlags CLayersView::LayerFlags(const std::shared_ptr<CLayer> &pLayer)
+{
+	CToggleFlags Flags;
+	Flags[CToggleFlags::TOGGLE_VISIBILE] = &pLayer->m_Visible;
+	return Flags;
+}
+
+// ------------------------------------------------------------
+
+struct CTreeViewItem
+{
+	bool m_Selected;
+	CUIRect m_Rect;
+};
+
+class CTreeView
+{
+public:
+	CTreeView(CEditor *pEditor) :
+		m_pEditor(pEditor), m_ItemHeight(12.0f), m_Indent(12.0f), m_View({}), m_AutoSpacing(0), m_ItemIndex(0), m_vpSelection(), m_pDragId(nullptr)
+	{
+	}
+
+	void Start(const CUIRect *pView, float Indent, float ItemHeight, const std::vector<void *> vpSelection)
+	{
+		m_View = *pView;
+		m_Indent = Indent;
+		m_ItemHeight = ItemHeight;
+		m_ItemIndex = 0;
+		m_vpSelection = vpSelection;
+	}
+
+	const std::vector<void *> &End()
+	{
+		return m_vpSelection;
+	}
+
+	CTreeViewItem DoNode(void *pId)
+	{
+		CTreeViewItem Item{};
+
+		if(m_AutoSpacing > 0.0f && m_ItemIndex > 0)
+			DoSpacing(m_AutoSpacing);
+
+		m_View.HSplitTop(m_ItemHeight, &Item.m_Rect, &m_View);
+
+		auto Position = std::find(m_vpSelection.begin(), m_vpSelection.end(), pId);
+		bool Selected = Position != m_vpSelection.end();
+
+		bool Clicked, Abrupted;
+		int Result = m_pEditor->Ui()->DoDraggableButtonLogic(pId, Selected, &Item.m_Rect, &Clicked, &Abrupted);
+
+		if(Result > 0)
+		{
+			if(m_pClickedId == nullptr)
+			{
+				m_pClickedId = pId;
+				m_InitialMouseY = m_pEditor->Ui()->MouseY();
+			}
+
+			if(m_pClickedId == pId && absolute(m_pEditor->Ui()->MouseY() - m_InitialMouseY) > 5.0f)
+				m_pDragId = pId;
+
+			if(Clicked && !Abrupted && !m_pDragId)
+			{
+				if(Result == 1)
+				{
+					Selected = !Selected;
+					if(Selected)
+						m_vpSelection.push_back(pId);
+					else
+						m_vpSelection.erase(Position);
+				}
+				else if(Result == 2)
+				{
+					// Context
+				}
+			}
+
+			if(Abrupted)
+				m_pDragId = nullptr;
+		}
+		else if(m_pDragId == pId)
+			m_pDragId = nullptr;
+
+		Item.m_Selected = Selected;
+
+		if(m_pDragId == pId)
+			Item.m_Rect.y = m_pEditor->Ui()->MouseY();
+
+		m_ItemIndex++;
+		return Item;
+	}
+
+	void DoAutoSpacing(float Spacing)
+	{
+		m_AutoSpacing = Spacing;
+	}
+
+	void DoSpacing(float Spacing)
+	{
+		m_View.HSplitTop(Spacing, nullptr, &m_View);
+	}
+
+	void PushTree()
+	{
+		m_View.VSplitLeft(m_Indent, nullptr, &m_View);
+	}
+
+	void PopTree()
+	{
+		m_View.VSplitLeft(-m_Indent, nullptr, &m_View);
+	}
+
+private:
+	CEditor *m_pEditor;
+	CUIRect m_View;
+	float m_Indent;
+	float m_AutoSpacing;
+	float m_ItemHeight;
+	int m_ItemIndex;
+	std::vector<void *> m_vpSelection;
+	void *m_pDragId;
+	void *m_pClickedId;
+	float m_InitialMouseY;
+};
+
+void Test()
+{
+	CEditor *pEditor;
+	int Id;
+}
+
+void CLayersView::OnRender(CUIRect View)
+{
+	static CTreeView s_TreeView(Editor());
+
+	static auto &&DoBtn = [&](const void *pId, const char *pText, bool Checked, const CUIRect *pRect) {
+		auto Color = Editor()->GetButtonColor(pId, Checked);
+		pRect->Draw(Color, IGraphics::CORNER_ALL, 3.0f);
+		Editor()->Ui()->DoLabel(pRect, pText, 10.0f, TEXTALIGN_ML);
+		return Editor()->Ui()->DoButtonLogic(pId, Checked, pRect);
+	};
+
+	CUIRect Test;
+	View.VSplitLeft(200.0f, nullptr, &Test);
+	Test.VSplitLeft(200.0f, &Test, nullptr);
+
+	static int Id0, Id1, Id2;
+	static bool Collapse = false;
+
+	static std::vector<void *> s_vpSelection;
+
+	s_TreeView.Start(&Test, 12.0f, 12.0f, s_vpSelection);
+	s_TreeView.DoAutoSpacing(4.0f);
+
+	auto Item = s_TreeView.DoNode(&Id0);
+	CUIRect CollapseBtn;
+	Item.m_Rect.VSplitLeft(15.0f, &CollapseBtn, &Item.m_Rect);
+	if(DoBtn(&Collapse, "?", Collapse, &CollapseBtn))
+		Collapse = !Collapse;
+	DoBtn(&Id0, "Parent", Item.m_Selected, &Item.m_Rect);
+
+	if(!Collapse)
+	{
+		s_TreeView.PushTree();
+		auto Child = s_TreeView.DoNode(&Id2);
+		DoBtn(&Id2, "Child", Child.m_Selected, &Child.m_Rect);
+		s_TreeView.PopTree();
+	}
+
+	Item = s_TreeView.DoNode(&Id1);
+	DoBtn(&Id1, "Parent", Item.m_Selected, &Item.m_Rect);
+
+	s_vpSelection = s_TreeView.End();
 }

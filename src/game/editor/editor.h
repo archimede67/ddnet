@@ -938,6 +938,7 @@ public:
 	void DrawAxis(EAxis Axis, CPoint &OriginalPoint, CPoint &Point) const;
 	void DrawAABB(const SAxisAlignedBoundingBox &AABB, int OffsetX = 0, int OffsetY = 0) const;
 	ColorRGBA GetButtonColor(const void *pId, int Checked);
+	ColorRGBA GetButtonColor(const void *pId, int Checked, bool Hovered);
 
 	// Alignment methods
 	// These methods take `OffsetX` and `OffsetY` because the calculations are made with the original positions

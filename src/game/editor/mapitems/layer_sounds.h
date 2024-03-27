@@ -25,6 +25,9 @@ public:
 	std::shared_ptr<CLayer> Duplicate() const override;
 	const char *TypeName() const override;
 
+	inline const char *Icon() const override { return FONT_ICON_MUSIC; }
+
+public:
 	int m_Sound;
 	std::vector<CSoundSource> m_vSources;
 };

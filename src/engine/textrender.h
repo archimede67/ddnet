@@ -149,7 +149,12 @@ MAYBE_UNUSED static const char *FONT_ICON_REDO = "\xEF\x8B\xB9";
 MAYBE_UNUSED static const char *FONT_ICON_ARROWS_ROTATE = "\xEF\x80\xA1";
 MAYBE_UNUSED static const char *FONT_ICON_QUESTION = "?";
 
-MAYBE_UNUSED static const char *FONT_ICON_LAYERS_GROUP = "\xEF\x97\xBD";
+MAYBE_UNUSED static const char *FONT_ICON_SHAPES = "\xEF\x98\x9F"; // Quads
+MAYBE_UNUSED static const char *FONT_ICON_TOGGLE_ON = "\xEF\x88\x85"; // Switch
+MAYBE_UNUSED static const char *FONT_ICON_GRIP = "\xEF\x96\x8D"; // Tiles
+MAYBE_UNUSED static const char *FONT_ICON_SLIDERS_H = "\xEF\x87\x9E"; // Tune
+MAYBE_UNUSED static const char *FONT_ICON_ANGLE_DOUBLE_UP = "\xEF\x84\x82"; // Speedup
+MAYBE_UNUSED static const char *FONT_ICON_BORDER_NONE = "\xEF\xA1\x90"; // Entities (Game)
 } // end namespace FontIcons
 
 enum ETextCursorSelectionMode

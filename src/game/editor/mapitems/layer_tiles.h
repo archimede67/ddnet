@@ -130,6 +130,8 @@ public:
 	std::shared_ptr<CLayer> Duplicate() const override;
 	const char *TypeName() const override;
 
+	inline virtual const char *Icon() const override { return FONT_ICON_GRIP; }
+
 	virtual void ShowInfo();
 	CUi::EPopupMenuFunctionResult RenderProperties(CUIRect *pToolbox) override;
 

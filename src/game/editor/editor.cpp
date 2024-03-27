@@ -120,6 +120,11 @@ bool CEditor::DoClearableEditBox(CLineInput *pLineInput, const CUIRect *pRect, f
 
 ColorRGBA CEditor::GetButtonColor(const void *pId, int Checked)
 {
+	return GetButtonColor(pId, Checked, Ui()->HotItem() == pId);
+}
+
+ColorRGBA CEditor::GetButtonColor(const void *pId, int Checked, bool Hovered)
+{
 	if(Checked < 0)
 		return ColorRGBA(0, 0, 0, 0.5f);
 
@@ -128,42 +133,42 @@ ColorRGBA CEditor::GetButtonColor(const void *pId, int Checked)
 	case 8: // invisible
 		return ColorRGBA(0, 0, 0, 0);
 	case 7: // selected + game layers
-		if(Ui()->HotItem() == pId)
+		if(Hovered)
 			return ColorRGBA(1, 0, 0, 0.4f);
 		return ColorRGBA(1, 0, 0, 0.2f);
 
 	case 6: // game layers
-		if(Ui()->HotItem() == pId)
+		if(Hovered)
 			return ColorRGBA(1, 1, 1, 0.4f);
 		return ColorRGBA(1, 1, 1, 0.2f);
 
 	case 5: // selected + image/sound should be embedded
-		if(Ui()->HotItem() == pId)
+		if(Hovered)
 			return ColorRGBA(1, 0, 0, 0.75f);
 		return ColorRGBA(1, 0, 0, 0.5f);
 
 	case 4: // image/sound should be embedded
-		if(Ui()->HotItem() == pId)
+		if(Hovered)
 			return ColorRGBA(1, 0, 0, 1.0f);
 		return ColorRGBA(1, 0, 0, 0.875f);
 
 	case 3: // selected + unused image/sound
-		if(Ui()->HotItem() == pId)
+		if(Hovered)
 			return ColorRGBA(1, 0, 1, 0.75f);
 		return ColorRGBA(1, 0, 1, 0.5f);
 
 	case 2: // unused image/sound
-		if(Ui()->HotItem() == pId)
+		if(Hovered)
 			return ColorRGBA(0, 0, 1, 0.75f);
 		return ColorRGBA(0, 0, 1, 0.5f);
 
 	case 1: // selected
-		if(Ui()->HotItem() == pId)
+		if(Hovered)
 			return ColorRGBA(1, 0, 0, 0.75f);
 		return ColorRGBA(1, 0, 0, 0.5f);
 
 	default: // regular
-		if(Ui()->HotItem() == pId)
+		if(Hovered)
 			return ColorRGBA(1, 1, 1, 0.75f);
 		return ColorRGBA(1, 1, 1, 0.5f);
 	}
