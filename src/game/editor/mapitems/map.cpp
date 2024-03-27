@@ -6,7 +6,7 @@ void CEditorMap::OnModify()
 {
 	m_Modified = true;
 	m_ModifiedAuto = true;
-	m_LastModifiedTime = m_pEditor->Client()->GlobalTime();
+	m_LastModifiedTime = m_pEditor->Client()->GlobalTime() + m_Test[0];
 }
 
 void CEditorMap::DeleteEnvelope(int Index)

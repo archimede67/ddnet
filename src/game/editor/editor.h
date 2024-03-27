@@ -47,6 +47,8 @@
 #include <string>
 #include <vector>
 
+#include <unordered_map>
+
 typedef std::function<void(int *pIndex)> FIndexModifyFunction;
 template<typename T>
 using FDropdownRenderCallback = std::function<void(const T &, char (&aOutput)[128], std::vector<STextColorSplit> &)>;
@@ -74,10 +76,12 @@ class CEditorMap
 
 public:
 	CEditor *m_pEditor;
+	std::unordered_map<int, int> m_Test;
 
 	CEditorMap()
 	{
 		Clean();
+		m_Test[0] = 2;
 	}
 
 	~CEditorMap()
