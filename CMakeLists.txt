@@ -2299,6 +2299,8 @@ if(CLIENT)
     ui_rect.h
     ui_scrollregion.cpp
     ui_scrollregion.h
+    ui_treeview.cpp
+    ui_treeview.h
   )
   set_src(GAME_EDITOR GLOB_RECURSE src/game/editor
     component.cpp

@@ -57,7 +57,24 @@ struct SEditorSelectableInfo
 	int m_Index;
 };
 
-// TODO: have an object that points to anything based on a type enum, used to render? So we can store bounding box/rect used to render
+// Idea: decouple actual objects from the UI
+struct CTreeNode
+{
+	char m_aName[64];
+	int m_Type;
+	std::shared_ptr<ITreeNode> m_pData;
+	std::vector<std::shared_ptr<CTreeNode>> m_vpChildren;
+
+	enum
+	{
+		TYPE_NONE = -1,
+		TYPE_LAYER,
+		TYPE_LAYER_GROUP,
+		TYPE_FOLDER,
+	};
+};
+
+class CTreeView;
 
 class CLayersView : public CEditorComponent
 {
@@ -65,24 +82,13 @@ public:
 	void Init(CEditor *pEditor) override;
 
 	void Render(CUIRect LayersBox);
-	void OnRender(CUIRect View) override;
+	//void OnRender(CUIRect View) override;
+
+	//void InternalRender(CTreeView &, const std::shared_ptr<TreeNode> &);
 
 private:
-	struct SDragContext
-	{
-		int m_GroupAfterDraggedLayer;
-		int m_LayerAfterDraggedLayer;
-		bool m_DraggedPositionFound;
-		bool m_MoveLayers;
-		bool m_MoveGroup;
-		bool m_StartDragLayer;
-		bool m_StartDragGroup;
-	};
-
 	struct SRenderContext
 	{
-		CUIRect m_UnscrolledLayersBox;
-		std::vector<int> m_vButtonsPerGroup;
 		bool m_ScrollToSelection;
 	};
 
@@ -92,23 +98,9 @@ private:
 	};
 
 private:
-	enum
-	{
-		OP_NONE = 0,
-		OP_CLICK,
-		OP_LAYER_DRAG,
-		OP_GROUP_DRAG
-	};
-
-	int m_Operation = OP_NONE;
-	int m_PreviousOperation = OP_NONE;
-	const void *m_pDraggedButton = nullptr;
-	float m_InitialMouseY = 0;
-	float m_InitialCutHeight = 0;
 	CScrollRegion m_ScrollRegion;
 	bool m_ScrollToSelectionNext;
 
-	SDragContext m_DragContext;
 	SRenderContext m_RenderContext;
 	SParentGroupPopupContext m_ParentPopupContext;
 
@@ -118,12 +110,10 @@ private:
 	void RenderLayersGroup(CUIRect *pRect, const CEditorGroupInfo &Info);
 	void RenderParentGroup(CUIRect *pRect, int Index, const CEditorGroupInfo &Info);
 
-	void SetOperation(int Operation);
-	inline void ResetDragContext();
 	inline void ResetRenderContext();
 
 	int DoSelectable(const void *pId, const char *pText, const CToggleFlags &Flags, int Checked, const CUIRect *pRect, const char *pToolTip, const SExtraRenderInfo &Extra = {});
-	std::shared_ptr<IGroup> GetGroupBase(const CEditorGroupInfo &pGroupInfo);
+	//std::shared_ptr<IGroup> GetGroupBase(const CEditorGroupInfo &pGroupInfo);
 
 	int DoToggleIconButton(const void *pButtonId, const void *pParentId, const char *pIcon, bool Checked, const CUIRect *pRect, const char *pToolTip);
 	void DoIcon(const char *pIcon, const CUIRect *pRect, float FontSize);
@@ -131,9 +121,9 @@ private:
 	CToggleFlags GroupFlags(const CEditorGroupInfo &pGroupInfo);
 	CToggleFlags LayerFlags(const std::shared_ptr<CLayer> &pLayer);
 
+	bool CanHandleInput() const;
+
 private:
-	static constexpr float MIN_DRAG_DISTANCE = 5.0f;
-	static constexpr float INDENT = 12.0f;
 	static constexpr float ROW_HEIGHT = 12.0f;
 };
 

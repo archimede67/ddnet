@@ -7716,6 +7716,8 @@ void CEditor::Init()
 	m_aCursorTextures[CURSOR_NORMAL] = Graphics()->LoadTexture("editor/cursor.png", IStorage::TYPE_ALL);
 	m_aCursorTextures[CURSOR_RESIZE_H] = Graphics()->LoadTexture("editor/cursor_resize.png", IStorage::TYPE_ALL);
 	m_aCursorTextures[CURSOR_RESIZE_V] = m_aCursorTextures[CURSOR_RESIZE_H];
+	m_aCursorTextures[CURSOR_NOT_ALLOWED] = Graphics()->LoadTexture("editor/cursor_not_allowed.png", IStorage::TYPE_ALL);
+	m_aCursorTextures[CURSOR_MOVE_HERE] = Graphics()->LoadTexture("editor/cursor_move_here.png", IStorage::TYPE_ALL);
 
 	m_pTilesetPicker = std::make_shared<CLayerTiles>(this, 16, 16);
 	m_pTilesetPicker->MakePalette();

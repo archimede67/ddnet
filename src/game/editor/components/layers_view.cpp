@@ -7,7 +7,8 @@
 #include <game/editor/mapitems/image.h>
 #include <game/editor/mapitems/sound.h>
 #include <game/editor/popups.h>
-#include <iterator>
+
+#include <game/client/ui_treeview.h>
 
 using namespace FontIcons;
 
@@ -17,8 +18,6 @@ void CLayersView::Init(CEditor *pEditor)
 
 	m_ScrollToSelectionNext = false;
 	m_ParentPopupContext.m_pEditor = pEditor;
-
-	SetOperation(OP_NONE);
 }
 
 void CLayersView::Render(CUIRect LayersBox)
@@ -28,7 +27,6 @@ void CLayersView::Render(CUIRect LayersBox)
 	//auto &SelectedGroup = Editor()->m_SelectedGroup;
 	//auto &vSelectedLayers = Editor()->m_vSelectedLayers;
 
-	ResetDragContext();
 	ResetRenderContext();
 
 	CUIRect UnscrolledLayersBox = LayersBox;
@@ -40,45 +38,6 @@ void CLayersView::Render(CUIRect LayersBox)
 	ScrollParams.m_ScrollUnit = ROW_HEIGHT * 5.0f;
 	m_ScrollRegion.Begin(&LayersBox, &ScrollOffset, &ScrollParams);
 	LayersBox.y += ScrollOffset.y;
-
-	m_RenderContext.m_vButtonsPerGroup.reserve(Map.m_vpGroups.size());
-	for(const std::shared_ptr<CLayerGroup> &pGroup : Map.m_vpGroups)
-	{
-		m_RenderContext.m_vButtonsPerGroup.push_back(pGroup->m_vpLayers.size() + 1);
-	}
-
-	if(m_pDraggedButton != nullptr && Ui()->ActiveItem() != m_pDraggedButton)
-	{
-		SetOperation(OP_NONE);
-	}
-
-	//if(m_Operation == OP_LAYER_DRAG || m_Operation == OP_GROUP_DRAG)
-	//{
-	//	float MinDraggableValue = UnscrolledLayersBox.y;
-	//	float MaxDraggableValue = MinDraggableValue;
-	//	for(int NumButtons : m_RenderContext.m_vButtonsPerGroup)
-	//	{
-	//		MaxDraggableValue += NumButtons * (ROW_HEIGHT + 2.0f) + 5.0f;
-	//	}
-	//	MaxDraggableValue += ScrollOffset.y;
-
-	//	if(m_Operation == OP_GROUP_DRAG)
-	//	{
-	//		MaxDraggableValue -= m_RenderContext.m_vButtonsPerGroup[SelectedGroup] * (ROW_HEIGHT + 2.0f) + 5.0f;
-	//	}
-	//	else if(m_Operation == OP_LAYER_DRAG)
-	//	{
-	//		MinDraggableValue += ROW_HEIGHT + 2.0f;
-	//		MaxDraggableValue -= vSelectedLayers.size() * (ROW_HEIGHT + 2.0f) + 5.0f;
-	//	}
-
-	//	UnscrolledLayersBox.HSplitTop(m_InitialCutHeight, nullptr, &UnscrolledLayersBox);
-	//	UnscrolledLayersBox.y -= m_InitialMouseY - Ui()->MouseY();
-
-	//	UnscrolledLayersBox.y = clamp(UnscrolledLayersBox.y, MinDraggableValue, MaxDraggableValue);
-
-	//	UnscrolledLayersBox.w = LayersBox.w;
-	//}
 
 	m_RenderContext.m_ScrollToSelection = pEditor->LayerSelector()->SelectByTile() || m_ScrollToSelectionNext;
 	m_ScrollToSelectionNext = false;
@@ -114,116 +73,10 @@ void CLayersView::Render(CUIRect LayersBox)
 		}
 	}
 
-	auto &[GroupAfterDraggedLayer, LayerAfterDraggedLayer, DraggedPositionFound, MoveLayers, MoveGroup, StartDragLayer, StartDragGroup] = m_DragContext;
-
-	//if(!DraggedPositionFound && m_Operation == OP_LAYER_DRAG)
-	//{
-	//	GroupAfterDraggedLayer = Map.m_vpGroups.size();
-	//	LayerAfterDraggedLayer = Map.m_vpGroups[GroupAfterDraggedLayer - 1]->m_vpLayers.size();
-
-	//	CUIRect TmpSlot;
-	//	LayersBox.HSplitTop(vSelectedLayers.size() * (ROW_HEIGHT + 2.0f), &TmpSlot, &LayersBox);
-	//	m_ScrollRegion.AddRect(TmpSlot);
-	//}
-
-	//if(!DraggedPositionFound && m_Operation == OP_GROUP_DRAG)
-	//{
-	//	GroupAfterDraggedLayer = Map.m_vpGroups.size();
-
-	//	CUIRect TmpSlot;
-	//	if(Map.m_vpGroups[SelectedGroup]->m_Collapse)
-	//		LayersBox.HSplitTop(ROW_HEIGHT + 7.0f, &TmpSlot, &LayersBox);
-	//	else
-	//		LayersBox.HSplitTop(m_RenderContext.m_vButtonsPerGroup[SelectedGroup] * (ROW_HEIGHT + 2.0f) + 5.0f, &TmpSlot, &LayersBox);
-	//	m_ScrollRegion.AddRect(TmpSlot, false);
-	//}
-
-	//if(MoveLayers && 1 <= GroupAfterDraggedLayer && GroupAfterDraggedLayer <= (int)Map.m_vpGroups.size())
-	//{
-	//	std::vector<std::shared_ptr<CLayer>> &vpNewGroupLayers = Map.m_vpGroups[GroupAfterDraggedLayer - 1]->m_vpLayers;
-	//	if(0 <= LayerAfterDraggedLayer && LayerAfterDraggedLayer <= (int)vpNewGroupLayers.size())
-	//	{
-	//		std::vector<std::shared_ptr<CLayer>> vpSelectedLayers;
-	//		std::vector<std::shared_ptr<CLayer>> &vpSelectedGroupLayers = Map.m_vpGroups[SelectedGroup]->m_vpLayers;
-	//		std::shared_ptr<CLayer> pNextLayer = nullptr;
-	//		if(LayerAfterDraggedLayer < (int)vpNewGroupLayers.size())
-	//			pNextLayer = vpNewGroupLayers[LayerAfterDraggedLayer];
-
-	//		std::sort(vSelectedLayers.begin(), vSelectedLayers.end(), std::greater<>());
-	//		for(int k : vSelectedLayers)
-	//		{
-	//			vpSelectedLayers.insert(vpSelectedLayers.begin(), vpSelectedGroupLayers[k]);
-	//		}
-	//		for(int k : vSelectedLayers)
-	//		{
-	//			vpSelectedGroupLayers.erase(vpSelectedGroupLayers.begin() + k);
-	//		}
-
-	//		auto InsertPosition = std::find(vpNewGroupLayers.begin(), vpNewGroupLayers.end(), pNextLayer);
-	//		int InsertPositionIndex = InsertPosition - vpNewGroupLayers.begin();
-	//		vpNewGroupLayers.insert(InsertPosition, vpSelectedLayers.begin(), vpSelectedLayers.end());
-
-	//		int NumSelectedLayers = vSelectedLayers.size();
-	//		vSelectedLayers.clear();
-	//		for(int i = 0; i < NumSelectedLayers; i++)
-	//			vSelectedLayers.push_back(InsertPositionIndex + i);
-
-	//		SelectedGroup = GroupAfterDraggedLayer - 1;
-	//		Map.OnModify();
-	//	}
-	//}
-
-	//if(MoveGroup && 0 <= GroupAfterDraggedLayer && GroupAfterDraggedLayer <= (int)Map.m_vpGroups.size())
-	//{
-	//	std::shared_ptr<CLayerGroup> pSelectedGroup = Map.m_vpGroups[SelectedGroup];
-	//	std::shared_ptr<CLayerGroup> pNextGroup = nullptr;
-	//	if(GroupAfterDraggedLayer < (int)Map.m_vpGroups.size())
-	//		pNextGroup = Map.m_vpGroups[GroupAfterDraggedLayer];
-
-	//	Map.m_vpGroups.erase(Map.m_vpGroups.begin() + SelectedGroup);
-
-	//	auto InsertPosition = std::find(Map.m_vpGroups.begin(), Map.m_vpGroups.end(), pNextGroup);
-	//	Map.m_vpGroups.insert(InsertPosition, pSelectedGroup);
-
-	//	auto Pos = std::find(Map.m_vpGroups.begin(), Map.m_vpGroups.end(), pSelectedGroup);
-	//	SelectedGroup = Pos - Map.m_vpGroups.begin();
-
-	//	Map.OnModify();
-	//}
-
 	static int s_InitialGroupIndex;
 	static std::vector<int> s_vInitialLayerIndices;
 
-	//if(MoveLayers || MoveGroup)
-	//{
-	//	SetOperation(OP_NONE);
-	//}
-	//if(StartDragLayer)
-	//{
-	//	SetOperation(OP_LAYER_DRAG);
-	//	s_InitialGroupIndex = SelectedGroup;
-	//	s_vInitialLayerIndices = std::vector(vSelectedLayers);
-	//}
-	//if(StartDragGroup)
-	//{
-	//	s_InitialGroupIndex = SelectedGroup;
-	//	SetOperation(OP_GROUP_DRAG);
-	//}
-
-	//if(m_Operation == OP_LAYER_DRAG || m_Operation == OP_GROUP_DRAG)
-	//{
-	//	if(m_pDraggedButton == nullptr)
-	//	{
-	//		SetOperation(OP_NONE);
-	//	}
-	//	else
-	//	{
-	//		m_ScrollRegion.DoEdgeScrolling();
-	//		Ui()->SetActiveItem(m_pDraggedButton);
-	//	}
-	//}
-
-	if(Input()->KeyPress(KEY_DOWN) && Editor()->m_Dialog == DIALOG_NONE && CLineInput::GetActiveInput() == nullptr && m_Operation == OP_NONE)
+	if(Input()->KeyPress(KEY_DOWN) && CanHandleInput())
 	{
 		if(Input()->ShiftIsPressed())
 		{
@@ -255,7 +108,7 @@ void CLayersView::Render(CUIRect LayersBox)
 		}
 		m_ScrollToSelectionNext = true;
 	}
-	if(Input()->KeyPress(KEY_UP) && Editor()->m_Dialog == DIALOG_NONE && CLineInput::GetActiveInput() == nullptr && m_Operation == OP_NONE)
+	if(Input()->KeyPress(KEY_UP) && CanHandleInput())
 	{
 		if(Input()->ShiftIsPressed())
 		{
@@ -303,472 +156,250 @@ void CLayersView::Render(CUIRect LayersBox)
 	}
 
 	m_ScrollRegion.End();
-
-	if(m_Operation == OP_NONE)
-	{
-		//if(m_PreviousOperation == OP_GROUP_DRAG)
-		//{
-		//	m_PreviousOperation = OP_NONE;
-		//	Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionEditGroupProp>(Editor(), SelectedGroup, EGroupProp::PROP_ORDER, s_InitialGroupIndex, SelectedGroup));
-		//}
-		//else if(m_PreviousOperation == OP_LAYER_DRAG)
-		//{
-		//	if(s_InitialGroupIndex != SelectedGroup)
-		//	{
-		//		Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionEditLayersGroupAndOrder>(Editor(), s_InitialGroupIndex, s_vInitialLayerIndices, SelectedGroup, vSelectedLayers));
-		//	}
-		//	else
-		//	{
-		//		std::vector<std::shared_ptr<IEditorAction>> vpActions;
-		//		std::vector<int> vLayerIndices = vSelectedLayers;
-		//		std::sort(vLayerIndices.begin(), vLayerIndices.end());
-		//		std::sort(s_vInitialLayerIndices.begin(), s_vInitialLayerIndices.end());
-		//		for(int k = 0; k < (int)vLayerIndices.size(); k++)
-		//		{
-		//			int LayerIndex = vLayerIndices[k];
-		//			vpActions.push_back(std::make_shared<CEditorActionEditLayerProp>(Editor(), SelectedGroup, LayerIndex, ELayerProp::PROP_ORDER, s_vInitialLayerIndices[k], LayerIndex));
-		//		}
-		//		Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionBulk>(Editor(), vpActions, nullptr, true));
-		//	}
-		//	m_PreviousOperation = OP_NONE;
-		//}
-	}
 }
 
-void CLayersView::RenderParentGroup(CUIRect *pRect, int Index, const CEditorGroupInfo &Info)
-{
-	char aBuf[64];
-	CEditorMap &Map = Editor()->m_Map;
-
-	int g = Info.m_GroupIndex;
-	std::shared_ptr<CEditorParentGroup> &pGroupParent = Map.m_vpGroupParents.at(g);
-
-	std::vector<int> vChildren;
-	for(size_t k = 0; k < Map.m_vGroupInfos.size(); k++)
-	{
-		if(Map.m_vGroupInfos[k].m_ParentIndex == Index)
-			vChildren.push_back(k);
-	}
-
-	CUIRect Slot;
-	pRect->HSplitTop(ROW_HEIGHT, &Slot, pRect);
-
-	CUIRect TmpRect;
-	pRect->HSplitTop(2.0f, &TmpRect, pRect);
-	m_ScrollRegion.AddRect(TmpRect);
-
-	if(m_ScrollRegion.AddRect(Slot))
-	{
-		str_format(aBuf, sizeof(aBuf), "%s", pGroupParent->m_aName);
-
-		bool Clicked = false;
-		bool Abrupted = false;
-
-		if(int Result = DoSelectable(&Info, aBuf, GroupFlags(Info), 0, &Slot, "Something I guess"))
-		{
-			if(Clicked)
-			{
-				if(Result == 2)
-				{
-					m_ParentPopupContext.m_GroupInfoIndex = Index;
-					Ui()->DoPopupMenu(&m_ParentPopupContext, Ui()->MouseX(), Ui()->MouseY(), 145, 120, &m_ParentPopupContext, Editor()->PopupParentGroup);
-				}
-
-				if(!vChildren.empty() && Input()->MouseDoubleClick())
-					pGroupParent->m_Collapse ^= 1;
-			}
-		}
-	}
-
-	if(!pGroupParent->m_Collapse)
-	{
-		int StartY = pRect->y;
-
-		// Render childrens
-		CUIRect ChildrenBox = *pRect;
-		ChildrenBox.VSplitLeft(INDENT, nullptr, &ChildrenBox);
-		for(int Child : vChildren)
-		{
-			CEditorGroupInfo &ChildInfo = Map.m_vGroupInfos.at(Child);
-			if(ChildInfo.m_Type == CEditorGroupInfo::TYPE_LAYER_GROUP)
-				RenderLayersGroup(&ChildrenBox, ChildInfo);
-			else if(ChildInfo.m_Type == CEditorGroupInfo::TYPE_PARENT_GROUP)
-				RenderParentGroup(&ChildrenBox, Child, ChildInfo);
-		}
-		int EndY = ChildrenBox.y;
-
-		CUIRect IndentIndicator;
-		pRect->VSplitLeft(4.0f, nullptr, &IndentIndicator);
-		IndentIndicator.VSplitLeft(1.0f, &IndentIndicator, nullptr);
-		IndentIndicator.h = EndY - StartY - 4.0f;
-		IndentIndicator.Draw(ColorRGBA(0.6f, 0.6f, 0.6f, 0.4f), IGraphics::CORNER_NONE, 0.0f);
-
-		pRect->y = EndY;
-	}
-	else
-	{
-		pRect->HSplitTop(5.0f, &Slot, pRect);
-		m_ScrollRegion.AddRect(Slot);
-	}
-}
-
-void CLayersView::RenderLayersGroup(CUIRect *pRect, const CEditorGroupInfo &Info)
-{
-	char aBuf[64];
-	CEditorMap &Map = Editor()->m_Map;
-	auto &SelectedGroup = Editor()->m_SelectedGroup;
-	auto &vSelectedLayers = Editor()->m_vSelectedLayers;
-
-	auto &[GroupAfterDraggedLayer, LayerAfterDraggedLayer, DraggedPositionFound, MoveLayers, MoveGroup, StartDragLayer, StartDragGroup] = m_DragContext;
-	auto &[UnscrolledLayersBox, vButtonsPerGroup, ScrollToSelection] = m_RenderContext;
-
-	int g = Info.m_GroupIndex;
-
-	if(m_Operation == OP_LAYER_DRAG && g > 0 && !DraggedPositionFound && Ui()->MouseY() < pRect->y + ROW_HEIGHT / 2)
-	{
-		DraggedPositionFound = true;
-		GroupAfterDraggedLayer = g;
-
-		LayerAfterDraggedLayer = Map.m_vpGroups[g - 1]->m_vpLayers.size();
-
-		CUIRect Slot;
-		pRect->HSplitTop(vSelectedLayers.size() * (ROW_HEIGHT + 2.0f), &Slot, pRect);
-		m_ScrollRegion.AddRect(Slot);
-	}
-
-	CUIRect Slot, VisibleToggle;
-	if(m_Operation == OP_GROUP_DRAG)
-	{
-		if(g == SelectedGroup)
-		{
-			UnscrolledLayersBox.HSplitTop(ROW_HEIGHT, &Slot, &UnscrolledLayersBox);
-			UnscrolledLayersBox.HSplitTop(2.0f, nullptr, &UnscrolledLayersBox);
-		}
-		else if(!DraggedPositionFound && Ui()->MouseY() < pRect->y + ROW_HEIGHT * vButtonsPerGroup[g] / 2 + 3.0f)
-		{
-			DraggedPositionFound = true;
-			GroupAfterDraggedLayer = g;
-
-			CUIRect TmpSlot;
-			if(Map.m_vpGroups[SelectedGroup]->m_Collapse)
-				pRect->HSplitTop(ROW_HEIGHT + 7.0f, &TmpSlot, pRect);
-			else
-				pRect->HSplitTop(vButtonsPerGroup[SelectedGroup] * (ROW_HEIGHT + 2.0f) + 5.0f, &TmpSlot, pRect);
-			m_ScrollRegion.AddRect(TmpSlot, false);
-		}
-	}
-	if(m_Operation != OP_GROUP_DRAG || g != SelectedGroup)
-	{
-		pRect->HSplitTop(ROW_HEIGHT, &Slot, pRect);
-
-		CUIRect TmpRect;
-		pRect->HSplitTop(2.0f, &TmpRect, pRect);
-		m_ScrollRegion.AddRect(TmpRect);
-	}
-
-	if(m_ScrollRegion.AddRect(Slot))
-	{
-		//Slot.VSplitLeft(15.0f, &VisibleToggle, &Slot);
-		//if(Editor()->DoButton_FontIcon(&Map.m_vpGroups[g]->m_Visible, Map.m_vpGroups[g]->m_Visible ? FONT_ICON_EYE : FONT_ICON_EYE_SLASH, Map.m_vpGroups[g]->m_Collapse ? 1 : 0, &VisibleToggle, 0, "Toggle group visibility", IGraphics::CORNER_L, 8.0f))
-		//	Map.m_vpGroups[g]->m_Visible = !Map.m_vpGroups[g]->m_Visible;
-
-		str_format(aBuf, sizeof(aBuf), "#%d %s", g, Map.m_vpGroups[g]->m_aName);
-
-		bool Clicked = false;
-		bool Abrupted = false;
-		SExtraRenderInfo Extra;
-		Extra.m_pIcon = FONT_ICON_LAYER_GROUP;
-		if(int Result = DoSelectable(&Map.m_vpGroups[g], aBuf, GroupFlags(Info), g == SelectedGroup, &Slot, Map.m_vpGroups[g]->m_Collapse ? "Select group. Shift click to select all layers. Double click to expand." : "Select group. Shift click to select all layers. Double click to collapse.", Extra))
-		{
-			if(m_Operation == OP_NONE)
-			{
-				m_InitialMouseY = Ui()->MouseY();
-				m_InitialCutHeight = m_InitialMouseY - UnscrolledLayersBox.y;
-				SetOperation(OP_CLICK);
-
-				if(g != SelectedGroup)
-					Editor()->SelectLayer(0, g);
-			}
-
-			if(Abrupted)
-			{
-				SetOperation(OP_NONE);
-			}
-
-			if(m_Operation == OP_CLICK && absolute(Ui()->MouseY() - m_InitialMouseY) > MIN_DRAG_DISTANCE)
-			{
-				StartDragGroup = true;
-				m_pDraggedButton = Map.m_vpGroups[g].get();
-			}
-
-			if(m_Operation == OP_CLICK && Clicked)
-			{
-				if(g != SelectedGroup)
-					Editor()->SelectLayer(0, g);
-
-				if(Input()->ShiftIsPressed() && SelectedGroup == g)
-				{
-					vSelectedLayers.clear();
-					for(size_t i = 0; i < Map.m_vpGroups[g]->m_vpLayers.size(); i++)
-					{
-						Editor()->AddSelectedLayer(i);
-					}
-				}
-
-				if(Result == 2)
-				{
-					static SPopupMenuId s_PopupGroupId;
-					Ui()->DoPopupMenu(&s_PopupGroupId, Ui()->MouseX(), Ui()->MouseY(), 145, 256, Editor(), Editor()->PopupGroup);
-				}
-
-				if(!Map.m_vpGroups[g]->m_vpLayers.empty() && Input()->MouseDoubleClick())
-					Map.m_vpGroups[g]->m_Collapse ^= 1;
-
-				SetOperation(OP_NONE);
-			}
-
-			if(m_Operation == OP_GROUP_DRAG && Clicked)
-				MoveGroup = true;
-		}
-		else if(m_pDraggedButton == Map.m_vpGroups[g].get())
-		{
-			SetOperation(OP_NONE);
-		}
-	}
-
-	for(int i = 0; i < (int)Map.m_vpGroups[g]->m_vpLayers.size(); i++)
-	{
-		if(Map.m_vpGroups[g]->m_Collapse)
-			continue;
-
-		std::shared_ptr<CLayer> &pLayer = Map.m_vpGroups[g]->m_vpLayers.at(i);
-
-		bool IsLayerSelected = false;
-		if(SelectedGroup == g)
-		{
-			for(const auto &Selected : vSelectedLayers)
-			{
-				if(Selected == i)
-				{
-					IsLayerSelected = true;
-					break;
-				}
-			}
-		}
-
-		if(m_Operation == OP_GROUP_DRAG && g == SelectedGroup)
-		{
-			UnscrolledLayersBox.HSplitTop(ROW_HEIGHT + 2.0f, &Slot, &UnscrolledLayersBox);
-		}
-		else if(m_Operation == OP_LAYER_DRAG)
-		{
-			if(IsLayerSelected)
-			{
-				UnscrolledLayersBox.HSplitTop(ROW_HEIGHT + 2.0f, &Slot, &UnscrolledLayersBox);
-			}
-			else
-			{
-				if(!DraggedPositionFound && Ui()->MouseY() < pRect->y + ROW_HEIGHT / 2)
-				{
-					DraggedPositionFound = true;
-					GroupAfterDraggedLayer = g + 1;
-					LayerAfterDraggedLayer = i;
-					for(size_t j = 0; j < vSelectedLayers.size(); j++)
-					{
-						pRect->HSplitTop(ROW_HEIGHT + 2.0f, nullptr, pRect);
-						m_ScrollRegion.AddRect(Slot);
-					}
-				}
-				pRect->HSplitTop(ROW_HEIGHT + 2.0f, &Slot, pRect);
-				if(!m_ScrollRegion.AddRect(Slot, ScrollToSelection && IsLayerSelected))
-					continue;
-			}
-		}
-		else
-		{
-			pRect->HSplitTop(ROW_HEIGHT + 2.0f, &Slot, pRect);
-			if(!m_ScrollRegion.AddRect(Slot, ScrollToSelection && IsLayerSelected))
-				continue;
-		}
-
-		Slot.HSplitTop(ROW_HEIGHT, &Slot, nullptr);
-
-		CUIRect Button;
-		Slot.VSplitLeft(INDENT, nullptr, &Button);
-		//Slot.VSplitLeft(15.0f, &VisibleToggle, &Button);
-
-		//if(Editor()->DoButton_FontIcon(&Map.m_vpGroups[g]->m_vpLayers[i]->m_Visible, Map.m_vpGroups[g]->m_vpLayers[i]->m_Visible ? FONT_ICON_EYE : FONT_ICON_EYE_SLASH, 0, &VisibleToggle, 0, "Toggle layer visibility", IGraphics::CORNER_L, 8.0f))
-		//Map.m_vpGroups[g]->m_vpLayers[i]->m_Visible = !Map.m_vpGroups[g]->m_vpLayers[i]->m_Visible;
-
-		if(pLayer->m_aName[0])
-			str_copy(aBuf, pLayer->m_aName);
-		else
-		{
-			if(pLayer->m_Type == LAYERTYPE_TILES)
-			{
-				std::shared_ptr<CLayerTiles> pTiles = std::static_pointer_cast<CLayerTiles>(pLayer);
-				str_copy(aBuf, pTiles->m_Image >= 0 ? Map.m_vpImages[pTiles->m_Image]->m_aName : "Tiles");
-			}
-			else if(pLayer->m_Type == LAYERTYPE_QUADS)
-			{
-				std::shared_ptr<CLayerQuads> pQuads = std::static_pointer_cast<CLayerQuads>(pLayer);
-				str_copy(aBuf, pQuads->m_Image >= 0 ? Map.m_vpImages[pQuads->m_Image]->m_aName : "Quads");
-			}
-			else if(pLayer->m_Type == LAYERTYPE_SOUNDS)
-			{
-				std::shared_ptr<CLayerSounds> pSounds = std::static_pointer_cast<CLayerSounds>(pLayer);
-				str_copy(aBuf, pSounds->m_Sound >= 0 ? Map.m_vpSounds[pSounds->m_Sound]->m_aName : "Sounds");
-			}
-		}
-
-		int Checked = IsLayerSelected ? 1 : 0;
-		if(pLayer->IsEntitiesLayer())
-		{
-			Checked += 6;
-		}
-
-		bool Clicked = false;
-		bool Abrupted = false;
-		SExtraRenderInfo Extra;
-		Extra.m_pIcon = pLayer->Icon();
-		if(int Result = DoSelectable(&pLayer, aBuf, LayerFlags(pLayer), Checked, &Button, "Select layer. Shift click to select multiple.", Extra))
-		{
-			if(m_Operation == OP_NONE)
-			{
-				m_InitialMouseY = Ui()->MouseY();
-				m_InitialCutHeight = m_InitialMouseY - UnscrolledLayersBox.y;
-
-				SetOperation(OP_CLICK);
-
-				if(!Input()->ShiftIsPressed() && !IsLayerSelected)
-				{
-					Editor()->SelectLayer(i, g);
-				}
-			}
-
-			if(Abrupted)
-			{
-				SetOperation(OP_NONE);
-			}
-
-			if(m_Operation == OP_CLICK && absolute(Ui()->MouseY() - m_InitialMouseY) > MIN_DRAG_DISTANCE)
-			{
-				bool EntitiesLayerSelected = false;
-				for(int k : vSelectedLayers)
-				{
-					if(Map.m_vpGroups[SelectedGroup]->m_vpLayers[k]->IsEntitiesLayer())
-						EntitiesLayerSelected = true;
-				}
-
-				if(!EntitiesLayerSelected)
-					StartDragLayer = true;
-
-				m_pDraggedButton = pLayer.get();
-			}
-
-			if(m_Operation == OP_CLICK && Clicked)
-			{
-				static CEditor::SLayerPopupContext s_LayerPopupContext = {};
-				s_LayerPopupContext.m_pEditor = Editor();
-				if(Result == 1)
-				{
-					if(Input()->ShiftIsPressed() && SelectedGroup == g)
-					{
-						auto Position = std::find(vSelectedLayers.begin(), vSelectedLayers.end(), i);
-						if(Position != vSelectedLayers.end())
-							vSelectedLayers.erase(Position);
-						else
-							Editor()->AddSelectedLayer(i);
-					}
-					else if(!Input()->ShiftIsPressed())
-					{
-						Editor()->SelectLayer(i, g);
-					}
-				}
-				else if(Result == 2)
-				{
-					s_LayerPopupContext.m_vpLayers.clear();
-					s_LayerPopupContext.m_vLayerIndices.clear();
-
-					if(!IsLayerSelected)
-					{
-						Editor()->SelectLayer(i, g);
-					}
-
-					if(vSelectedLayers.size() > 1)
-					{
-						bool AllTile = true;
-						for(size_t j = 0; AllTile && j < vSelectedLayers.size(); j++)
-						{
-							int LayerIndex = vSelectedLayers[j];
-							if(Map.m_vpGroups[SelectedGroup]->m_vpLayers[LayerIndex]->m_Type == LAYERTYPE_TILES)
-							{
-								s_LayerPopupContext.m_vpLayers.push_back(std::static_pointer_cast<CLayerTiles>(Map.m_vpGroups[SelectedGroup]->m_vpLayers[vSelectedLayers[j]]));
-								s_LayerPopupContext.m_vLayerIndices.push_back(LayerIndex);
-							}
-							else
-								AllTile = false;
-						}
-
-						// Don't allow editing if all selected layers are not tile layers
-						if(!AllTile)
-						{
-							s_LayerPopupContext.m_vpLayers.clear();
-							s_LayerPopupContext.m_vLayerIndices.clear();
-						}
-					}
-
-					Ui()->DoPopupMenu(&s_LayerPopupContext, Ui()->MouseX(), Ui()->MouseY(), 120, 270, &s_LayerPopupContext, Editor()->PopupLayer);
-				}
-
-				SetOperation(OP_NONE);
-			}
-
-			if(m_Operation == OP_LAYER_DRAG && Clicked)
-			{
-				MoveLayers = true;
-			}
-		}
-		else if(m_pDraggedButton == pLayer.get())
-		{
-			SetOperation(OP_NONE);
-		}
-	}
-
-	if(m_Operation != OP_GROUP_DRAG || g != SelectedGroup)
-	{
-		pRect->HSplitTop(5.0f, &Slot, pRect);
-		m_ScrollRegion.AddRect(Slot);
-	}
-}
-
-void CLayersView::SetOperation(int Operation)
-{
-	if(Operation != m_Operation)
-	{
-		m_PreviousOperation = m_Operation;
-		m_Operation = Operation;
-		if(Operation == OP_NONE)
-		{
-			m_pDraggedButton = nullptr;
-		}
-	}
-}
-
-void CLayersView::ResetDragContext()
-{
-	m_DragContext.m_GroupAfterDraggedLayer = -1;
-	m_DragContext.m_LayerAfterDraggedLayer = -1;
-	m_DragContext.m_DraggedPositionFound = false;
-	m_DragContext.m_MoveLayers = false;
-	m_DragContext.m_MoveGroup = false;
-	m_DragContext.m_StartDragLayer = false;
-	m_DragContext.m_StartDragGroup = false;
-}
+//void CLayersView::RenderParentGroup(CUIRect *pRect, int Index, const CEditorGroupInfo &Info)
+//{
+//	char aBuf[64];
+//	CEditorMap &Map = Editor()->m_Map;
+//
+//	int g = Info.m_GroupIndex;
+//	std::shared_ptr<CEditorParentGroup> &pGroupParent = Map.m_vpGroupParents.at(g);
+//
+//	std::vector<int> vChildren;
+//	for(size_t k = 0; k < Map.m_vGroupInfos.size(); k++)
+//	{
+//		if(Map.m_vGroupInfos[k].m_ParentIndex == Index)
+//			vChildren.push_back(k);
+//	}
+//
+//	CUIRect Slot;
+//	pRect->HSplitTop(ROW_HEIGHT, &Slot, pRect);
+//
+//	CUIRect TmpRect;
+//	pRect->HSplitTop(2.0f, &TmpRect, pRect);
+//	m_ScrollRegion.AddRect(TmpRect);
+//
+//	if(m_ScrollRegion.AddRect(Slot))
+//	{
+//		str_format(aBuf, sizeof(aBuf), "%s", pGroupParent->m_aName);
+//
+//		bool Clicked = false;
+//		bool Abrupted = false;
+//
+//		if(int Result = DoSelectable(&Info, aBuf, GroupFlags(Info), 0, &Slot, "Something I guess"))
+//		{
+//			if(Clicked)
+//			{
+//				if(Result == 2)
+//				{
+//					m_ParentPopupContext.m_GroupInfoIndex = Index;
+//					Ui()->DoPopupMenu(&m_ParentPopupContext, Ui()->MouseX(), Ui()->MouseY(), 145, 120, &m_ParentPopupContext, Editor()->PopupParentGroup);
+//				}
+//
+//				if(!vChildren.empty() && Input()->MouseDoubleClick())
+//					pGroupParent->m_Collapse ^= 1;
+//			}
+//		}
+//	}
+//
+//	if(!pGroupParent->m_Collapse)
+//	{
+//		int StartY = pRect->y;
+//
+//		// Render childrens
+//		CUIRect ChildrenBox = *pRect;
+//		ChildrenBox.VSplitLeft(INDENT, nullptr, &ChildrenBox);
+//		for(int Child : vChildren)
+//		{
+//			CEditorGroupInfo &ChildInfo = Map.m_vGroupInfos.at(Child);
+//			if(ChildInfo.m_Type == CEditorGroupInfo::TYPE_LAYER_GROUP)
+//				RenderLayersGroup(&ChildrenBox, ChildInfo);
+//			else if(ChildInfo.m_Type == CEditorGroupInfo::TYPE_PARENT_GROUP)
+//				RenderParentGroup(&ChildrenBox, Child, ChildInfo);
+//		}
+//		int EndY = ChildrenBox.y;
+//
+//		CUIRect IndentIndicator;
+//		pRect->VSplitLeft(4.0f, nullptr, &IndentIndicator);
+//		IndentIndicator.VSplitLeft(1.0f, &IndentIndicator, nullptr);
+//		IndentIndicator.h = EndY - StartY - 4.0f;
+//		IndentIndicator.Draw(ColorRGBA(0.6f, 0.6f, 0.6f, 0.4f), IGraphics::CORNER_NONE, 0.0f);
+//
+//		pRect->y = EndY;
+//	}
+//	else
+//	{
+//		pRect->HSplitTop(5.0f, &Slot, pRect);
+//		m_ScrollRegion.AddRect(Slot);
+//	}
+//}
+//
+//void CLayersView::RenderLayersGroup(CUIRect *pRect, const CEditorGroupInfo &Info)
+//{
+//	char aBuf[64];
+//	CEditorMap &Map = Editor()->m_Map;
+//	auto &SelectedGroup = Editor()->m_SelectedGroup;
+//	auto &vSelectedLayers = Editor()->m_vSelectedLayers;
+//
+//	auto &[ScrollToSelection] = m_RenderContext;
+//
+//	int g = Info.m_GroupIndex;
+//
+//	CUIRect Slot, VisibleToggle;
+//	if(g != SelectedGroup)
+//	{
+//		pRect->HSplitTop(ROW_HEIGHT, &Slot, pRect);
+//
+//		CUIRect TmpRect;
+//		pRect->HSplitTop(2.0f, &TmpRect, pRect);
+//		m_ScrollRegion.AddRect(TmpRect);
+//	}
+//
+//	if(m_ScrollRegion.AddRect(Slot))
+//	{
+//		//Slot.VSplitLeft(15.0f, &VisibleToggle, &Slot);
+//		//if(Editor()->DoButton_FontIcon(&Map.m_vpGroups[g]->m_Visible, Map.m_vpGroups[g]->m_Visible ? FONT_ICON_EYE : FONT_ICON_EYE_SLASH, Map.m_vpGroups[g]->m_Collapse ? 1 : 0, &VisibleToggle, 0, "Toggle group visibility", IGraphics::CORNER_L, 8.0f))
+//		//	Map.m_vpGroups[g]->m_Visible = !Map.m_vpGroups[g]->m_Visible;
+//
+//		str_format(aBuf, sizeof(aBuf), "#%d %s", g, Map.m_vpGroups[g]->m_aName);
+//
+//		bool Clicked = false;
+//		bool Abrupted = false;
+//		SExtraRenderInfo Extra;
+//		Extra.m_pIcon = FONT_ICON_LAYER_GROUP;
+//		if(int Result = DoSelectable(&Map.m_vpGroups[g], aBuf, GroupFlags(Info), g == SelectedGroup, &Slot, Map.m_vpGroups[g]->m_Collapse ? "Select group. Shift click to select all layers. Double click to expand." : "Select group. Shift click to select all layers. Double click to collapse.", Extra))
+//		{
+//			if(Clicked && Result == 1)
+//			{
+//				if(g != SelectedGroup)
+//					Editor()->SelectLayer(0, g);
+//
+//				if(Input()->ShiftIsPressed() && SelectedGroup == g)
+//				{
+//					vSelectedLayers.clear();
+//					for(size_t i = 0; i < Map.m_vpGroups[g]->m_vpLayers.size(); i++)
+//					{
+//						Editor()->AddSelectedLayer(i);
+//					}
+//				}
+//
+//				if(Result == 2)
+//				{
+//					static SPopupMenuId s_PopupGroupId;
+//					Ui()->DoPopupMenu(&s_PopupGroupId, Ui()->MouseX(), Ui()->MouseY(), 145, 256, Editor(), Editor()->PopupGroup);
+//				}
+//
+//				if(!Map.m_vpGroups[g]->m_vpLayers.empty() && Input()->MouseDoubleClick())
+//					Map.m_vpGroups[g]->m_Collapse ^= 1;
+//			}
+//		}
+//	}
+//
+//	for(int i = 0; i < (int)Map.m_vpGroups[g]->m_vpLayers.size(); i++)
+//	{
+//		if(Map.m_vpGroups[g]->m_Collapse)
+//			continue;
+//
+//		std::shared_ptr<CLayer> &pLayer = Map.m_vpGroups[g]->m_vpLayers.at(i);
+//
+//		if(pLayer->m_aName[0])
+//			str_copy(aBuf, pLayer->m_aName);
+//		else
+//		{
+//			if(pLayer->m_Type == LAYERTYPE_TILES)
+//			{
+//				std::shared_ptr<CLayerTiles> pTiles = std::static_pointer_cast<CLayerTiles>(pLayer);
+//				str_copy(aBuf, pTiles->m_Image >= 0 ? Map.m_vpImages[pTiles->m_Image]->m_aName : "Tiles");
+//			}
+//			else if(pLayer->m_Type == LAYERTYPE_QUADS)
+//			{
+//				std::shared_ptr<CLayerQuads> pQuads = std::static_pointer_cast<CLayerQuads>(pLayer);
+//				str_copy(aBuf, pQuads->m_Image >= 0 ? Map.m_vpImages[pQuads->m_Image]->m_aName : "Quads");
+//			}
+//			else if(pLayer->m_Type == LAYERTYPE_SOUNDS)
+//			{
+//				std::shared_ptr<CLayerSounds> pSounds = std::static_pointer_cast<CLayerSounds>(pLayer);
+//				str_copy(aBuf, pSounds->m_Sound >= 0 ? Map.m_vpSounds[pSounds->m_Sound]->m_aName : "Sounds");
+//			}
+//		}
+//
+//		int Checked = false ? 1 : 0;
+//		if(pLayer->IsEntitiesLayer())
+//		{
+//			Checked += 6;
+//		}
+//
+//		SExtraRenderInfo Extra;
+//		Extra.m_pIcon = pLayer->Icon();
+//		if(int Result = DoSelectable(&pLayer, aBuf, LayerFlags(pLayer), Checked, &Button, "Select layer. Shift click to select multiple.", Extra))
+//		{
+//			if(!Input()->ShiftIsPressed() /* && !IsLayerSelected*/)
+//			{
+//				Editor()->SelectLayer(i, g);
+//			}
+//
+//			if(Clicked)
+//			{
+//				static CEditor::SLayerPopupContext s_LayerPopupContext = {};
+//				s_LayerPopupContext.m_pEditor = Editor();
+//				if(Result == 1)
+//				{
+//					if(Input()->ShiftIsPressed() && SelectedGroup == g)
+//					{
+//						auto Position = std::find(vSelectedLayers.begin(), vSelectedLayers.end(), i);
+//						if(Position != vSelectedLayers.end())
+//							vSelectedLayers.erase(Position);
+//						else
+//							Editor()->AddSelectedLayer(i);
+//					}
+//					else if(!Input()->ShiftIsPressed())
+//					{
+//						Editor()->SelectLayer(i, g);
+//					}
+//				}
+//				else if(Result == 2)
+//				{
+//					s_LayerPopupContext.m_vpLayers.clear();
+//					s_LayerPopupContext.m_vLayerIndices.clear();
+//
+//					if(!IsLayerSelected)
+//					{
+//						Editor()->SelectLayer(i, g);
+//					}
+//
+//					if(vSelectedLayers.size() > 1)
+//					{
+//						bool AllTile = true;
+//						for(size_t j = 0; AllTile && j < vSelectedLayers.size(); j++)
+//						{
+//							int LayerIndex = vSelectedLayers[j];
+//							if(Map.m_vpGroups[SelectedGroup]->m_vpLayers[LayerIndex]->m_Type == LAYERTYPE_TILES)
+//							{
+//								s_LayerPopupContext.m_vpLayers.push_back(std::static_pointer_cast<CLayerTiles>(Map.m_vpGroups[SelectedGroup]->m_vpLayers[vSelectedLayers[j]]));
+//								s_LayerPopupContext.m_vLayerIndices.push_back(LayerIndex);
+//							}
+//							else
+//								AllTile = false;
+//						}
+//
+//						// Don't allow editing if all selected layers are not tile layers
+//						if(!AllTile)
+//						{
+//							s_LayerPopupContext.m_vpLayers.clear();
+//							s_LayerPopupContext.m_vLayerIndices.clear();
+//						}
+//					}
+//
+//					Ui()->DoPopupMenu(&s_LayerPopupContext, Ui()->MouseX(), Ui()->MouseY(), 120, 270, &s_LayerPopupContext, Editor()->PopupLayer);
+//				}
+//			}
+//		}
+//	}
+//}
 
 void CLayersView::ResetRenderContext()
 {
-	m_RenderContext.m_vButtonsPerGroup.clear();
 	m_RenderContext.m_ScrollToSelection = false;
 }
 
@@ -850,20 +481,20 @@ int CLayersView::DoSelectable(const void *pId, const char *pText, const CToggleF
 
 	return Result;
 }
-
-std::shared_ptr<IGroup> CLayersView::GetGroupBase(const CEditorGroupInfo &GroupInfo)
-{
-	switch(GroupInfo.m_Type)
-	{
-	case CEditorGroupInfo::TYPE_LAYER_GROUP:
-		return std::static_pointer_cast<IGroup>(Editor()->m_Map.m_vpGroups.at(GroupInfo.m_GroupIndex));
-		return nullptr;
-	case CEditorGroupInfo::TYPE_PARENT_GROUP:
-		return std::static_pointer_cast<IGroup>(Editor()->m_Map.m_vpGroupParents.at(GroupInfo.m_GroupIndex));
-	default:
-		return nullptr;
-	}
-}
+//
+//std::shared_ptr<IGroup> CLayersView::GetGroupBase(const CEditorGroupInfo &GroupInfo)
+//{
+//	switch(GroupInfo.m_Type)
+//	{
+//	case CEditorGroupInfo::TYPE_LAYER_GROUP:
+//		return std::static_pointer_cast<IGroup>(Editor()->m_Map.m_vpGroups.at(GroupInfo.m_GroupIndex));
+//		return nullptr;
+//	case CEditorGroupInfo::TYPE_PARENT_GROUP:
+//		return std::static_pointer_cast<IGroup>(Editor()->m_Map.m_vpGroupParents.at(GroupInfo.m_GroupIndex));
+//	default:
+//		return nullptr;
+//	}
+//}
 
 int CLayersView::DoToggleIconButton(const void *pButtonId, const void *pParentId, const char *pIcon, bool Checked, const CUIRect *pRect, const char *pToolTip)
 {
@@ -883,190 +514,331 @@ void CLayersView::DoIcon(const char *pIcon, const CUIRect *pRect, float FontSize
 	TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
 }
 
-CToggleFlags CLayersView::GroupFlags(const CEditorGroupInfo &GroupInfo)
+//CToggleFlags CLayersView::GroupFlags(const CEditorGroupInfo &GroupInfo)
+//{
+//	std::shared_ptr<IGroup> pGroupBase = GetGroupBase(GroupInfo);
+//
+//	CToggleFlags Flags;
+//	Flags[CToggleFlags::TOGGLE_COLLAPSE] = &pGroupBase->m_Collapse;
+//	Flags[CToggleFlags::TOGGLE_VISIBILE] = &pGroupBase->m_Visible;
+//
+//	return Flags;
+//}
+//
+//CToggleFlags CLayersView::LayerFlags(const std::shared_ptr<CLayer> &pLayer)
+//{
+//	CToggleFlags Flags;
+//	Flags[CToggleFlags::TOGGLE_VISIBILE] = &pLayer->m_Visible;
+//	return Flags;
+//}
+
+bool CLayersView::CanHandleInput() const
 {
-	std::shared_ptr<IGroup> pGroupBase = GetGroupBase(GroupInfo);
-
-	CToggleFlags Flags;
-	Flags[CToggleFlags::TOGGLE_COLLAPSE] = &pGroupBase->m_Collapse;
-	Flags[CToggleFlags::TOGGLE_VISIBILE] = &pGroupBase->m_Visible;
-
-	return Flags;
-}
-
-CToggleFlags CLayersView::LayerFlags(const std::shared_ptr<CLayer> &pLayer)
-{
-	CToggleFlags Flags;
-	Flags[CToggleFlags::TOGGLE_VISIBILE] = &pLayer->m_Visible;
-	return Flags;
+	return Editor()->m_Dialog == DIALOG_NONE && CLineInput::GetActiveInput() == nullptr;
 }
 
 // ------------------------------------------------------------
 
-struct CTreeViewItem
-{
-	bool m_Selected;
-	CUIRect m_Rect;
-};
-
-class CTreeView
-{
-public:
-	CTreeView(CEditor *pEditor) :
-		m_pEditor(pEditor), m_ItemHeight(12.0f), m_Indent(12.0f), m_View({}), m_AutoSpacing(0), m_ItemIndex(0), m_vpSelection(), m_pDragId(nullptr)
-	{
-	}
-
-	void Start(const CUIRect *pView, float Indent, float ItemHeight, const std::vector<void *> vpSelection)
-	{
-		m_View = *pView;
-		m_Indent = Indent;
-		m_ItemHeight = ItemHeight;
-		m_ItemIndex = 0;
-		m_vpSelection = vpSelection;
-	}
-
-	const std::vector<void *> &End()
-	{
-		return m_vpSelection;
-	}
-
-	CTreeViewItem DoNode(void *pId)
-	{
-		CTreeViewItem Item{};
-
-		if(m_AutoSpacing > 0.0f && m_ItemIndex > 0)
-			DoSpacing(m_AutoSpacing);
-
-		m_View.HSplitTop(m_ItemHeight, &Item.m_Rect, &m_View);
-
-		auto Position = std::find(m_vpSelection.begin(), m_vpSelection.end(), pId);
-		bool Selected = Position != m_vpSelection.end();
-
-		bool Clicked, Abrupted;
-		int Result = m_pEditor->Ui()->DoDraggableButtonLogic(pId, Selected, &Item.m_Rect, &Clicked, &Abrupted);
-
-		if(Result > 0)
-		{
-			if(m_pClickedId == nullptr)
-			{
-				m_pClickedId = pId;
-				m_InitialMouseY = m_pEditor->Ui()->MouseY();
-			}
-
-			if(m_pClickedId == pId && absolute(m_pEditor->Ui()->MouseY() - m_InitialMouseY) > 5.0f)
-				m_pDragId = pId;
-
-			if(Clicked && !Abrupted && !m_pDragId)
-			{
-				if(Result == 1)
-				{
-					Selected = !Selected;
-					if(Selected)
-						m_vpSelection.push_back(pId);
-					else
-						m_vpSelection.erase(Position);
-				}
-				else if(Result == 2)
-				{
-					// Context
-				}
-			}
-
-			if(Abrupted)
-				m_pDragId = nullptr;
-		}
-		else if(m_pDragId == pId)
-			m_pDragId = nullptr;
-
-		Item.m_Selected = Selected;
-
-		if(m_pDragId == pId)
-			Item.m_Rect.y = m_pEditor->Ui()->MouseY();
-
-		m_ItemIndex++;
-		return Item;
-	}
-
-	void DoAutoSpacing(float Spacing)
-	{
-		m_AutoSpacing = Spacing;
-	}
-
-	void DoSpacing(float Spacing)
-	{
-		m_View.HSplitTop(Spacing, nullptr, &m_View);
-	}
-
-	void PushTree()
-	{
-		m_View.VSplitLeft(m_Indent, nullptr, &m_View);
-	}
-
-	void PopTree()
-	{
-		m_View.VSplitLeft(-m_Indent, nullptr, &m_View);
-	}
-
-private:
-	CEditor *m_pEditor;
-	CUIRect m_View;
-	float m_Indent;
-	float m_AutoSpacing;
-	float m_ItemHeight;
-	int m_ItemIndex;
-	std::vector<void *> m_vpSelection;
-	void *m_pDragId;
-	void *m_pClickedId;
-	float m_InitialMouseY;
-};
-
-void Test()
-{
-	CEditor *pEditor;
-	int Id;
-}
-
-void CLayersView::OnRender(CUIRect View)
-{
-	static CTreeView s_TreeView(Editor());
-
-	static auto &&DoBtn = [&](const void *pId, const char *pText, bool Checked, const CUIRect *pRect) {
-		auto Color = Editor()->GetButtonColor(pId, Checked);
-		pRect->Draw(Color, IGraphics::CORNER_ALL, 3.0f);
-		Editor()->Ui()->DoLabel(pRect, pText, 10.0f, TEXTALIGN_ML);
-		return Editor()->Ui()->DoButtonLogic(pId, Checked, pRect);
-	};
-
-	CUIRect Test;
-	View.VSplitLeft(200.0f, nullptr, &Test);
-	Test.VSplitLeft(200.0f, &Test, nullptr);
-
-	static int Id0, Id1, Id2;
-	static bool Collapse = false;
-
-	static std::vector<void *> s_vpSelection;
-
-	s_TreeView.Start(&Test, 12.0f, 12.0f, s_vpSelection);
-	s_TreeView.DoAutoSpacing(4.0f);
-
-	auto Item = s_TreeView.DoNode(&Id0);
-	CUIRect CollapseBtn;
-	Item.m_Rect.VSplitLeft(15.0f, &CollapseBtn, &Item.m_Rect);
-	if(DoBtn(&Collapse, "?", Collapse, &CollapseBtn))
-		Collapse = !Collapse;
-	DoBtn(&Id0, "Parent", Item.m_Selected, &Item.m_Rect);
-
-	if(!Collapse)
-	{
-		s_TreeView.PushTree();
-		auto Child = s_TreeView.DoNode(&Id2);
-		DoBtn(&Id2, "Child", Child.m_Selected, &Child.m_Rect);
-		s_TreeView.PopTree();
-	}
-
-	Item = s_TreeView.DoNode(&Id1);
-	DoBtn(&Id1, "Parent", Item.m_Selected, &Item.m_Rect);
-
-	s_vpSelection = s_TreeView.End();
-}
+//void CLayersView::InternalRender(CTreeView &TreeView, const std::shared_ptr<TreeNode> &pNode)
+//{
+//	static auto &&DoBtn = [&](const void *pId, const char *pText, bool Checked, const CUIRect *pRect, bool HasChildren, bool *pClicked) {
+//		auto Color = Editor()->GetButtonColor(pId, Checked);
+//		pRect->Draw(Color, !HasChildren ? IGraphics::CORNER_ALL : IGraphics::CORNER_R, 3.0f);
+//		CUIRect Label;
+//		pRect->VMargin(5.0f, &Label);
+//		Editor()->Ui()->DoLabel(&Label, pText, 10.0f, TEXTALIGN_ML);
+//		return Editor()->Ui()->DoDraggableButtonLogic(pId, Checked, pRect, pClicked, nullptr);
+//	};
+//
+//	static std::unordered_set<std::shared_ptr<TreeNode>> s_Selection;
+//	bool IsSelected = s_Selection.find(pNode) != s_Selection.end();
+//
+//	bool Dragging = TreeView.Dragging();
+//
+//	CDropTargetInfo DropTargetInfo = CDropTargetInfo::None();
+//	if(pNode->m_Type == TreeNode::TYPE_FOLDER)
+//		DropTargetInfo = CDropTargetInfo::Accept({TreeNode::TYPE_FOLDER, TreeNode::TYPE_LAYER_GROUP});
+//	else if(pNode->m_Type == TreeNode::TYPE_LAYER_GROUP)
+//		DropTargetInfo = CDropTargetInfo::Accept({TreeNode::TYPE_LAYER});
+//
+//	auto Item = TreeView.DoNode(pNode.get(), IsSelected, pNode->m_Type, DropTargetInfo);
+//	const bool Shift = Editor()->Input()->ShiftIsPressed();
+//
+//	if(Item.m_IsTargetParent)
+//	{
+//		// Draw highlighted background
+//		Item.m_Rect.Draw(ColorRGBA(0.6f, 0.1f, 0.9f, 0.4f), IGraphics::CORNER_ALL, 3.0f);
+//	}
+//
+//	if(!pNode->m_vpChildren.empty() || pNode->m_Type != 1)
+//	{
+//		CUIRect ColBtn;
+//		Item.m_Rect.VSplitLeft(15.0f, &ColBtn, &Item.m_Rect);
+//		if(Editor()->DoButton_FontIcon(&pNode->m_Collapse, pNode->m_Collapse ? "+" : "-", pNode->m_Collapse, &ColBtn, 0, nullptr, IGraphics::CORNER_L, 8.0f))
+//			pNode->m_Collapse = !pNode->m_Collapse;
+//	}
+//
+//	bool Clicked;
+//	int Res = DoBtn(&pNode->m_vpChildren, pNode->m_aName, IsSelected, &Item.m_Rect, !pNode->m_vpChildren.empty() || pNode->m_Type != 1, &Clicked);
+//
+//	if(Res)
+//	{
+//		if(!Dragging)
+//		{
+//			if(!Shift && !IsSelected)
+//			{
+//				s_Selection.clear();
+//				s_Selection.insert(pNode);
+//			}
+//
+//			if(Clicked)
+//			{
+//				if(Res == 1)
+//				{
+//					if(!Shift)
+//					{
+//						s_Selection.clear();
+//						s_Selection.insert(pNode);
+//					}
+//					else
+//					{
+//						if(!IsSelected)
+//							s_Selection.insert(pNode);
+//						else
+//							s_Selection.erase(pNode);
+//					}
+//				}
+//			}
+//		}
+//	}
+//
+//	if(!pNode->m_Collapse && !pNode->m_vpChildren.empty())
+//	{
+//		TreeView.PushTree();
+//		for(auto &Child : pNode->m_vpChildren)
+//			InternalRender(TreeView, Child);
+//		TreeView.PopTree();
+//	}
+//}
+//
+//static std::shared_ptr<TreeNode> GenerateTestTree(const char *pDesc)
+//{
+//	std::shared_ptr<TreeNode> Root = std::make_shared<TreeNode>(TreeNode{
+//		"ROOT",
+//		false,
+//		TreeNode::TYPE_NONE,
+//		{},
+//	});
+//
+//	std::shared_ptr<TreeNode> pNode = Root;
+//	std::vector<std::shared_ptr<TreeNode>> m_vpNodes;
+//
+//	const char *ptr = pDesc;
+//	int p = 0;
+//	char LastType = 0;
+//
+//	int aCounts[3] = {0, 0, 0};
+//
+//	while(ptr && *ptr)
+//	{
+//		if(str_isspace(*ptr))
+//		{
+//			ptr++;
+//			continue;
+//		}
+//
+//		if(*ptr == '(' && LastType != 'L')
+//		{
+//			TreeNode Node;
+//			Node.m_vpChildren.emplace_back();
+//			Node.m_Collapse = false;
+//			if(LastType == 'G')
+//			{
+//				Node.m_Type = TreeNode::TYPE_LAYER_GROUP;
+//				str_format(Node.m_aName, sizeof(Node.m_aName), "Group %d", aCounts[Node.m_Type - 1]++);
+//			}
+//			else if(LastType == 'F')
+//			{
+//				Node.m_Type = TreeNode::TYPE_FOLDER;
+//				str_format(Node.m_aName, sizeof(Node.m_aName), "Folder %d", aCounts[Node.m_Type - 1]++);
+//			}
+//			Node.m_vpChildren.clear();
+//
+//			pNode->m_vpChildren.push_back(std::make_shared<TreeNode>(Node));
+//			m_vpNodes.push_back(pNode);
+//			pNode = pNode->m_vpChildren.back();
+//			p++;
+//		}
+//		if(*ptr == ')' && !m_vpNodes.empty())
+//		{
+//			pNode = m_vpNodes.back();
+//			m_vpNodes.pop_back();
+//			LastType = 0;
+//			p--;
+//		}
+//
+//		if(*ptr == 'G' || *ptr == 'F')
+//		{
+//			LastType = *ptr;
+//		}
+//
+//		if(*ptr == 'L')
+//		{
+//			TreeNode Node;
+//			Node.m_Type = TreeNode::TYPE_LAYER;
+//			str_format(Node.m_aName, sizeof(Node.m_aName), "Layer %d", aCounts[pNode->m_Type - 1]++);
+//			Node.m_Collapse = false;
+//			pNode->m_vpChildren.push_back(std::make_shared<TreeNode>(Node));
+//		}
+//
+//		ptr++;
+//	}
+//
+//	if(p != 0)
+//	{
+//		printf("Invalid tree\n");
+//		return {};
+//	}
+//
+//	return Root;
+//}
+//
+//void CLayersView::OnRender(CUIRect View)
+//{
+//	static CTreeView s_TreeView;
+//
+//	CUIRect Test;
+//	View.VSplitLeft(200.0f, nullptr, &Test);
+//	Test.VSplitLeft(200.0f, &Test, nullptr);
+//
+//	static auto s_Root = GenerateTestTree({R"(
+//		F(
+//			F(
+//				G(LLLLLLL)
+//				G(LLLLL)
+//				F(
+//					F(
+//						G(LLLLL)
+//						F()
+//					)
+//				)
+//			)
+//			G()
+//			F()
+//			F(
+//				G(L)
+//				F(G(LLLL))
+//				G()
+//			)
+//			G(LLL)
+//			F(
+//				G()
+//				G(LL)
+//				G(LLLLLLL)
+//				F(
+//					G(LL)
+//					G()
+//				)
+//			)
+//		)
+//		G(LLLLLLLL)
+//		F(
+//			G(LLL)
+//			G(LLLLL)
+//			F()
+//		)
+//	)"});
+//
+//	//static std::shared_ptr<TreeNode> s_Root = GenerateTestTree({R"(
+//	//	F(G()G(LLL)G())F()F(G()G())
+//	//)"});
+//
+//	//static std::shared_ptr<TreeNode> s_Root = GenerateTestTree({R"(
+//	//	F(G(L)G())F()
+//	//)"});
+//
+//	//static auto s_Root = GenerateTestTree({R"(
+//	//	F(G()G())
+//	//)"});
+//
+//	//static auto s_Root = GenerateTestTree({R"(
+//	//	F(
+//	//		F()
+//	//		F(
+//	//			F()
+//	//			F()
+//	//		)
+//	//		F(
+//	//			F()
+//	//		)
+//	//	)
+//	//	F(
+//	//		F(
+//	//			F(F()F())
+//	//		)
+//	//	)
+//	//	F(F()F())
+//	//)"});
+//
+//	s_TreeView.Start(&Test, 12.0f, 20.0f, CDropTargetInfo::Accept({TreeNode::TYPE_LAYER_GROUP, TreeNode::TYPE_FOLDER}));
+//	s_TreeView.DoAutoSpacing(4.0f);
+//
+//	for(auto &Node : s_Root->m_vpChildren)
+//		InternalRender(s_TreeView, Node);
+//
+//	auto Changes = s_TreeView.End();
+//
+//	if(s_TreeView.DragStatus() == CTreeView::EDragStatus::NOT_ALLOWED)
+//		Editor()->m_CursorType = CEditor::CURSOR_NOT_ALLOWED;
+//	else if(s_TreeView.DragStatus() == CTreeView::EDragStatus::MOVE_HERE)
+//		Editor()->m_CursorType = CEditor::CURSOR_MOVE_HERE;
+//
+//	auto &&GetNode = [](const std::shared_ptr<TreeNode> &pRoot, const CTreeChanges::TPath &Path) {
+//		std::shared_ptr<TreeNode> pNode = pRoot;
+//		for(auto p : Path)
+//			pNode = pNode->m_vpChildren[p];
+//		return pNode;
+//	};
+//
+//	if(!Changes.Empty())
+//	{
+//		auto To = Changes.To();
+//		auto ToParent = To;
+//		ToParent.pop_back();
+//		int Position = To.back();
+//
+//		std::vector<std::shared_ptr<TreeNode>> vSubTree;
+//		std::vector<std::pair<std::shared_ptr<TreeNode>, int>> vDeleteBefore, vDeleteAfter;
+//
+//		for(auto &Path : Changes.From())
+//		{
+//			auto FromParentPath = Path;
+//			auto FromPosition = FromParentPath.back();
+//			FromParentPath.pop_back();
+//
+//			auto pFromNodeParent = GetNode(s_Root, FromParentPath);
+//			auto pFromNode = pFromNodeParent->m_vpChildren[FromPosition];
+//
+//			if(Path >= To)
+//				vDeleteBefore.emplace_back(pFromNodeParent, FromPosition);
+//			else if(Path < To)
+//				vDeleteAfter.emplace_back(pFromNodeParent, FromPosition);
+//
+//			vSubTree.push_back(pFromNode);
+//		}
+//
+//		To.pop_back();
+//
+//		std::sort(vDeleteBefore.begin(), vDeleteBefore.end(), [](auto &Pair1, auto &Pair2) { return Pair2.second < Pair1.second; });
+//		std::sort(vDeleteAfter.begin(), vDeleteAfter.end(), [](auto &Pair1, auto &Pair2) { return Pair2.second < Pair1.second; });
+//
+//		for(auto &Item : vDeleteBefore)
+//			Item.first->m_vpChildren.erase(Item.first->m_vpChildren.begin() + Item.second);
+//
+//		std::shared_ptr<TreeNode> pDest = GetNode(s_Root, To);
+//		pDest->m_vpChildren.insert(pDest->m_vpChildren.begin() + minimum(Position, (int)pDest->m_vpChildren.size()), vSubTree.begin(), vSubTree.end());
+//
+//		for(auto &Item : vDeleteAfter)
+//			Item.first->m_vpChildren.erase(Item.first->m_vpChildren.begin() + Item.second);
+//	}
+//}

@@ -785,6 +785,8 @@ public:
 		CURSOR_NORMAL,
 		CURSOR_RESIZE_V,
 		CURSOR_RESIZE_H,
+		CURSOR_NOT_ALLOWED,
+		CURSOR_MOVE_HERE,
 		NUM_CURSORS
 	};
 	IGraphics::CTextureHandle m_aCursorTextures[ECursorType::NUM_CURSORS];

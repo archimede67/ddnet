@@ -1,0 +1,262 @@
+﻿#ifndef GAME_CLIENT_UI_TREEVIEW_H
+#define GAME_CLIENT_UI_TREEVIEW_H
+
+#include "ui.h"
+#include "ui_rect.h"
+#include "ui_scrollregion.h"
+
+#include <iterator>
+#include <unordered_map>
+#include <unordered_set>
+
+struct CTreeViewItem
+{
+	CUIRect m_Rect; // The rect of the element in the tree
+	bool m_IsTargetParent; // Wether or not this item is a drag target parent
+};
+
+// A class describing a drop target
+class CDropTargetInfo
+{
+public:
+	// Creates a drop target accepting nothing
+	static CDropTargetInfo None()
+	{
+		CDropTargetInfo Info;
+		Info.m_IsDropTarget = false;
+		return Info;
+	}
+
+	// Creates a drop target accepting specific types
+	static CDropTargetInfo Accept(const std::unordered_set<int> &vTypes)
+	{
+		CDropTargetInfo Info;
+		Info.m_IsDropTarget = true;
+		Info.m_vAcceptTypes = vTypes;
+		return Info;
+	}
+
+	// Creates a drop target accepting everything
+	static CDropTargetInfo AcceptAll()
+	{
+		CDropTargetInfo Info;
+		Info.m_IsDropTarget = true;
+		Info.m_vAcceptTypes.clear();
+		return Info;
+	}
+
+public:
+	// Checks if a specific type is accepted in this drop target
+	bool IsAccepting(int Type) const
+	{
+		return m_IsDropTarget && (m_vAcceptTypes.empty() || m_vAcceptTypes.find(Type) != m_vAcceptTypes.end());
+	}
+
+private:
+	CDropTargetInfo() :
+		m_IsDropTarget(false), m_vAcceptTypes() {}
+
+private:
+	bool m_IsDropTarget; // Indicates if this is a drop target that is accepting something
+	std::unordered_set<int> m_vAcceptTypes; // Stores the accepted types
+
+	friend class CTreeView;
+};
+
+// A class describing changes within the tree
+class CTreeChanges
+{
+public:
+	// A path is simply a list of numbers, using a convenient name here
+	using TPath = std::vector<int>;
+
+private:
+	CTreeChanges() :
+		m_vFrom(), m_To() {}
+	CTreeChanges(const std::vector<TPath> &vFrom, TPath &To) :
+		m_vFrom(vFrom), m_To(To) {}
+
+public:
+	// Gets the list of initial paths (parent paths that were selected)
+	const std::vector<TPath> &From() const { return m_vFrom; }
+
+	// Gets the destination path
+	const TPath &To() const { return m_To; }
+
+	// Checks if there are any changes
+	bool Empty() const { return m_vFrom.size() == 0; }
+
+private:
+	std::vector<TPath> m_vFrom;
+	TPath m_To;
+
+	friend class CTreeView;
+};
+
+// The main class to handle the logic of a treeview, with drag-and-drop support.
+// Notes:
+// - The changes within the tree must be handled outside, after calling End().
+//   This is because the logic only computes the changes, and has no idea of the
+//   underlying data structure used to store the tree.
+// - Instances of this class must be either static or a member of a class
+class CTreeView : private CUIElementBase
+{
+	// A path is simply a list of numbers, using a convenient name here.
+	// It is mainly used to identify a node (the path to a node) within the tree.
+	using TPath = std::vector<int>;
+
+private:
+	class CContext
+	{
+	public:
+		CUIRect m_View;
+		std::vector<CUIRect> m_vSubTrees;
+		float m_Indent;
+		int m_ItemIndex;
+
+		void Begin(CUIRect &View, float Indent)
+		{
+			m_vSubTrees.clear();
+			m_View = View;
+			m_Indent = Indent;
+			m_vSubTrees.push_back(View);
+			m_ItemIndex = 0;
+		}
+
+		void NextSlot(float Cut, CUIRect *pSlot)
+		{
+			m_View.HSplitTop(Cut, pSlot, &m_View);
+		}
+
+		void Push()
+		{
+			m_View.VSplitLeft(m_Indent, nullptr, &m_View);
+			m_vSubTrees.push_back(m_View);
+		}
+
+		void Pop()
+		{
+			m_View.VSplitLeft(-m_Indent, nullptr, &m_View);
+			m_vSubTrees.pop_back();
+		}
+
+		CUIRect CurrentSubTree() const
+		{
+			CUIRect SubTree = m_vSubTrees.back();
+			SubTree.h = m_View.y - SubTree.y;
+			return SubTree;
+		}
+	};
+
+	class CPopoutContext : public CContext
+	{
+	public:
+		std::unordered_set<int> m_vTypes;
+		std::vector<TPath> m_vOriginalPaths;
+	};
+
+public:
+	enum class EDragStatus
+	{
+		NONE,
+		NORMAL,
+		NOT_ALLOWED,
+		MOVE_HERE,
+	};
+
+public:
+	CTreeView();
+
+	void Start(CUIRect *pView, float Indent, float ItemHeight, const CDropTargetInfo &RootDropTargetInfo = CDropTargetInfo::AcceptAll());
+	CTreeViewItem DoNode(void *pId, bool Selected, int Type, const CDropTargetInfo &DropTargetInfo);
+	void PushTree();
+	void PopTree();
+	CTreeChanges End();
+
+	void DoAutoSpacing(float Spacing);
+	void DoSpacing(float Spacing);
+
+	bool Dragging() const;
+
+	EDragStatus DragStatus() const { return m_DragStatus; }
+
+private:
+	enum class EDragResult
+	{
+		DRAG_RESULT_NONE,
+		DRAG_RESULT_DRAG,
+		DRAG_RESULT_CANCEL,
+	};
+
+	EDragResult DoDrag(const void *pId, CUIRect *pRect);
+	bool UpdateNode(const void *pId, bool Selected, int Type);
+	void NextSlot(float Cut, CUIRect *pSlot);
+	bool IsValidDropTarget(const CDropTargetInfo &Info);
+	void Place(bool ValidTarget, CUIRect *pRect);
+
+	inline bool ShouldClearSelected();
+	inline bool ShouldBePopout();
+
+	void OnDragStop();
+	void OnDragConfirm();
+	void OnDragCancel();
+	void OnDragStart();
+	void OnDrag();
+	void OnTarget(const TPath &Path);
+
+	inline CContext *Context();
+
+	void Reset();
+	inline int ItemIndex();
+
+private:
+	CUIRect m_Root;
+
+	float m_Indent;
+	float m_AutoSpacing;
+	float m_ItemHeight;
+
+	const void *m_pDragId;
+	const void *m_pHotId;
+	const void *m_pClickedId;
+	CScrollRegion m_ScrollRegion;
+
+	float m_InitialMouseY;
+	float m_PopoutY;
+	float m_PopoutX;
+	float m_PopoutHeight;
+	float m_PopoutOffset;
+	TPath m_SelectedPath;
+
+	CContext m_ViewContext;
+	CPopoutContext m_PopoutContext;
+
+	std::optional<TPath> m_HighlightPath;
+	enum class EState
+	{
+		STATE_NONE,
+		STATE_DRAG_START,
+		STATE_DRAGGING,
+	};
+	EState m_State;
+
+	enum class EDragEndState
+	{
+		STATE_NONE,
+		STATE_DRAG_CONFIRM,
+		STATE_DRAG_CANCEL,
+	};
+	EDragEndState m_DragEndState;
+
+	TPath m_CurrentPath;
+	int m_PathCounter;
+	TPath m_CurrentTargetPath;
+	std::optional<TPath> m_TargetPath;
+
+	std::vector<CDropTargetInfo> m_vCurrentDropTargetInfo;
+	CDropTargetInfo m_LastDropTargetInfo;
+
+	EDragStatus m_DragStatus;
+};
+
+#endif
