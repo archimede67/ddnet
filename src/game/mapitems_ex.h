@@ -2,6 +2,8 @@
 #define GAME_MAPITEMS_EX_H
 #include <game/generated/protocol.h>
 
+#include "mapitems_object.h"
+
 enum
 {
 	__MAPITEMTYPE_UUID_HELPER = OFFSET_MAPITEMTYPE_UUID - 1,
@@ -30,34 +32,55 @@ struct CMapItemAutoMapperConfig
 	int m_Flags;
 };
 
-// Map item to store infos about a group
-struct CMapItemGroupInfo
+struct CMapItemRoot
 {
 	enum
 	{
 		CURRENT_VERSION = 1
 	};
 
-	int m_Version; // Version of the map item
-	int m_Type; // Type of the group
-	int m_Index; // Index of the group
-	//int m_Children; // List of child group indices of this parent group
-	int m_Parent; // Parent of this group
+	int m_Version;
+	int m_Objects; // Pointer to the list of root objects
 };
 
-struct CMapItemParentGroup
+// --- Object base ------------------------
+
+struct IMapItemObject
 {
+	int m_Version;
+};
+// ----------------------------------------
+
+// --- Objects ----------------------------
+
+// Map item for a "pointer" to a layergroup
+struct CMapItemLayerGroupObject : IMapItemObject
+{
+	MACRO_MAPITEM_OBJECT("Yahoo");
+
 	enum
 	{
 		CURRENT_VERSION = 1
 	};
 
-	int m_Version; // Version of the map item
-	int m_Name; // Name of the group
-	// Extra info here (maybe)
-	int m_Visible;
-	int m_Collapse;
+	int m_GroupIndex; // Index to the LayerGroup
 };
+
+// Map item for a parent group
+struct CMapItemParentGroupObject : IMapItemObject
+{
+	MACRO_MAPITEM_OBJECT("Test");
+
+	enum
+	{
+		CURRENT_VERSION = 1
+	};
+
+	int m_Name; // Pointer to string data
+	int m_Test1;
+	int m_Test2;
+};
+// ----------------------------------------
 
 void RegisterMapItemTypeUuids(class CUuidManager *pManager);
 #endif // GAME_MAPITEMS_EX_H

@@ -24,6 +24,7 @@
 #include <game/editor/mapitems/layer_tele.h>
 #include <game/editor/mapitems/layer_tiles.h>
 #include <game/editor/mapitems/layer_tune.h>
+#include <game/editor/mapitems/map_object.h>
 
 #include <engine/console.h>
 #include <engine/editor.h>
@@ -34,7 +35,7 @@
 
 #include <game/editor/components/auto_map.h>
 #include <game/editor/components/layer_selector.h>
-#include <game/editor/components/layers_view.h>
+#include <game/editor/components/layers_view/layers_view.h>
 #include <game/editor/components/map_view.h>
 
 #include "editor_history.h"
@@ -104,8 +105,8 @@ public:
 	std::vector<std::shared_ptr<CEditorImage>> m_vpImages;
 	std::vector<std::shared_ptr<CEnvelope>> m_vpEnvelopes;
 	std::vector<std::shared_ptr<CEditorSound>> m_vpSounds;
-	std::vector<CEditorGroupInfo> m_vGroupInfos;
-	std::vector<std::shared_ptr<CEditorParentGroup>> m_vpGroupParents;
+
+	std::vector<std::shared_ptr<IEditorMapObject>> m_vpObjects;
 
 	class CMapInfo
 	{
@@ -154,12 +155,12 @@ public:
 
 	std::shared_ptr<CLayerGroup> NewGroup(bool CreateInfo = true);
 
-	CEditorGroupInfo &GroupSelection(const std::vector<int> &vSelectedGroupItems);
-	void UngroupSelection(const std::vector<int> &vSelectedGroupItems);
-	void NewGroups(const std::vector<int> &vSelectedGroupItems);
-	void NewNestedGroups(const std::vector<int> &vSelectedGroupItems);
-	CEditorGroupInfo &NewParentGroup();
-	int GroupInfoIndex(CEditorGroupInfo::EType Type, int GroupIndex);
+	//CEditorGroupInfo &GroupSelection(const std::vector<int> &vSelectedGroupItems);
+	//void UngroupSelection(const std::vector<int> &vSelectedGroupItems);
+	//void NewGroups(const std::vector<int> &vSelectedGroupItems);
+	//void NewNestedGroups(const std::vector<int> &vSelectedGroupItems);
+	//CEditorGroupInfo &NewParentGroup();
+	//int GroupInfoIndex(CEditorGroupInfo::EType Type, int GroupIndex);
 
 	int SwapGroups(int Index0, int Index1)
 	{

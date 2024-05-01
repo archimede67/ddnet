@@ -1,18 +1,39 @@
 #include <game/editor/editor.h>
+#include <game/editor/mapitems/group_ex.h>
+#include <game/mapitems_object.h>
 
 #include <engine/client.h>
 #include <engine/console.h>
 #include <engine/graphics.h>
-#include <engine/serverbrowser.h>
 #include <engine/shared/datafile.h>
 #include <engine/sound.h>
 #include <engine/storage.h>
 
+#include <base/factory.h>
+
 #include <game/gamecore.h>
-#include <game/mapitems_ex.h>
+
+#include <memory>
 
 #include "image.h"
+#include "map_io.h"
 #include "sound.h"
+
+struct CMapObjectMetadata
+{
+	CMapItemObjectType m_Type;
+};
+
+struct CMapObjectWrapper
+{
+	CMapObjectWrapper(const IMapItemObjectBase &Object) :
+		m_Metadata({/*Object->Key()*/}), m_Object(Object) {}
+
+	CMapObjectMetadata m_Metadata;
+	IMapItemObjectBase m_Object;
+
+	size_t Size() { return sizeof(m_Metadata) /*+ m_Object->Size()*/; }
+};
 
 template<typename T>
 static int MakeVersion(int i, const T &v)
@@ -412,31 +433,58 @@ bool CEditorMap::Save(const char *pFileName)
 		free(pPointsBezier);
 	}
 
+	// Save 1 instance of CMapObjectParentGroup
+	//CMapItemParentGroupObject ParentGroupObject;
+	//ParentGroupObject.m_Version = CMapItemParentGroupObject::CURRENT_VERSION;
+	//CMapObjectWrapper<CMapItemParentGroupObject> Test(CMapItemParentGroupObject::Key(), ParentGroupObject);
+	//Writer.AddItem(MAPITEMTYPE_OBJECT, 0, sizeof(Test), &Test);
+
+	//printf("1/ size is %d\n", (int)sizeof(Test.m_Object));
+
+	//// Save 1 instance of CMapObjectLayerGroup
+	//CMapItemLayerGroupObject LayerGroupObject;
+	//CMapObjectWrapper<CMapItemLayerGroupObject> Test2(CMapItemLayerGroupObject::Key(), LayerGroupObject);
+	//Writer.AddItem(MAPITEMTYPE_OBJECT, 1, sizeof(Test2), &Test2);
+
+	//printf("2/ size is %d\n", (int)sizeof(Test2.m_Object));
+
+	CMapWriter MapWriter(Writer);
+	// save objects
+	for(size_t i = 0; i < m_vpObjects.size(); i++)
+	{
+		IMapItemObjectBase Object = std::dynamic_pointer_cast<IEditorMapObjectMixin>(m_vpObjects.at(i))->Save(MapWriter);
+		auto WrappedItem = CMapObjectWrapper(Object);
+
+		printf("%d Size is %d, wrapped size is %d\n", (int)i, (int)0 /* Object->Size()*/, (int)WrappedItem.Size());
+		//
+		Writer.AddItem(MAPITEMTYPE_OBJECT, i, WrappedItem.Size(), &WrappedItem);
+	}
+
 	// save extra group data
-	for(size_t i = 0; i < m_vGroupInfos.size(); i++)
-	{
-		auto &Info = m_vGroupInfos.at(i);
+	//for(size_t i = 0; i < m_vGroupInfos.size(); i++)
+	//{
+	//	auto &Info = m_vGroupInfos.at(i);
 
-		CMapItemGroupInfo InfoMI;
-		InfoMI.m_Version = CMapItemGroupInfo::CURRENT_VERSION;
-		InfoMI.m_Type = Info.m_Type;
-		InfoMI.m_Index = Info.m_GroupIndex;
-		InfoMI.m_Parent = Info.m_ParentIndex;
+	//	CMapItemGroupInfo InfoMI;
+	//	InfoMI.m_Version = CMapItemGroupInfo::CURRENT_VERSION;
+	//	InfoMI.m_Type = Info.m_Type;
+	//	InfoMI.m_Index = Info.m_GroupIndex;
+	//	InfoMI.m_Parent = Info.m_ParentIndex;
 
-		Writer.AddItem(MAPITEMTYPE_GROUP_INFO, i, sizeof(CMapItemGroupInfo), &InfoMI);
-	}
+	//	Writer.AddItem(MAPITEMTYPE_GROUP_INFO, i, sizeof(CMapItemGroupInfo), &InfoMI);
+	//}
 
-	for(size_t i = 0; i < m_vpGroupParents.size(); i++)
-	{
-		auto &pGroupParent = m_vpGroupParents.at(i);
+	//for(size_t i = 0; i < m_vpGroupParents.size(); i++)
+	//{
+	//	auto &pGroupParent = m_vpGroupParents.at(i);
 
-		CMapItemParentGroup ParentGroup;
-		ParentGroup.m_Version = CMapItemParentGroup::CURRENT_VERSION;
-		ParentGroup.m_Name = Writer.AddDataString(pGroupParent->m_aName);
-		ParentGroup.m_Visible = pGroupParent->m_Visible;
-		ParentGroup.m_Collapse = pGroupParent->m_Collapse;
-		Writer.AddItem(MAPITEMTYPE_PARENT_GROUP, i, sizeof(CMapItemParentGroup), &ParentGroup);
-	}
+	//	CMapItemParentGroup ParentGroup;
+	//	ParentGroup.m_Version = CMapItemParentGroup::CURRENT_VERSION;
+	//	ParentGroup.m_Name = Writer.AddDataString(pGroupParent->m_aName);
+	//	ParentGroup.m_Visible = pGroupParent->m_Visible;
+	//	ParentGroup.m_Collapse = pGroupParent->m_Collapse;
+	//	Writer.AddItem(MAPITEMTYPE_PARENT_GROUP, i, sizeof(CMapItemParentGroup), &ParentGroup);
+	//}
 
 	// finish the data file
 	std::shared_ptr<CDataFileWriterFinishJob> pWriterFinishJob = std::make_shared<CDataFileWriterFinishJob>(pFileName, aFileNameTmp, std::move(Writer));
@@ -659,6 +707,8 @@ bool CEditorMap::Load(const char *pFileName, int StorageType, const std::functio
 			pGroup->m_ParallaxY = pGItem->m_ParallaxY;
 			pGroup->m_OffsetX = pGItem->m_OffsetX;
 			pGroup->m_OffsetY = pGItem->m_OffsetY;
+
+			m_vpObjects.push_back(std::make_shared<CLayerGroupObject>(m_vpGroups.size() - 1));
 
 			if(pGItem->m_Version >= 2)
 			{
@@ -1035,46 +1085,85 @@ bool CEditorMap::Load(const char *pFileName, int StorageType, const std::functio
 
 	// load extra group infos
 	{
+		// TEST
+		CMapReader Reader;
+
+		auto pObject = CMapItemObjectFactory::New("Yahoo");
+		if(pObject)
+		{
+			printf("GG\n");
+			std::shared_ptr<IEditorMapObject> pMapObject = pObject->Load(Reader);
+			pMapObject->m_pMap = this;
+		}
+
+		int Start, Num;
+		DataFile.GetType(MAPITEMTYPE_OBJECT, &Start, &Num);
+		for(int i = 0; i < Num; i++)
+		{
+			void *pItem = DataFile.GetItem(Start + i);
+			CMapObjectMetadata Metadata;
+			mem_copy(&Metadata, pItem, sizeof(CMapObjectMetadata));
+			pItem = static_cast<char *>(pItem) + sizeof(CMapObjectMetadata);
+
+			/*
+			
+			auto obj = factory::create(id, [](auto pCreated) {
+				Wrapper(*pCreated).Load(Reader
+			});
+
+			
+			*/
+
+			//auto Object = CMapItemObjectFactory::New("Yahoo");
+			//Object->Load(Reader);
+
+			//auto pObject = ::factory::Registry<IMapObjectBase>::New("Yahoo");
+			//auto pObject = IMapObjectBase::Create(Metadata.m_Type);
+			//dbg_assert(pObject != nullptr, "Could not load map object, data might be corrupted");
+
+			//pObject->Load(Reader, pItem);
+		}
+
 		// load parent groups
-		int ParentGroupsStart, ParentGroupsNum;
-		DataFile.GetType(MAPITEMTYPE_PARENT_GROUP, &ParentGroupsStart, &ParentGroupsNum);
+		//int ParentGroupsStart, ParentGroupsNum;
+		//DataFile.GetType(MAPITEMTYPE_PARENT_GROUP, &ParentGroupsStart, &ParentGroupsNum);
 
-		for(int g = 0; g < ParentGroupsNum; g++)
-		{
-			CMapItemParentGroup *pGroupParentMI = (CMapItemParentGroup *)DataFile.GetItem(ParentGroupsStart + g);
+		//for(int g = 0; g < ParentGroupsNum; g++)
+		//{
+		//	CMapItemParentGroup *pGroupParentMI = (CMapItemParentGroup *)DataFile.GetItem(ParentGroupsStart + g);
 
-			std::shared_ptr<CEditorParentGroup> pGroupParent = std::make_shared<CEditorParentGroup>();
-			const char *pName = DataFile.GetDataString(pGroupParentMI->m_Name);
-			if(pName == nullptr || pName[0] == '\0')
-			{
-				char aBuf[128];
-				str_format(aBuf, sizeof(aBuf), "Error: Failed to read name of parent group %d.", g);
-				ErrorHandler(aBuf);
-			}
-			else
-				str_copy(pGroupParent->m_aName, pName);
+		//	std::shared_ptr<CEditorParentGroup> pGroupParent = std::make_shared<CEditorParentGroup>();
+		//	const char *pName = DataFile.GetDataString(pGroupParentMI->m_Name);
+		//	if(pName == nullptr || pName[0] == '\0')
+		//	{
+		//		char aBuf[128];
+		//		str_format(aBuf, sizeof(aBuf), "Error: Failed to read name of parent group %d.", g);
+		//		ErrorHandler(aBuf);
+		//	}
+		//	else
+		//		str_copy(pGroupParent->m_aName, pName);
 
-			pGroupParent->m_Visible = pGroupParentMI->m_Visible;
-			pGroupParent->m_Collapse = pGroupParentMI->m_Collapse;
+		//	pGroupParent->m_Visible = pGroupParentMI->m_Visible;
+		//	pGroupParent->m_Collapse = pGroupParentMI->m_Collapse;
 
-			m_vpGroupParents.emplace_back(pGroupParent);
-		}
+		//	m_vpGroupParents.emplace_back(pGroupParent);
+		//}
 
-		// load group infos
-		int GroupInfoStart, GroupInfoNum;
-		DataFile.GetType(MAPITEMTYPE_GROUP_INFO, &GroupInfoStart, &GroupInfoNum);
+		//// load group infos
+		//int GroupInfoStart, GroupInfoNum;
+		//DataFile.GetType(MAPITEMTYPE_GROUP_INFO, &GroupInfoStart, &GroupInfoNum);
 
-		for(int g = 0; g < GroupInfoNum; g++)
-		{
-			CMapItemGroupInfo *pGroupInfo = (CMapItemGroupInfo *)DataFile.GetItem(GroupInfoStart + g);
+		//for(int g = 0; g < GroupInfoNum; g++)
+		//{
+		//	CMapItemGroupInfo *pGroupInfo = (CMapItemGroupInfo *)DataFile.GetItem(GroupInfoStart + g);
 
-			m_vGroupInfos.emplace_back();
-			CEditorGroupInfo &Info = m_vGroupInfos.back();
+		//	m_vGroupInfos.emplace_back();
+		//	CEditorGroupInfo &Info = m_vGroupInfos.back();
 
-			Info.m_Type = (CEditorGroupInfo::EType)pGroupInfo->m_Type;
-			Info.m_GroupIndex = pGroupInfo->m_Index;
-			Info.m_ParentIndex = pGroupInfo->m_Parent;
-		}
+		//	Info.m_Type = (CEditorGroupInfo::EType)pGroupInfo->m_Type;
+		//	Info.m_GroupIndex = pGroupInfo->m_Index;
+		//	Info.m_ParentIndex = pGroupInfo->m_Parent;
+		//}
 	}
 
 	PerformSanityChecks(ErrorHandler);
@@ -1119,4 +1208,52 @@ void CEditorMap::PerformSanityChecks(const std::function<void(const char *pError
 		}
 		++ImageIndex;
 	}
+}
+
+auto CMapReader::Load(const CMapItemParentGroupObject &Item)
+{
+	CEditorParentGroup ParentGroupObj;
+
+	printf("Loading CMapItemParentGroupObject! The size is %d\n", (int)sizeof(Item));
+
+	return ParentGroupObj;
+}
+
+auto CMapReader::Load(const CMapItemLayerGroupObject &Item)
+{
+	printf("Loading CMapItemLayerGroupObject! The size is %d\n", (int)sizeof(Item));
+	return CLayerGroupObject(0);
+}
+
+auto CMapWriter::Write(const CEditorParentGroup &Object)
+{
+	// maybe have a class like a pair with both somehow?
+	//std::shared_ptr<CEditorParentGroup> pGroupParent = std::static_pointer_cast<CEditorParentGroup>(pData);
+	//Item.m_Version = CMapItemParentGroupObject::CURRENT_VERSION;
+	printf("Writing CEditorParentGroup!\n");
+	//CMapItemParentGroupObject Item;
+
+	//Item.m_Version = 123;
+
+	return CMapItemLayerGroupObject{};
+}
+
+auto CMapWriter::Write(const CLayerGroupObject &Object)
+{
+	printf("Writing CLayerGroupObject!\n");
+
+	return CMapItemLayerGroupObject{};
+}
+
+template<typename T>
+CEditorMapObject IMapItemObjectBase::CModel<T>::Load(CMapReader &Loader)
+{
+	auto Object = Loader.Load(m_Object);
+	return CEditorMapObjectMixin<decltype(Object)>(Object);
+}
+
+template<typename T>
+std::string IMapItemObjectBase::CModel<T>::Key()
+{
+	return CMapItemObjectFactory::GetKeyFor(type_t<T>{});
 }

@@ -18,6 +18,16 @@ void CLayersView::Init(CEditor *pEditor)
 
 	m_ScrollToSelectionNext = false;
 	m_ParentPopupContext.m_pEditor = pEditor;
+
+	m_pTreeRoot = std::make_shared<CNode>(ITreeNode::TYPE_ROOT, 0, std::make_shared<CEditorMapNode>(&Editor()->m_Map));
+	m_TreeNav = CTreeNavigator(m_pTreeRoot);
+
+	BuildTree();
+}
+
+void CLayersView::OnMapLoad()
+{
+	BuildTree();
 }
 
 void CLayersView::Render(CUIRect LayersBox)
@@ -27,17 +37,38 @@ void CLayersView::Render(CUIRect LayersBox)
 	//auto &SelectedGroup = Editor()->m_SelectedGroup;
 	//auto &vSelectedLayers = Editor()->m_vSelectedLayers;
 
+	CUIRect ButtonsBar;
+	LayersBox.HSplitBottom(20.0f, &LayersBox, &ButtonsBar);
+
+	static int s_NewGroupBtn = 0;
+	if(Editor()->DoButton_Editor(&s_NewGroupBtn, "New group", 0, &ButtonsBar, 0, ""))
+	{
+	}
+
+	{
+		m_TreeView.Start(&LayersBox, 12.0f, 14.0f, CDropTargetInfo::Accept({ITreeNode::TYPE_LAYER_GROUP, ITreeNode::TYPE_FOLDER}));
+		m_TreeView.DoAutoSpacing(4.0f);
+
+		//printf("\n------------- ");
+		//CTreeView::Print(m_TreeView.CurrentPath());
+		//printf(" -------------\n");
+		for(auto &pNode : m_pTreeRoot->m_vpChildren)
+		{
+			RenderTreeNode(pNode);
+			m_TreeView.DoSpacing(4.0f);
+		}
+
+		auto Changes = m_TreeView.End();
+		if(!Changes.Empty())
+			ApplyTreeChanges(Changes);
+
+		if(m_TreeView.DragStatus() == CTreeView::EDragStatus::NOT_ALLOWED)
+			Editor()->m_CursorType = CEditor::CURSOR_NOT_ALLOWED;
+		else if(m_TreeView.DragStatus() == CTreeView::EDragStatus::MOVE_HERE)
+			Editor()->m_CursorType = CEditor::CURSOR_MOVE_HERE;
+	}
+
 	ResetRenderContext();
-
-	CUIRect UnscrolledLayersBox = LayersBox;
-
-	vec2 ScrollOffset(0.0f, 0.0f);
-	CScrollRegionParams ScrollParams;
-	ScrollParams.m_ScrollbarWidth = 10.0f;
-	ScrollParams.m_ScrollbarMargin = 3.0f;
-	ScrollParams.m_ScrollUnit = ROW_HEIGHT * 5.0f;
-	m_ScrollRegion.Begin(&LayersBox, &ScrollOffset, &ScrollParams);
-	LayersBox.y += ScrollOffset.y;
 
 	m_RenderContext.m_ScrollToSelection = pEditor->LayerSelector()->SelectByTile() || m_ScrollToSelectionNext;
 	m_ScrollToSelectionNext = false;
@@ -45,33 +76,33 @@ void CLayersView::Render(CUIRect LayersBox)
 	// TODO: you can select group parents but you can't do anything in the map view if so
 
 	// find root nodes
-	std::vector<bool> vRootNodes(Map.m_vGroupInfos.size());
-	for(int g = 0; g < (int)Map.m_vGroupInfos.size(); g++)
-	{
-		auto &GroupInfo = Map.m_vGroupInfos.at(g);
-		vRootNodes[g] = GroupInfo.m_ParentIndex == CEditorGroupInfo::PARENT_NONE;
+	//std::vector<bool> vRootNodes(Map.m_vGroupInfos.size());
+	//for(int g = 0; g < (int)Map.m_vGroupInfos.size(); g++)
+	//{
+	//	auto &GroupInfo = Map.m_vGroupInfos.at(g);
+	//	vRootNodes[g] = GroupInfo.m_ParentIndex == CEditorGroupInfo::PARENT_NONE;
 
-		//for(int &Child : GroupInfo.m_Children)
-		//	vNodesVisited[Child] = true;
-	}
+	//	//for(int &Child : GroupInfo.m_Children)
+	//	//	vNodesVisited[Child] = true;
+	//}
 
-	// render layers
-	for(int GroupInfoIndex = 0; GroupInfoIndex < (int)Map.m_vGroupInfos.size(); GroupInfoIndex++)
-	{
-		if(!vRootNodes[GroupInfoIndex])
-			continue;
+	//// render layers
+	//for(int GroupInfoIndex = 0; GroupInfoIndex < (int)Map.m_vGroupInfos.size(); GroupInfoIndex++)
+	//{
+	//	if(!vRootNodes[GroupInfoIndex])
+	//		continue;
 
-		const CEditorGroupInfo &Info = Map.m_vGroupInfos.at(GroupInfoIndex);
+	//	const CEditorGroupInfo &Info = Map.m_vGroupInfos.at(GroupInfoIndex);
 
-		if(Info.m_Type == CEditorGroupInfo::TYPE_LAYER_GROUP)
-		{
-			RenderLayersGroup(&LayersBox, Info);
-		}
-		else if(Info.m_Type == CEditorGroupInfo::TYPE_PARENT_GROUP)
-		{
-			RenderParentGroup(&LayersBox, GroupInfoIndex, Info);
-		}
-	}
+	//	//if(Info.m_Type == CEditorGroupInfo::TYPE_LAYER_GROUP)
+	//	//{
+	//	//	RenderLayersGroup(&LayersBox, Info);
+	//	//}
+	//	//else if(Info.m_Type == CEditorGroupInfo::TYPE_PARENT_GROUP)
+	//	//{
+	//	//	RenderParentGroup(&LayersBox, GroupInfoIndex, Info);
+	//	//}
+	//}
 
 	static int s_InitialGroupIndex;
 	static std::vector<int> s_vInitialLayerIndices;
@@ -143,19 +174,147 @@ void CLayersView::Render(CUIRect LayersBox)
 
 	CUIRect AddGroupButton;
 	LayersBox.HSplitTop(ROW_HEIGHT + 1.0f, &AddGroupButton, &LayersBox);
-	if(m_ScrollRegion.AddRect(AddGroupButton))
+	//if(m_ScrollRegion.AddRect(AddGroupButton))
+	//{
+	//	AddGroupButton.HSplitTop(ROW_HEIGHT, &AddGroupButton, 0);
+	//	static int s_AddGroupButton = 0;
+	//	if(Editor()->DoButton_Editor(&s_AddGroupButton, "Add group", 0, &AddGroupButton, IGraphics::CORNER_R, "Adds a new group"))
+	//	{
+	//		Map.NewGroup();
+	//		//SelectedGroup = Map.m_vpGroups.size() - 1;
+	//		//Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionGroup>(Editor(), SelectedGroup, false));
+	//	}
+	//}
+
+	//m_ScrollRegion.End();
+}
+
+void CLayersView::RenderTreeNode(const std::shared_ptr<CNode> &pNode)
+{
+	switch(pNode->m_Type)
 	{
-		AddGroupButton.HSplitTop(ROW_HEIGHT, &AddGroupButton, 0);
-		static int s_AddGroupButton = 0;
-		if(Editor()->DoButton_Editor(&s_AddGroupButton, "Add group", 0, &AddGroupButton, IGraphics::CORNER_R, "Adds a new group"))
+	case ITreeNode::TYPE_LAYER:
+	case ITreeNode::TYPE_ENTITIES_LAYER:
+		RenderLayerNodeItem(pNode);
+		break;
+	case ITreeNode::TYPE_LAYER_GROUP:
+		RenderGroupNodeItem(pNode);
+		break;
+	default:
+		break;
+	}
+}
+
+void CLayersView::RenderLayerNodeItem(const std::shared_ptr<CNode> &pNode)
+{
+	//auto Item = m_TreeView.DoNode(&pLayer, false, ITreeNode::TYPE_LAYER, CDropTargetInfo::None());
+	std::shared_ptr<CLayerNode> pLayerNode = std::static_pointer_cast<CLayerNode>(pNode->m_pData);
+	RenderTreeNodeItem(LayerName(pLayerNode->Layer()), pNode);
+}
+
+void CLayersView::RenderGroupNodeItem(const std::shared_ptr<CNode> &pNode)
+{
+	std::shared_ptr<CLayerGroupNode> pGroupNode = std::static_pointer_cast<CLayerGroupNode>(pNode->m_pData);
+	std::shared_ptr<CLayerGroup> pGroup = pGroupNode->Group();
+
+	char aBuf[64];
+	str_format(aBuf, sizeof(aBuf), "#%d %s", pNode->m_Index, pGroup->m_aName);
+	RenderTreeNodeItem(aBuf, pNode);
+}
+
+void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<CNode> &pNode)
+{
+	static auto &&DoBtn = [&](const void *pId, const char *pText, int Checked, const CUIRect *pRect, bool HasChildren, bool *pClicked) {
+		auto Color = Editor()->GetButtonColor(pId, Checked);
+		pRect->Draw(Color, !HasChildren ? IGraphics::CORNER_ALL : IGraphics::CORNER_R, 3.0f);
+		CUIRect Label;
+		pRect->VMargin(5.0f, &Label);
+		Editor()->Ui()->DoLabel(&Label, pText, 10.0f, TEXTALIGN_ML);
+		return Editor()->Ui()->DoDraggableButtonLogic(pId, Checked, pRect, pClicked, nullptr);
+	};
+
+	bool IsSelected = m_vpSelectedNodes.find(pNode) != m_vpSelectedNodes.end();
+
+	bool Dragging = m_TreeView.Dragging();
+
+	bool *pCollapse = pNode->m_pData->Collapse();
+	bool *pVisible = pNode->m_pData->Visible();
+
+	CDropTargetInfo DropTargetInfo = CDropTargetInfo::None();
+	if(pNode->m_Type == ITreeNode::TYPE_FOLDER)
+		DropTargetInfo = CDropTargetInfo::Accept({ITreeNode::TYPE_FOLDER, ITreeNode::TYPE_LAYER_GROUP});
+	else if(pNode->m_Type == ITreeNode::TYPE_LAYER_GROUP)
+	{
+		std::shared_ptr<CLayerGroupNode> pGroupNode = std::static_pointer_cast<CLayerGroupNode>(pNode->m_pData);
+		if(pGroupNode->Group() == Editor()->m_Map.m_pGameGroup)
+			DropTargetInfo = CDropTargetInfo::Accept({ITreeNode::TYPE_LAYER, ITreeNode::TYPE_ENTITIES_LAYER});
+		else // Do not accept entities layers on non game groups
+			DropTargetInfo = CDropTargetInfo::Accept({ITreeNode::TYPE_LAYER});
+	}
+
+	auto Item = m_TreeView.DoNode(pNode->m_pData.get(), IsSelected, pNode->m_Type, DropTargetInfo);
+	const bool Shift = Editor()->Input()->ShiftIsPressed();
+
+	if(Item.m_IsTargetParent)
+	{
+		// Draw highlighted background
+		Item.m_Rect.Draw(ColorRGBA(0.6f, 0.1f, 0.9f, 0.6f), IGraphics::CORNER_ALL, 3.0f);
+	}
+
+	const bool ChildrenExists = (!pNode->m_vpChildren.empty() || pNode->m_Type != 1) && pCollapse;
+	if(ChildrenExists)
+	{
+		CUIRect ColBtn;
+		Item.m_Rect.VSplitLeft(14.0f, &ColBtn, &Item.m_Rect);
+		if(Editor()->DoButton_FontIcon(pCollapse, *pCollapse ? "+" : "-", *pCollapse, &ColBtn, 0, nullptr, IGraphics::CORNER_L, 8.0f))
+			*pCollapse = !*pCollapse;
+	}
+
+	bool Clicked;
+	int Checked = IsSelected ? 1 : 0;
+	if(pNode->m_Type == ITreeNode::TYPE_ENTITIES_LAYER)
+		Checked += 6;
+
+	int Res = DoBtn(pNode->m_pData.get(), pName, Checked, &Item.m_Rect, ChildrenExists, &Clicked);
+
+	if(Res)
+	{
+		if(!Dragging)
 		{
-			Map.NewGroup();
-			//SelectedGroup = Map.m_vpGroups.size() - 1;
-			//Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionGroup>(Editor(), SelectedGroup, false));
+			if(!Shift && !IsSelected)
+			{
+				m_vpSelectedNodes.clear();
+				m_vpSelectedNodes.insert(pNode);
+			}
+
+			if(Clicked)
+			{
+				if(Res == 1)
+				{
+					if(!Shift)
+					{
+						m_vpSelectedNodes.clear();
+						m_vpSelectedNodes.insert(pNode);
+					}
+					else
+					{
+						if(!IsSelected)
+							m_vpSelectedNodes.insert(pNode);
+						else
+							m_vpSelectedNodes.erase(pNode);
+					}
+				}
+			}
 		}
 	}
 
-	m_ScrollRegion.End();
+	if(ChildrenExists && !*pCollapse)
+	{
+		m_TreeView.PushTree();
+		for(auto &Child : pNode->m_vpChildren)
+			RenderTreeNode(Child);
+		m_TreeView.PopTree();
+	}
 }
 
 //void CLayersView::RenderParentGroup(CUIRect *pRect, int Index, const CEditorGroupInfo &Info)
@@ -481,20 +640,6 @@ int CLayersView::DoSelectable(const void *pId, const char *pText, const CToggleF
 
 	return Result;
 }
-//
-//std::shared_ptr<IGroup> CLayersView::GetGroupBase(const CEditorGroupInfo &GroupInfo)
-//{
-//	switch(GroupInfo.m_Type)
-//	{
-//	case CEditorGroupInfo::TYPE_LAYER_GROUP:
-//		return std::static_pointer_cast<IGroup>(Editor()->m_Map.m_vpGroups.at(GroupInfo.m_GroupIndex));
-//		return nullptr;
-//	case CEditorGroupInfo::TYPE_PARENT_GROUP:
-//		return std::static_pointer_cast<IGroup>(Editor()->m_Map.m_vpGroupParents.at(GroupInfo.m_GroupIndex));
-//	default:
-//		return nullptr;
-//	}
-//}
 
 int CLayersView::DoToggleIconButton(const void *pButtonId, const void *pParentId, const char *pIcon, bool Checked, const CUIRect *pRect, const char *pToolTip)
 {
@@ -514,27 +659,101 @@ void CLayersView::DoIcon(const char *pIcon, const CUIRect *pRect, float FontSize
 	TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
 }
 
-//CToggleFlags CLayersView::GroupFlags(const CEditorGroupInfo &GroupInfo)
-//{
-//	std::shared_ptr<IGroup> pGroupBase = GetGroupBase(GroupInfo);
-//
-//	CToggleFlags Flags;
-//	Flags[CToggleFlags::TOGGLE_COLLAPSE] = &pGroupBase->m_Collapse;
-//	Flags[CToggleFlags::TOGGLE_VISIBILE] = &pGroupBase->m_Visible;
-//
-//	return Flags;
-//}
-//
-//CToggleFlags CLayersView::LayerFlags(const std::shared_ptr<CLayer> &pLayer)
-//{
-//	CToggleFlags Flags;
-//	Flags[CToggleFlags::TOGGLE_VISIBILE] = &pLayer->m_Visible;
-//	return Flags;
-//}
-
 bool CLayersView::CanHandleInput() const
 {
 	return Editor()->m_Dialog == DIALOG_NONE && CLineInput::GetActiveInput() == nullptr;
+}
+
+const char *CLayersView::LayerName(const std::shared_ptr<CLayer> &pLayer)
+{
+	if(pLayer->m_aName[0])
+		return pLayer->m_aName;
+	else
+	{
+		if(pLayer->m_Type == LAYERTYPE_TILES)
+		{
+			std::shared_ptr<CLayerTiles> pTiles = std::static_pointer_cast<CLayerTiles>(pLayer);
+			return pTiles->m_Image >= 0 ? Editor()->m_Map.m_vpImages[pTiles->m_Image]->m_aName : "Tiles";
+		}
+		else if(pLayer->m_Type == LAYERTYPE_QUADS)
+		{
+			std::shared_ptr<CLayerQuads> pQuads = std::static_pointer_cast<CLayerQuads>(pLayer);
+			return pQuads->m_Image >= 0 ? Editor()->m_Map.m_vpImages[pQuads->m_Image]->m_aName : "Quads";
+		}
+		else if(pLayer->m_Type == LAYERTYPE_SOUNDS)
+		{
+			std::shared_ptr<CLayerSounds> pSounds = std::static_pointer_cast<CLayerSounds>(pLayer);
+			return pSounds->m_Sound >= 0 ? Editor()->m_Map.m_vpSounds[pSounds->m_Sound]->m_aName : "Sounds";
+		}
+	}
+
+	return "Unknown";
+}
+
+void CLayersView::BuildTree()
+{
+	auto Start = std::chrono::high_resolution_clock::now();
+
+	auto &Map = Editor()->m_Map;
+	m_pTreeRoot->Clear();
+	for(int g = 0; g < (int)Map.m_vpGroups.size(); g++)
+	{
+		std::shared_ptr<CLayerGroup> &pGroup = Map.m_vpGroups.at(g);
+		auto &pGroupNode = m_pTreeRoot->AddChild(ITreeNode::TYPE_LAYER_GROUP, g, std::make_shared<CLayerGroupNode>(pGroup));
+
+		for(int l = 0; l < (int)pGroup->m_vpLayers.size(); l++)
+		{
+			auto &pLayer = pGroup->m_vpLayers.at(l);
+			pGroupNode->AddChild(pLayer->IsEntitiesLayer() ? ITreeNode::TYPE_ENTITIES_LAYER : ITreeNode::TYPE_LAYER, l, std::make_shared<CLayerNode>(pLayer));
+		}
+	}
+
+	auto End = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<float> Duration = End - Start;
+	printf("BuildTree() took %.12fs (%" PRId64 "ms)\n", Duration.count(), std::chrono::duration_cast<std::chrono::milliseconds>(Duration).count());
+}
+
+void CLayersView::ApplyTreeChanges(const CTreeChanges &Changes)
+{
+	auto To = Changes.To();
+	auto ToParent = To;
+	ToParent.pop_back();
+	int Position = To.back();
+
+	std::shared_ptr<CNode> pToNode = m_TreeNav[ToParent];
+
+	std::vector<std::shared_ptr<ITreeNode>> vpSubTree;
+	for(auto Iterator = Changes.From().rbegin(); Iterator != Changes.From().rend(); Iterator++)
+	{
+		const CTreeNodePath &Path = *Iterator;
+
+		auto ParentPath = Path;
+		ParentPath.pop_back();
+
+		if(ParentPath == ToParent && Path.back() < Position)
+			Position--;
+
+		std::shared_ptr<CNode> pFromNodeParent = m_TreeNav[ParentPath];
+		std::shared_ptr<CNode> pFromNode = pFromNodeParent->m_vpChildren[Path.back()];
+
+		vpSubTree.push_back(pFromNode->m_pData);
+		if(!pFromNodeParent->m_pData->IsLeaf())
+		{
+			std::static_pointer_cast<ITreeParentNode>(pFromNodeParent->m_pData)->RemoveChild(Path.back());
+		}
+	}
+
+	if(!pToNode->m_pData->IsLeaf())
+	{
+		std::shared_ptr<ITreeParentNode> pNode = std::static_pointer_cast<ITreeParentNode>(pToNode->m_pData);
+		for(int Offset = 0; Offset < vpSubTree.size(); Offset++)
+		{
+			pNode->AddChild(Position + Offset, *(vpSubTree.rbegin() + Offset));
+		}
+	}
+
+	// Update tree
+	BuildTree();
 }
 
 // ------------------------------------------------------------

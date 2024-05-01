@@ -1,0 +1,10 @@
+﻿#ifndef GAME_MAPITEMS_OBJECT_TYPES_H
+#define GAME_MAPITEMS_OBJECT_TYPES_H
+
+enum class CMapItemObjectType
+{
+	LAYER_GROUP_OBJECT = 0,
+	PARENT_GROUP_OBJECT,
+};
+
+#endif

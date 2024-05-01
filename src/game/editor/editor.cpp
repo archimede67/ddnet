@@ -7599,6 +7599,9 @@ void CEditor::Reset(bool CreateDefault)
 	{
 		m_EditorWasUsedBefore = true;
 		m_Map.CreateDefault(GetEntitiesTexture());
+
+		for(CEditorComponent &Component : m_vComponents)
+			Component.OnMapLoad();
 	}
 
 	SelectGameLayer();

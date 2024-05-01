@@ -1408,6 +1408,8 @@ set(EXPECTED_DATA
   editor/checker.png
   editor/cursor.png
   editor/cursor_resize.png
+  editor/cursor_not_allowed.png
+  editor/cursor_move_here.png
   editor/entities/DDNet.png
   editor/entities/FNG.png
   editor/entities/Race.png
@@ -1865,6 +1867,8 @@ set_src(BASE GLOB_RECURSE src/base
   color.h
   detect.h
   dynamic.h
+  factory.h
+  generic.h
   hash.cpp
   hash.h
   hash_bundled.cpp
@@ -2027,6 +2031,8 @@ set_src(GAME_SHARED GLOB src/game
   mapitems_ex.cpp
   mapitems_ex.h
   mapitems_ex_types.h
+  mapitems_object.h
+  mapitems_object_types.h
   prng.cpp
   prng.h
   teamscore.cpp
@@ -2309,8 +2315,11 @@ if(CLIENT)
     components/auto_map.h
     components/layer_selector.cpp
     components/layer_selector.h
-    components/layers_view.cpp
-    components/layers_view.h
+    components/layers_view/layers_view.cpp
+    components/layers_view/layers_view.h
+    components/layers_view/node.h
+    components/layers_view/nodes.cpp
+    components/layers_view/nodes.h
     components/map_grid.cpp
     components/map_grid.h
     components/map_view.cpp
@@ -2336,7 +2345,7 @@ if(CLIENT)
     mapitems.h
     mapitems/envelope.cpp
     mapitems/envelope.h
-    mapitems/group.h
+    mapitems/group_ex.cpp
     mapitems/group_ex.h
     mapitems/image.cpp
     mapitems/image.h
@@ -2363,6 +2372,8 @@ if(CLIENT)
     mapitems/layer_tune.h
     mapitems/map.cpp
     mapitems/map_io.cpp
+    mapitems/map_io.h
+    mapitems/map_object.h
     mapitems/sound.cpp
     mapitems/sound.h
     popups.cpp

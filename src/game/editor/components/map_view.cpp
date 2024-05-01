@@ -106,11 +106,16 @@ void CMapView::RenderMap()
 			Map.m_pSwitchLayer->m_Visible = AnyHidden;
 	}
 
-	for(int g = 0; g < (int)Map.m_vpGroups.size(); g++)
+	// TODO: iterate over objects here...
+	for(auto &pObject : Map.m_vpObjects)
 	{
-		if(ResolveVisibility(g))
-			Map.m_vpGroups.at(g)->Render();
+		pObject->Render();
 	}
+	//for(int g = 0; g < (int)Map.m_vpGroups.size(); g++)
+	//{
+	//	if(ResolveVisibility(g))
+	//		Map.m_vpGroups.at(g)->Render();
+	//}
 
 	// render the game, tele, speedup, front, tune and switch above everything else
 	int GameGroupIndex = std::find(Map.m_vpGroups.begin(), Map.m_vpGroups.end(), Map.m_pGameGroup) - Map.m_vpGroups.begin();
@@ -249,22 +254,22 @@ bool CMapView::ResolveVisibility(int GroupIndex)
 	// Otherwise, we need to check for parent groups
 
 	// First find the corresponding group info
-	int GroupInfoIndex = Map.GroupInfoIndex(CEditorGroupInfo::TYPE_LAYER_GROUP, GroupIndex);
-	int Parent = Map.m_vGroupInfos[GroupInfoIndex].m_ParentIndex;
+	//int GroupInfoIndex = Map.GroupInfoIndex(CEditorGroupInfo::TYPE_LAYER_GROUP, GroupIndex);
+	//int Parent = Map.m_vGroupInfos[GroupInfoIndex].m_ParentIndex;
 
-	// Traverse the parents from bottom to up
-	while(Parent != CEditorGroupInfo::PARENT_NONE)
-	{
-		CEditorGroupInfo &Info = Map.m_vGroupInfos.at(Parent);
-		if(Info.m_Type != CEditorGroupInfo::TYPE_PARENT_GROUP)
-			continue;
+	//// Traverse the parents from bottom to up
+	//while(Parent != CEditorGroupInfo::PARENT_NONE)
+	//{
+	//	CEditorGroupInfo &Info = Map.m_vGroupInfos.at(Parent);
+	//	if(Info.m_Type != CEditorGroupInfo::TYPE_PARENT_GROUP)
+	//		continue;
 
-		// If we find a parent that shouldn't be visible, then return false
-		if(!Map.m_vpGroupParents[Info.m_GroupIndex]->m_Visible)
-			return false;
+	//	// If we find a parent that shouldn't be visible, then return false
+	//	if(!Map.m_vpGroupParents[Info.m_GroupIndex]->m_Visible)
+	//		return false;
 
-		Parent = Info.m_ParentIndex;
-	}
+	//	Parent = Info.m_ParentIndex;
+	//}
 
 	// If all parents are visible, it means the group is visible
 	return true;

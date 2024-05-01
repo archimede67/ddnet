@@ -16,7 +16,6 @@ CTreeView::CTreeView()
 	m_HighlightPath.reset();
 
 	m_InitialMouseY = 0;
-	m_PathCounter = -1;
 	m_PopoutHeight = 0;
 	m_PopoutOffset = 0;
 	m_vCurrentDropTargetInfo = {};
@@ -34,11 +33,10 @@ void CTreeView::Start(CUIRect *pView, float Indent, float ItemHeight, const CDro
 	m_vCurrentDropTargetInfo = {RootDropTargetInfo};
 	m_DragStatus = EDragStatus::NONE;
 
-	m_CurrentPath.clear();
 	m_SelectedPath.clear();
 	m_TargetPath.reset();
 	m_HighlightPath.reset();
-	m_PathCounter = -1;
+	m_CurrentPath = {0};
 
 	vec2 ScrollOffset(0.0f, 0.0f);
 	CScrollRegionParams ScrollParams;
@@ -83,7 +81,7 @@ CTreeChanges CTreeView::End()
 		{
 			if(IsValidDropTarget(m_vCurrentDropTargetInfo.back()))
 			{
-				m_CurrentTargetPath = {m_PathCounter + 1}; // Insert at the end
+				m_CurrentTargetPath = {m_CurrentPath[0]}; // Insert at the end
 			}
 			else
 			{
@@ -120,16 +118,11 @@ CTreeChanges CTreeView::End()
 	return {};
 }
 
-CTreeViewItem CTreeView::DoNode(void *pId, bool Selected, int Type, const CDropTargetInfo &DropTargetInfo)
+CTreeViewItem CTreeView::DoNode(const void *pId, bool Selected, int Type, const CDropTargetInfo &DropTargetInfo)
 {
 	m_LastDropTargetInfo = DropTargetInfo;
 	CDropTargetInfo &CurrentDropTargetInfo = m_vCurrentDropTargetInfo.back();
 	const bool ValidCurrentTarget = IsValidDropTarget(CurrentDropTargetInfo);
-
-	if(!m_CurrentPath.empty())
-		m_CurrentPath.pop_back();
-
-	m_CurrentPath.push_back(++m_PathCounter);
 
 	if(m_pDragId == pId)
 	{
@@ -241,6 +234,9 @@ CTreeViewItem CTreeView::DoNode(void *pId, bool Selected, int Type, const CDropT
 	if(m_CurrentPath == m_HighlightPath)
 		Item.m_IsTargetParent = true;
 
+	Item.m_Path = m_CurrentPath;
+	m_CurrentPath.back()++;
+
 	return Item;
 }
 
@@ -256,9 +252,9 @@ void CTreeView::DoSpacing(float Spacing)
 
 void CTreeView::PushTree()
 {
-	m_CurrentPath.push_back(m_PathCounter);
+	m_CurrentPath.back()--;
+	m_CurrentPath.push_back(0);
 	m_vCurrentDropTargetInfo.push_back(m_LastDropTargetInfo);
-	m_PathCounter = -1;
 	Context()->Push();
 }
 
@@ -273,12 +269,10 @@ void CTreeView::PopTree()
 		MouseY = maximum(m_Root.y + 0.01f, MouseY);
 
 		const bool ValidTarget = IsValidDropTarget(m_vCurrentDropTargetInfo.back());
-		auto &SubTree = Context()->CurrentSubTree();
+		auto SubTree = Context()->CurrentSubTree();
 
 		if(MouseY > SubTree.y + SubTree.h && MouseY <= SubTree.y + SubTree.h + 0.25f * m_ItemHeight && ValidTarget)
 		{
-			m_CurrentPath.back()++;
-
 			CUIRect FakeItem;
 			m_ViewContext.m_View.HSplitTop(m_ItemHeight, &FakeItem, nullptr);
 
@@ -291,8 +285,8 @@ void CTreeView::PopTree()
 		m_SelectedPath.clear();
 
 	m_CurrentPath.pop_back();
+	m_CurrentPath.back()++;
 	m_vCurrentDropTargetInfo.pop_back();
-	m_PathCounter = m_CurrentPath.back();
 
 	Context()->Pop();
 }
@@ -385,7 +379,7 @@ void CTreeView::OnDrag()
 	m_State = EState::STATE_DRAGGING;
 }
 
-void CTreeView::OnTarget(const TPath &Path)
+void CTreeView::OnTarget(const CTreeNodePath &Path)
 {
 	m_CurrentTargetPath = Path;
 }

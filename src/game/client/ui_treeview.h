@@ -9,10 +9,15 @@
 #include <unordered_map>
 #include <unordered_set>
 
+// A path is simply a list of numbers, using a convenient name here.
+// It is mainly used to identify a node (the path to a node) within the tree.
+typedef std::vector<int> CTreeNodePath;
+
 struct CTreeViewItem
 {
 	CUIRect m_Rect; // The rect of the element in the tree
 	bool m_IsTargetParent; // Wether or not this item is a drag target parent
+	CTreeNodePath m_Path; // The path to this node/item
 };
 
 // A class describing a drop target
@@ -66,29 +71,25 @@ private:
 // A class describing changes within the tree
 class CTreeChanges
 {
-public:
-	// A path is simply a list of numbers, using a convenient name here
-	using TPath = std::vector<int>;
-
 private:
 	CTreeChanges() :
 		m_vFrom(), m_To() {}
-	CTreeChanges(const std::vector<TPath> &vFrom, TPath &To) :
+	CTreeChanges(const std::vector<CTreeNodePath> &vFrom, CTreeNodePath &To) :
 		m_vFrom(vFrom), m_To(To) {}
 
 public:
 	// Gets the list of initial paths (parent paths that were selected)
-	const std::vector<TPath> &From() const { return m_vFrom; }
+	const std::vector<CTreeNodePath> &From() const { return m_vFrom; }
 
 	// Gets the destination path
-	const TPath &To() const { return m_To; }
+	const CTreeNodePath &To() const { return m_To; }
 
 	// Checks if there are any changes
 	bool Empty() const { return m_vFrom.size() == 0; }
 
 private:
-	std::vector<TPath> m_vFrom;
-	TPath m_To;
+	std::vector<CTreeNodePath> m_vFrom;
+	CTreeNodePath m_To;
 
 	friend class CTreeView;
 };
@@ -101,10 +102,6 @@ private:
 // - Instances of this class must be either static or a member of a class
 class CTreeView : private CUIElementBase
 {
-	// A path is simply a list of numbers, using a convenient name here.
-	// It is mainly used to identify a node (the path to a node) within the tree.
-	using TPath = std::vector<int>;
-
 private:
 	class CContext
 	{
@@ -152,7 +149,7 @@ private:
 	{
 	public:
 		std::unordered_set<int> m_vTypes;
-		std::vector<TPath> m_vOriginalPaths;
+		std::vector<CTreeNodePath> m_vOriginalPaths;
 	};
 
 public:
@@ -168,7 +165,7 @@ public:
 	CTreeView();
 
 	void Start(CUIRect *pView, float Indent, float ItemHeight, const CDropTargetInfo &RootDropTargetInfo = CDropTargetInfo::AcceptAll());
-	CTreeViewItem DoNode(void *pId, bool Selected, int Type, const CDropTargetInfo &DropTargetInfo);
+	CTreeViewItem DoNode(const void *pId, bool Selected, int Type, const CDropTargetInfo &DropTargetInfo);
 	void PushTree();
 	void PopTree();
 	CTreeChanges End();
@@ -179,6 +176,10 @@ public:
 	bool Dragging() const;
 
 	EDragStatus DragStatus() const { return m_DragStatus; }
+	const CTreeNodePath &CurrentPath() const
+	{
+		return m_CurrentPath;
+	}
 
 private:
 	enum class EDragResult
@@ -202,7 +203,7 @@ private:
 	void OnDragCancel();
 	void OnDragStart();
 	void OnDrag();
-	void OnTarget(const TPath &Path);
+	void OnTarget(const CTreeNodePath &Path);
 
 	inline CContext *Context();
 
@@ -226,12 +227,12 @@ private:
 	float m_PopoutX;
 	float m_PopoutHeight;
 	float m_PopoutOffset;
-	TPath m_SelectedPath;
+	CTreeNodePath m_SelectedPath;
 
 	CContext m_ViewContext;
 	CPopoutContext m_PopoutContext;
 
-	std::optional<TPath> m_HighlightPath;
+	std::optional<CTreeNodePath> m_HighlightPath;
 	enum class EState
 	{
 		STATE_NONE,
@@ -248,15 +249,23 @@ private:
 	};
 	EDragEndState m_DragEndState;
 
-	TPath m_CurrentPath;
-	int m_PathCounter;
-	TPath m_CurrentTargetPath;
-	std::optional<TPath> m_TargetPath;
+	CTreeNodePath m_CurrentPath;
+	//int m_PathCounter;
+	CTreeNodePath m_CurrentTargetPath;
+	std::optional<CTreeNodePath> m_TargetPath;
 
 	std::vector<CDropTargetInfo> m_vCurrentDropTargetInfo;
 	CDropTargetInfo m_LastDropTargetInfo;
 
 	EDragStatus m_DragStatus;
+
+public:
+	static void Print(const CTreeNodePath &Path)
+	{
+		printf("/");
+		for(int p : Path)
+			printf("%d/", p);
+	}
 };
 
 #endif
