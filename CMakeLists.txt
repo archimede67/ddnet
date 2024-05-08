@@ -1868,7 +1868,6 @@ set_src(BASE GLOB_RECURSE src/base
   detect.h
   dynamic.h
   factory.h
-  generic.h
   hash.cpp
   hash.h
   hash_bundled.cpp

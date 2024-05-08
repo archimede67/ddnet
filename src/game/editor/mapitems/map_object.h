@@ -32,7 +32,7 @@ private:
 
 struct IEditorMapObjectMixin : public virtual IEditorMapObject
 {
-	virtual IMapItemObjectBase Save(CMapWriter &Writer) = 0;
+	virtual IMapItemObjectBase Save(CMapObjectWriter &Writer) = 0;
 };
 
 template<typename Object, typename std::enable_if_t<std::is_base_of_v<IEditorMapObject, Object>, bool> = true>
@@ -42,7 +42,7 @@ struct CEditorMapObjectMixin : public virtual IEditorMapObjectMixin, public Obje
 		Object(Obj) {}
 
 private:
-	IMapItemObjectBase Save(CMapWriter &Writer) override final
+	IMapItemObjectBase Save(CMapObjectWriter &Writer) override final
 	{
 		return Writer.Write(*static_cast<Object *>(this));
 	}

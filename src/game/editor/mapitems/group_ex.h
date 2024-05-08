@@ -15,6 +15,7 @@ public:
 	char m_aName[16];
 
 	bool m_Visible;
+	int m_Test;
 	bool m_Collapse;
 
 	std::vector<std::shared_ptr<IEditorMapObject>> m_vpChildren;

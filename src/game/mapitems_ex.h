@@ -56,7 +56,7 @@ struct IMapItemObject
 // Map item for a "pointer" to a layergroup
 struct CMapItemLayerGroupObject : IMapItemObject
 {
-	MACRO_MAPITEM_OBJECT("Yahoo");
+	MACRO_MAPITEM_OBJECT(CMapItemObjectType::LAYER_GROUP_OBJECT);
 
 	enum
 	{
@@ -69,7 +69,7 @@ struct CMapItemLayerGroupObject : IMapItemObject
 // Map item for a parent group
 struct CMapItemParentGroupObject : IMapItemObject
 {
-	MACRO_MAPITEM_OBJECT("Test");
+	MACRO_MAPITEM_OBJECT(CMapItemObjectType::PARENT_GROUP_OBJECT);
 
 	enum
 	{
@@ -77,8 +77,7 @@ struct CMapItemParentGroupObject : IMapItemObject
 	};
 
 	int m_Name; // Pointer to string data
-	int m_Test1;
-	int m_Test2;
+	int m_Test;
 };
 // ----------------------------------------
 
