@@ -10,7 +10,7 @@
 
 class CEditorMap;
 
-class IEditorMapObject
+struct IEditorMapObject
 {
 public:
 	virtual ~IEditorMapObject() = default;
@@ -25,18 +25,20 @@ protected:
 	IEditorMapObject &operator=(const IEditorMapObject &) = delete;
 
 private:
+	virtual IEditorMapObjectNode ToObjectNode() = 0;
+
 	CEditorMap *m_pMap;
 
 	friend class CEditorMap;
 };
 
-struct IEditorMapObjectMixin : public virtual IEditorMapObject
+struct IEditorMapObjectMixin : virtual IEditorMapObject
 {
 	virtual IMapItemObjectBase Save(CMapObjectWriter &Writer) = 0;
 };
 
 template<typename Object, typename std::enable_if_t<std::is_base_of_v<IEditorMapObject, Object>, bool> = true>
-struct CEditorMapObjectMixin : public virtual IEditorMapObjectMixin, public Object
+struct CEditorMapObjectMixin : virtual IEditorMapObjectMixin, public virtual Object
 {
 	explicit CEditorMapObjectMixin(const Object &Obj) :
 		Object(Obj) {}
@@ -45,6 +47,24 @@ private:
 	IMapItemObjectBase Save(CMapObjectWriter &Writer) override final
 	{
 		return Writer.Write(*static_cast<Object *>(this));
+	}
+};
+
+// ----------------------------------------------
+
+template<typename Object, typename std::enable_if_t<std::is_base_of_v<IEditorMapObject, Object>, bool> = true>
+struct CEditorMapTreeNodeMixin : public Object
+{
+	template<typename... Args>
+	CEditorMapTreeNodeMixin(Args &&...Arguments) :
+		Object(std::forward<Args>(Arguments)...)
+	{
+	}
+
+private:
+	IEditorMapObjectNode ToObjectNode() override final
+	{
+		return static_cast<Object *>(this);
 	}
 };
 

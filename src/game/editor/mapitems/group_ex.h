@@ -6,7 +6,7 @@
 #include <memory>
 #include <vector>
 
-class CEditorParentGroup : public virtual IEditorMapObject
+class CEditorParentGroup : public IEditorMapObject
 {
 public:
 	void Render() override;
@@ -21,7 +21,7 @@ public:
 	std::vector<std::shared_ptr<IEditorMapObject>> m_vpChildren;
 };
 
-class CLayerGroupObject : public virtual IEditorMapObject
+class CLayerGroupObject : public IEditorMapObject
 {
 public:
 	CLayerGroupObject(int GroupIndex) :

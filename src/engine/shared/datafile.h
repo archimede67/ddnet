@@ -11,6 +11,7 @@
 #include "uuid_manager.h"
 
 #include <array>
+#include <unordered_map>
 #include <vector>
 
 enum
@@ -30,7 +31,7 @@ class CDataFileReader
 
 public:
 	CDataFileReader() :
-		m_pDataFile(nullptr) {}
+		m_pDataFile(nullptr), m_TypeOffsets() {}
 	~CDataFileReader() { Close(); }
 
 	CDataFileReader &operator=(CDataFileReader &&Other)
@@ -55,6 +56,7 @@ public:
 
 	int GetItemSize(int Index) const;
 	void *GetItem(int Index, int *pType = nullptr, int *pId = nullptr, CUuid *pUuid = nullptr);
+	void *GetItemOfType(int Type, int Index, int *pId = nullptr, CUuid *pUuid = nullptr);
 	void GetType(int Type, int *pStart, int *pNum);
 	int FindItemIndex(int Type, int Id);
 	void *FindItem(int Type, int Id);
@@ -63,6 +65,15 @@ public:
 	SHA256_DIGEST Sha256() const;
 	unsigned Crc() const;
 	int MapSize() const;
+
+private:
+	// Cache for accessed item types
+	struct CTypeOffset
+	{
+		int m_Start;
+		int m_Num;
+	};
+	std::unordered_map<int, CTypeOffset> m_TypeOffsets;
 };
 
 // write access

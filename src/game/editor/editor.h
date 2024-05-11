@@ -155,12 +155,12 @@ public:
 
 	std::shared_ptr<CLayerGroup> NewGroup(bool CreateInfo = true);
 
-	//CEditorGroupInfo &GroupSelection(const std::vector<int> &vSelectedGroupItems);
-	//void UngroupSelection(const std::vector<int> &vSelectedGroupItems);
-	//void NewGroups(const std::vector<int> &vSelectedGroupItems);
-	//void NewNestedGroups(const std::vector<int> &vSelectedGroupItems);
-	//CEditorGroupInfo &NewParentGroup();
-	//int GroupInfoIndex(CEditorGroupInfo::EType Type, int GroupIndex);
+	// CEditorGroupInfo &GroupSelection(const std::vector<int> &vSelectedGroupItems);
+	// void UngroupSelection(const std::vector<int> &vSelectedGroupItems);
+	// void NewGroups(const std::vector<int> &vSelectedGroupItems);
+	// void NewNestedGroups(const std::vector<int> &vSelectedGroupItems);
+	// CEditorGroupInfo &NewParentGroup();
+	// int GroupInfoIndex(CEditorGroupInfo::EType Type, int GroupIndex);
 
 	int SwapGroups(int Index0, int Index1)
 	{

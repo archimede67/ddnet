@@ -56,14 +56,14 @@ bool CEditorMap::Save(const char *pFileName)
 
 	// save version
 	{
-		CMapItemVersion Item;
+		CMapItemVersion Item{};
 		Item.m_Version = CMapItemVersion::CURRENT_VERSION;
 		Writer.AddItem(MAPITEMTYPE_VERSION, 0, sizeof(Item), &Item);
 	}
 
 	// save map info
 	{
-		CMapItemInfoSettings Item;
+		CMapItemInfoSettings Item{};
 		Item.m_Version = 1;
 		Item.m_Author = Writer.AddDataString(m_MapInfo.m_aAuthor);
 		Item.m_MapVersion = Writer.AddDataString(m_MapInfo.m_aVersion);
@@ -103,7 +103,7 @@ bool CEditorMap::Save(const char *pFileName)
 		// TODO!
 		pImg->AnalyseTileFlags();
 
-		CMapItemImage Item;
+		CMapItemImage Item{};
 		Item.m_Version = CMapItemImage::CURRENT_VERSION;
 
 		Item.m_Width = pImg->m_Width;
@@ -146,7 +146,7 @@ bool CEditorMap::Save(const char *pFileName)
 	{
 		std::shared_ptr<CEditorSound> pSound = m_vpSounds[i];
 
-		CMapItemSound Item;
+		CMapItemSound Item{};
 		Item.m_Version = 1;
 
 		Item.m_External = 0;
@@ -163,7 +163,7 @@ bool CEditorMap::Save(const char *pFileName)
 	int AutomapperCount = 0;
 	for(const auto &pGroup : m_vpGroups)
 	{
-		CMapItemGroup GItem;
+		CMapItemGroup GItem{};
 		GItem.m_Version = CMapItemGroup::CURRENT_VERSION;
 
 		GItem.m_ParallaxX = pGroup->m_ParallaxX;
@@ -189,7 +189,7 @@ bool CEditorMap::Save(const char *pFileName)
 				std::shared_ptr<CLayerTiles> pLayerTiles = std::static_pointer_cast<CLayerTiles>(pLayer);
 				pLayerTiles->PrepareForSave();
 
-				CMapItemLayerTilemap Item;
+				CMapItemLayerTilemap Item{};
 				Item.m_Version = CMapItemLayerTilemap::CURRENT_VERSION;
 
 				Item.m_Layer.m_Version = 0; // was previously uninitialized, do not rely on it being 0
@@ -256,7 +256,7 @@ bool CEditorMap::Save(const char *pFileName)
 				// save auto mapper of each tile layer (not physics layer)
 				if(!Item.m_Flags)
 				{
-					CMapItemAutoMapperConfig ItemAutomapper;
+					CMapItemAutoMapperConfig ItemAutomapper{};
 					ItemAutomapper.m_Version = CMapItemAutoMapperConfig::CURRENT_VERSION;
 					ItemAutomapper.m_GroupId = GroupCount;
 					ItemAutomapper.m_LayerId = GItem.m_NumLayers;
@@ -349,7 +349,7 @@ bool CEditorMap::Save(const char *pFileName)
 	int PointCount = 0;
 	for(size_t e = 0; e < m_vpEnvelopes.size(); e++)
 	{
-		CMapItemEnvelope Item;
+		CMapItemEnvelope Item{};
 		Item.m_Version = CMapItemEnvelope::CURRENT_VERSION;
 		Item.m_Channels = m_vpEnvelopes[e]->GetChannels();
 		Item.m_StartPoint = PointCount;
@@ -424,36 +424,55 @@ bool CEditorMap::Save(const char *pFileName)
 
 		std::vector<std::shared_ptr<IEditorMapObject>> vpObjects;
 
-		CEditorParentGroup Group{};
-		Group.m_Test = 123;
-		auto pObject1 = std::make_shared<CEditorMapObjectMixin<CEditorParentGroup>>(Group);
+		auto pObj1 = std::make_shared<CEditorMapTreeNodeMixin<CEditorParentGroup>>();
+		pObj1->m_Test = 12346;
 
-		CLayerGroupObject LayerGroup(42);
-		auto pObject2 = std::make_shared<CEditorMapObjectMixin<CLayerGroupObject>>(LayerGroup);
+		auto pObj2 = std::make_shared<CEditorMapTreeNodeMixin<CLayerGroupObject>>(42);
 
-		vpObjects.push_back(pObject1);
-		vpObjects.push_back(pObject2);
+		pObj1->m_pMap = this;
+		pObj2->m_pMap = this;
+
+		vpObjects.push_back(pObj1);
+		vpObjects.push_back(pObj2);
+
+		// for(size_t i = 0; i < vpObjects.size(); i++)
+		//{
+		//	// Cast the object back to the mixin used to create it
+		//	// TODO: find a way to make this better, without the use of std::dynamic_pointer_cast and without
+		//	// adding a virtual Save() method to IEditorMapObject
+		//	auto pMixin = std::dynamic_pointer_cast<IEditorMapObjectMixin>(vpObjects.at(i));
+		//	dbg_assert(pMixin != nullptr, "Could not save map object");
+
+		//	// Save the editor object to a map item object. This returns a type erased class IMapItemObjectBase
+		//	// used to store the concrete type of the underlying item, that will then be used when writing to
+		//	// the data file
+		//	auto MapItemObject = pMixin->Save(MapObjectWriter);
+
+		//	// Pack the object into metadata+data, where the metadata is used to store the type of the item
+		//	// and data is the concrete data of the saved map item
+		//	auto PackedItem = MapItemObject.PackedItem();
+		//	dbg_assert(PackedItem.m_Size > 0, "Invalid packed item size");
+
+		//	// Write the packed item data
+		//	Writer.AddItem(MAPITEMTYPE_OBJECT, i, PackedItem.m_Size, PackedItem.m_pData);
+		//}
+
+		std::unordered_map<int, int> Ids{};
 
 		for(size_t i = 0; i < vpObjects.size(); i++)
 		{
-			// Cast the object back to the mixin used to create it
-			// TODO: find a way to make this better, without the use of std::dynamic_pointer_cast and without
-			// adding a virtual Save() method to IEditorMapObject
-			auto pMixin = std::dynamic_pointer_cast<IEditorMapObjectMixin>(vpObjects.at(i));
-			dbg_assert(pMixin != nullptr, "Could not save map object");
+			IEditorMapObjectNode ObjectNode = vpObjects.at(i)->ToObjectNode();
+			IMapItemTreeNodeBase TreeNodeBase = ObjectNode.Write(MapObjectWriter);
+			IMapItemTreeNodeBase::CPackedItem PackedItem = TreeNodeBase.Pack();
 
-			// Save the editor object to a map item object. This returns a type erased class IMapItemObjectBase
-			// used to store the concrete type of the underlying item, that will then be used when writing to
-			// the data file
-			auto MapItemObject = pMixin->Save(MapObjectWriter);
+			CMapItemRawTreeNode Node{};
+			Node.m_ItemType = TreeNodeBase.Type();
+			Node.m_ItemIndex = Ids[Node.m_ItemType]++;
+			Node.m_FirstChildIndex = -1;
+			Node.m_NextSiblingIndex = -1;
 
-			// Pack the object into metadata+data, where the metadata is used to store the type of the item
-			// and data is the concrete data of the saved map item
-			auto PackedItem = MapItemObject.PackedItem();
-			dbg_assert(PackedItem.m_Size > 0, "Invalid packed item size");
-
-			// Write the packed item data
-			Writer.AddItem(MAPITEMTYPE_OBJECT, i, PackedItem.m_Size, PackedItem.m_pData);
+			Writer.AddItem(TreeNodeBase.Type(), i, PackedItem.m_Size, PackedItem.m_pData);
+			Writer.AddItem(MAPITEMTYPE_TREENODE, i, sizeof(Node), &Node);
 		}
 
 		// TODO:
@@ -463,7 +482,7 @@ bool CEditorMap::Save(const char *pFileName)
 		//
 		// Then saving would be done like it is now, but we save to a different mapitem type instead, in addition
 		// to saving the node's data in the MAPITEMTYPE_OBJECT array
-		// Saving would be different, it would read the node type and index pointer and instantiate the correct object
+		// Loading would be different, it would read the node type and index pointer and instantiate the correct object
 		// through the factory, and then call the load method with the raw pointer which will then be converted into
 		// the concrete type to be loaded as an EditorMapObjectNode
 		//
@@ -694,8 +713,6 @@ bool CEditorMap::Load(const char *pFileName, int StorageType, const std::functio
 			pGroup->m_ParallaxY = pGItem->m_ParallaxY;
 			pGroup->m_OffsetX = pGItem->m_OffsetX;
 			pGroup->m_OffsetY = pGItem->m_OffsetY;
-
-			m_vpObjects.push_back(std::make_shared<CLayerGroupObject>(m_vpGroups.size() - 1));
 
 			if(pGItem->m_Version >= 2)
 			{
@@ -1072,39 +1089,53 @@ bool CEditorMap::Load(const char *pFileName, int StorageType, const std::functio
 
 	// Load map objects
 	{
-		m_vpObjects.clear();
-
 		CMapObjectReader MapObjectReader{};
 		MapObjectReader.m_pReader = &DataFile;
 
-		int Start, Num;
-		DataFile.GetType(MAPITEMTYPE_OBJECT, &Start, &Num);
+		// int Start, Num;
+		// DataFile.GetType(MAPITEMTYPE_OBJECT, &Start, &Num);
 
+		// for(int i = 0; i < Num; i++)
+		//{
+		//	// Get the raw data of the packed item
+		//	void *pItem = DataFile.GetItem(Start + i);
+		//	// Cast to an object metadata to retrieve the type
+		//	CMapObjectMetadata *pMetadata = (CMapObjectMetadata *)pItem;
+		//	auto Type = pMetadata->m_Type;
+
+		//	// Use the stored type to instantiate the corresponding class using the factory
+		//	// This returns a smart pointer to IMapItemObjectBase which is a type erased class
+		//	// allowing us to store a concrete class and expose methods that aren't defined directly
+		//	// on that class but that can use the concrete type.
+		//	// This is to make sure that we don't add extra size to the stored class (which would be
+		//	// the case if we added virtual methods)
+		//	auto pObject = CMapItemObjectFactory::New(Type);
+		//	dbg_assert(pObject != nullptr, "Failed to convert saved map object");
+
+		//	// Load the raw data to an IEditorMapObject by using the above class, passing a
+		//	// CMapObjectReader on which the Load method of the corresponding type will be called
+		//	std::shared_ptr<IEditorMapObject> pMapObject = pObject->Load(MapObjectReader, pItem);
+		//	dbg_assert(pMapObject != nullptr, "Could not load map object of type");
+
+		//	// Finally, set the map and add it to the objects list
+		//	pMapObject->m_pMap = this;
+		//	m_vpObjects.push_back(pMapObject);
+		//}
+
+		int Start, Num;
+		DataFile.GetType(MAPITEMTYPE_TREENODE, &Start, &Num);
 		for(int i = 0; i < Num; i++)
 		{
-			// Get the raw data of the packed item
-			void *pItem = DataFile.GetItem(Start + i);
-			// Cast to an object metadata to retrieve the type
-			CMapObjectMetadata *pMetadata = (CMapObjectMetadata *)pItem;
-			auto Type = pMetadata->m_Type;
+			CMapItemRawTreeNode *pRawNode = (CMapItemRawTreeNode *)DataFile.GetItem(Start + i);
+			dbg_assert(pRawNode != nullptr, "Failed to read raw tree node from map file");
 
-			// Use the stored type to instantiate the corresponding class using the factory
-			// This returns a smart pointer to IMapItemObjectBase which is a type erased class
-			// allowing us to store a concrete class and expose methods that aren't defined directly
-			// on that class but that can use the concrete type.
-			// This is to make sure that we don't add extra size to the stored class (which would be
-			// the case if we added virtual methods)
-			auto pObject = CMapItemObjectFactory::New(Type);
-			dbg_assert(pObject != nullptr, "Failed to convert saved map object");
+			std::shared_ptr<IMapItemTreeNodeBase> pTreeNodeBase = CMapItemTreeNodeFactory::New(pRawNode->m_ItemType);
+			dbg_assert(pTreeNodeBase != nullptr, "Failed to deduce tree node object from raw tree node item type");
 
-			// Load the raw data to an IEditorMapObject by using the above class, passing a
-			// CMapObjectReader on which the Load method of the corresponding type will be called
-			std::shared_ptr<IEditorMapObject> pMapObject = pObject->Load(MapObjectReader, pItem);
-			dbg_assert(pMapObject != nullptr, "Could not load map object of type");
+			void *pData = DataFile.GetItemOfType(pRawNode->m_ItemType, pRawNode->m_ItemIndex);
+			dbg_assert(pData != nullptr, "Failed to load data of tree node from map file");
 
-			// Finally, set the map and add it to the objects list
-			pMapObject->m_pMap = this;
-			m_vpObjects.push_back(pMapObject);
+			pTreeNodeBase->Load(pData);
 		}
 	}
 
@@ -1164,7 +1195,8 @@ std::shared_ptr<IEditorMapObject> IMapItemObjectBase::CModel<T>::Load(CMapObject
 	// If we get here, we know that pItem is a pointer to a packed object containing data of type T
 	m_PackedObject = *(CMapObjectPacked<T> *)pItem;
 	auto Object = Reader.Load(m_PackedObject.m_Object);
-	return std::make_shared<CEditorMapObjectMixin<decltype(Object)>>(Object);
+	// return std::static_pointer_cast<decltype(Object)>(std::make_shared<CEditorMapObjectMixin<decltype(Object)>>(Object));
+	return nullptr;
 }
 
 template<typename T>
@@ -1179,22 +1211,38 @@ CMapItemObjectFactory::KeyType IMapItemObjectBase::CModel<T>::Key()
 	return CMapItemObjectFactory::KeyFor<T>();
 }
 
+template<typename T>
+CMapItemTreeNodeFactory::KeyType IMapItemTreeNodeBase::CModel<T>::Type()
+{
+	return CMapItemTreeNodeFactory::KeyFor<T>();
+}
+
+template<typename T>
+IMapItemTreeNodeBase IEditorMapObjectNode::CModel<T>::Write(CMapObjectWriter &Writer)
+{
+	return Writer.Write(*m_pObject);
+}
+
 // ----------------------------------- Parent Group Object -----------------------------------
 
 auto CMapObjectReader::Load(const CMapItemParentGroupObject &Item)
 {
-	CEditorParentGroup ParentGroupObj;
+	// CEditorParentGroup ParentGroupObj;
 
-	ParentGroupObj.m_Test = Item.m_Test;
+	// ParentGroupObj.m_Test = Item.m_Test;
 
-	return ParentGroupObj;
+	// return ParentGroupObj;
+	return 0;
 }
 
 auto CMapObjectWriter::Write(const CEditorParentGroup &Object)
 {
-	CMapItemParentGroupObject Item;
-	Item.m_Test = Object.m_Test;
+	// CMapItemParentGroupObject Item;
+	// Item.m_Test = Object.m_Test;
 
+	// return Item;
+	CMapItemFolderNode Item{};
+	Item.m_SomeData = 123465;
 	return Item;
 }
 
@@ -1202,12 +1250,16 @@ auto CMapObjectWriter::Write(const CEditorParentGroup &Object)
 
 auto CMapObjectReader::Load(const CMapItemLayerGroupObject &Item)
 {
-	return CLayerGroupObject(Item.m_GroupIndex);
+	// return CLayerGroupObject(Item.m_GroupIndex);
+	return 0;
 }
 
 auto CMapObjectWriter::Write(const CLayerGroupObject &Object)
 {
-	CMapItemLayerGroupObject Item{};
-	Item.m_GroupIndex = Object.m_GroupIndex;
+	// CMapItemLayerGroupObject Item{};
+	// Item.m_GroupIndex = Object.m_GroupIndex;
+	// return Item;
+	CMapItemFolderNode Item{};
+	Item.m_SomeData = 90831245;
 	return Item;
 }

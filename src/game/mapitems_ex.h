@@ -81,5 +81,18 @@ struct CMapItemParentGroupObject : IMapItemObject
 };
 // ----------------------------------------
 
+struct IMapItemTreeNode
+{
+};
+
+struct CMapItemFolderNode : IMapItemTreeNode
+{
+	MACRO_MAPITEM_TREENODE(MAPITEMTYPE_FOLDER_NODE);
+
+	int m_SomeData;
+};
+
+// ----------------------------------------
+
 void RegisterMapItemTypeUuids(class CUuidManager *pManager);
 #endif // GAME_MAPITEMS_EX_H

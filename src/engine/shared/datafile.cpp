@@ -527,8 +527,25 @@ void *CDataFileReader::GetItem(int Index, int *pType, int *pId, CUuid *pUuid)
 	return (void *)(pItem + 1);
 }
 
+void *CDataFileReader::GetItemOfType(int Type, int Index, int *pId, CUuid *pUuid)
+{
+	int Start, Num;
+	GetType(Type, &Start, &Num);
+	dbg_assert(Index < Num, "Item index out of bounds for specific type");
+
+	return GetItem(Index + Start, nullptr, pId, pUuid);
+}
+
 void CDataFileReader::GetType(int Type, int *pStart, int *pNum)
 {
+	auto It = m_TypeOffsets.find(Type);
+	if(It != m_TypeOffsets.end())
+	{
+		*pStart = It->second.m_Start;
+		*pNum = It->second.m_Num;
+		return;
+	}
+
 	*pStart = 0;
 	*pNum = 0;
 
@@ -542,9 +559,11 @@ void CDataFileReader::GetType(int Type, int *pStart, int *pNum)
 		{
 			*pStart = m_pDataFile->m_Info.m_pItemTypes[i].m_Start;
 			*pNum = m_pDataFile->m_Info.m_pItemTypes[i].m_Num;
-			return;
+			break;
 		}
 	}
+
+	m_TypeOffsets.insert(std::make_pair(Type, CTypeOffset{*pStart, *pNum}));
 }
 
 int CDataFileReader::FindItemIndex(int Type, int Id)

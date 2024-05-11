@@ -186,11 +186,11 @@ std::shared_ptr<CLayerGroup> CEditorMap::NewGroup(bool CreateInfo)
 	pGroup->m_pMap = this;
 	m_vpGroups.push_back(pGroup);
 
-	std::shared_ptr<CLayerGroupObject> pGroupObject = std::make_shared<CLayerGroupObject>(Index);
-	pGroupObject->m_pMap = this;
-	m_vpObjects.push_back(pGroupObject);
+	// std::shared_ptr<CLayerGroupObject> pGroupObject = std::make_shared<CLayerGroupObject>(Index);
+	// pGroupObject->m_pMap = this;
+	// m_vpObjects.push_back(pGroupObject);
 
-	//if(CreateInfo)
+	// if(CreateInfo)
 	//{
 	//	// Insert a group info for each layers group
 	//	CEditorGroupInfo Info;
@@ -198,22 +198,22 @@ std::shared_ptr<CLayerGroup> CEditorMap::NewGroup(bool CreateInfo)
 	//	Info.m_Type = CEditorGroupInfo::TYPE_LAYER_GROUP;
 	//	Info.m_ParentIndex = CEditorGroupInfo::PARENT_NONE;
 	//	m_vGroupInfos.push_back(Info);
-	//}
+	// }
 
 	// TODO: removeme
-	//std::shared_ptr<CEditorParentGroup> pGroupParent = std::make_shared<CEditorParentGroup>();
-	//str_format(pGroupParent->m_aName, sizeof(pGroupParent->m_aName), "Test Parent #%d", (int)m_vpGroupParents.size());
-	//CEditorGroupInfo ParentInfo;
-	//ParentInfo.m_GroupIndex = (int)m_vpGroupParents.size();
-	//ParentInfo.m_Children.push_back(m_vGroupInfos.size() - 1);
-	//ParentInfo.m_Type = CEditorGroupInfo::PARENT_GROUP;
-	//m_vpGroupParents.push_back(pGroupParent);
-	//m_vGroupInfos.push_back(ParentInfo);
+	// std::shared_ptr<CEditorParentGroup> pGroupParent = std::make_shared<CEditorParentGroup>();
+	// str_format(pGroupParent->m_aName, sizeof(pGroupParent->m_aName), "Test Parent #%d", (int)m_vpGroupParents.size());
+	// CEditorGroupInfo ParentInfo;
+	// ParentInfo.m_GroupIndex = (int)m_vpGroupParents.size();
+	// ParentInfo.m_Children.push_back(m_vGroupInfos.size() - 1);
+	// ParentInfo.m_Type = CEditorGroupInfo::PARENT_GROUP;
+	// m_vpGroupParents.push_back(pGroupParent);
+	// m_vGroupInfos.push_back(ParentInfo);
 
 	return pGroup;
 }
 
-//CEditorGroupInfo &CEditorMap::GroupSelection(const std::vector<int> &vSelectedGroupItems)
+// CEditorGroupInfo &CEditorMap::GroupSelection(const std::vector<int> &vSelectedGroupItems)
 //{
 //	int TargetIndex = vSelectedGroupItems[0];
 //	int ParentIndex = m_vGroupInfos[TargetIndex].m_ParentIndex;
@@ -240,9 +240,9 @@ std::shared_ptr<CLayerGroup> CEditorMap::NewGroup(bool CreateInfo)
 //	std::swap(m_vGroupInfos[TargetIndex], m_vGroupInfos[NewTargetIndex]);
 //
 //	return Info;
-//}
+// }
 
-//void CEditorMap::UngroupSelection(const std::vector<int> &vSelectedGroupItems)
+// void CEditorMap::UngroupSelection(const std::vector<int> &vSelectedGroupItems)
 //{
 //	std::vector<int> vSortedSelectedGroupItems = vSelectedGroupItems;
 //	std::sort(vSortedSelectedGroupItems.begin(), vSortedSelectedGroupItems.end());
@@ -277,9 +277,9 @@ std::shared_ptr<CLayerGroup> CEditorMap::NewGroup(bool CreateInfo)
 //		for(size_t k = i + 1; k < vSortedSelectedGroupItems.size(); k++)
 //			vSortedSelectedGroupItems[k]--;
 //	}
-//}
+// }
 
-//void CEditorMap::NewGroups(const std::vector<int> &vSelectedGroupItems)
+// void CEditorMap::NewGroups(const std::vector<int> &vSelectedGroupItems)
 //{
 //	// Add a new layers group for each selected group
 //	for(int Selected : vSelectedGroupItems)
@@ -288,9 +288,9 @@ std::shared_ptr<CLayerGroup> CEditorMap::NewGroup(bool CreateInfo)
 //		CEditorGroupInfo &Info = m_vGroupInfos.back();
 //		Info.m_ParentIndex = Selected;
 //	}
-//}
+// }
 
-//void CEditorMap::NewNestedGroups(const std::vector<int> &vSelectedGroupItems)
+// void CEditorMap::NewNestedGroups(const std::vector<int> &vSelectedGroupItems)
 //{
 //	// Add a new parent group inside each selected group
 //	for(int Selected : vSelectedGroupItems)
@@ -298,9 +298,9 @@ std::shared_ptr<CLayerGroup> CEditorMap::NewGroup(bool CreateInfo)
 //		CEditorGroupInfo &Info = NewParentGroup();
 //		Info.m_ParentIndex = Selected;
 //	}
-//}
+// }
 
-//CEditorGroupInfo &CEditorMap::NewParentGroup()
+// CEditorGroupInfo &CEditorMap::NewParentGroup()
 //{
 //	// Create a new ParentGroup
 //	std::shared_ptr<CEditorParentGroup> pGroupParent = std::make_shared<CEditorParentGroup>();
@@ -319,7 +319,7 @@ std::shared_ptr<CLayerGroup> CEditorMap::NewGroup(bool CreateInfo)
 //	m_vGroupInfos.push_back(Info);
 //
 //	return m_vGroupInfos.back();
-//}
+// }
 
 void CEditorMap::DeleteGroup(int Index)
 {
@@ -329,11 +329,11 @@ void CEditorMap::DeleteGroup(int Index)
 	m_vpGroups.erase(m_vpGroups.begin() + Index);
 
 	// Remove linked GroupInfo
-	//auto GroupInfoPos = std::find_if(m_vGroupInfos.begin(), m_vGroupInfos.end(), [Index](const CEditorGroupInfo &Info) {
+	// auto GroupInfoPos = std::find_if(m_vGroupInfos.begin(), m_vGroupInfos.end(), [Index](const CEditorGroupInfo &Info) {
 	//	return Info.m_GroupIndex == Index;
 	//});
 
-	//if(GroupInfoPos != m_vGroupInfos.end())
+	// if(GroupInfoPos != m_vGroupInfos.end())
 	//{
 	//	const int GroupInfoIndex = GroupInfoPos - m_vGroupInfos.begin();
 	//	m_vGroupInfos.erase(GroupInfoPos);
@@ -349,7 +349,7 @@ void CEditorMap::DeleteGroup(int Index)
 	//}
 }
 
-//int CEditorMap::GroupInfoIndex(CEditorGroupInfo::EType Type, int GroupIndex)
+// int CEditorMap::GroupInfoIndex(CEditorGroupInfo::EType Type, int GroupIndex)
 //{
 //	// Gets a group info index from a group index
 //	auto GroupInfoPos = std::find_if(m_vGroupInfos.begin(), m_vGroupInfos.end(), [Type, GroupIndex](const CEditorGroupInfo &Info) {
@@ -360,4 +360,4 @@ void CEditorMap::DeleteGroup(int Index)
 //		return -1;
 //
 //	return GroupInfoPos - m_vGroupInfos.begin();
-//}
+// }
