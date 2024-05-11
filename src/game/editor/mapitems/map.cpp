@@ -188,7 +188,7 @@ std::shared_ptr<CLayerGroup> CEditorMap::NewGroup(bool CreateInfo)
 
 	// std::shared_ptr<CLayerGroupObject> pGroupObject = std::make_shared<CLayerGroupObject>(Index);
 	// pGroupObject->m_pMap = this;
-	// m_vpObjects.push_back(pGroupObject);
+	// m_vpRootObjects.push_back(pGroupObject);
 
 	// if(CreateInfo)
 	//{

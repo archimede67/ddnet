@@ -106,7 +106,7 @@ public:
 	std::vector<std::shared_ptr<CEnvelope>> m_vpEnvelopes;
 	std::vector<std::shared_ptr<CEditorSound>> m_vpSounds;
 
-	std::vector<std::shared_ptr<IEditorMapObject>> m_vpObjects;
+	std::vector<std::shared_ptr<IEditorMapObject>> m_vpRootObjects;
 
 	class CMapInfo
 	{
@@ -203,6 +203,8 @@ public:
 
 	// io
 	bool Save(const char *pFilename);
+	void SaveMapItemNode();
+
 	bool Load(const char *pFilename, int StorageType, const std::function<void(const char *pErrorMessage)> &ErrorHandler);
 	void PerformSanityChecks(const std::function<void(const char *pErrorMessage)> &ErrorHandler);
 

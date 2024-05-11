@@ -32,64 +32,24 @@ struct CMapItemAutoMapperConfig
 	int m_Flags;
 };
 
-struct CMapItemRoot
-{
-	enum
-	{
-		CURRENT_VERSION = 1
-	};
-
-	int m_Version;
-	int m_Objects; // Pointer to the list of root objects
-};
-
-// --- Object base ------------------------
-
-struct IMapItemObject
-{
-	int m_Version;
-};
-// ----------------------------------------
-
-// --- Objects ----------------------------
-
-// Map item for a "pointer" to a layergroup
-struct CMapItemLayerGroupObject : IMapItemObject
-{
-	MACRO_MAPITEM_OBJECT(CMapItemObjectType::LAYER_GROUP_OBJECT);
-
-	enum
-	{
-		CURRENT_VERSION = 1
-	};
-
-	int m_GroupIndex; // Index to the LayerGroup
-};
-
-// Map item for a parent group
-struct CMapItemParentGroupObject : IMapItemObject
-{
-	MACRO_MAPITEM_OBJECT(CMapItemObjectType::PARENT_GROUP_OBJECT);
-
-	enum
-	{
-		CURRENT_VERSION = 1
-	};
-
-	int m_Name; // Pointer to string data
-	int m_Test;
-};
-// ----------------------------------------
-
 struct IMapItemTreeNode
 {
+	int m_Version;
 };
 
 struct CMapItemFolderNode : IMapItemTreeNode
 {
 	MACRO_MAPITEM_TREENODE(MAPITEMTYPE_FOLDER_NODE);
 
-	int m_SomeData;
+	enum
+	{
+		CURRENT_VERSION = 1
+	};
+
+	int m_Name;
+	int m_Visible;
+	int m_Collapse;
+	int m_Test;
 };
 
 // ----------------------------------------

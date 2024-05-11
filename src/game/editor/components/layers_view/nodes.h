@@ -9,6 +9,7 @@ class CLayer;
 class CLayerGroup;
 class CLayerNode;
 class CEditorMap;
+class CEditorParentGroup;
 
 // Node for CEditorMap (root)
 class CEditorMapNode : public ITreeParentNode
@@ -46,6 +47,25 @@ public:
 
 private:
 	std::shared_ptr<CLayerGroup> m_pGroup;
+};
+
+class CEditorFolderNode : public ITreeParentNode
+{
+public:
+	CEditorFolderNode(const std::shared_ptr<CEditorParentGroup> &pFolder) :
+		m_pFolder(pFolder) {}
+
+	void AddChild(int Index, const std::shared_ptr<ITreeNode> &pChild) override;
+	void RemoveChild(int Index) override;
+
+	bool *Visible() override;
+	bool *Collapse() override;
+	const void *Id() override { return m_pFolder.get(); }
+
+	const std::shared_ptr<CEditorParentGroup> &Folder() { return m_pFolder; }
+
+private:
+	std::shared_ptr<CEditorParentGroup> m_pFolder;
 };
 
 // Node for CLayer ---------------------------------------

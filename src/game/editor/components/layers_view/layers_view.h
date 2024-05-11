@@ -150,7 +150,8 @@ private:
 	{
 		const char *m_pIcon;
 
-		SExtraRenderInfo() : m_pIcon(nullptr) {}
+		SExtraRenderInfo() :
+			m_pIcon(nullptr) {}
 	};
 
 	struct STreeNodePathHasher
@@ -188,21 +189,21 @@ private:
 	std::unordered_set<CTreeNodeInfo, STreeNodeInfoHasher> m_vpSelectedNodes;
 
 private:
-	//void RenderLayersGroup(CUIRect *pRect, const CEditorGroupInfo &Info);
-	//void RenderParentGroup(CUIRect *pRect, int Index, const CEditorGroupInfo &Info);
+	// void RenderLayersGroup(CUIRect *pRect, const CEditorGroupInfo &Info);
+	// void RenderParentGroup(CUIRect *pRect, int Index, const CEditorGroupInfo &Info);
 
 	void RenderTreeNode(const std::shared_ptr<CNode> &pNode);
 
 	void RenderLayerNodeItem(const std::shared_ptr<CNode> &pNode);
 	void RenderGroupNodeItem(const std::shared_ptr<CNode> &pNode);
-	void RenderFolderNodeItem();
+	void RenderFolderNodeItem(const std::shared_ptr<CNode> &pNode);
 
 	void RenderTreeNodeItem(const char *pName, const std::shared_ptr<CNode> &pNode);
 
 	inline void ResetRenderContext();
 
 	int DoSelectable(const void *pId, const char *pText, const CToggleFlags &Flags, int Checked, const CUIRect *pRect, const char *pToolTip, const SExtraRenderInfo &Extra = {});
-	//std::shared_ptr<IGroup> GetGroupBase(const CEditorGroupInfo &pGroupInfo);
+	// std::shared_ptr<IGroup> GetGroupBase(const CEditorGroupInfo &pGroupInfo);
 
 	int DoToggleIconButton(const void *pButtonId, const void *pParentId, const char *pIcon, bool Checked, const CUIRect *pRect, const char *pToolTip);
 	void DoIcon(const char *pIcon, const CUIRect *pRect, float FontSize);
@@ -213,15 +214,15 @@ private:
 	void BuildTree();
 	void ApplyTreeChanges(const CTreeChanges &Changes);
 
-	//template<typename T, typename Iter>
-	//void InsertNodes(Iter NodesBegin, Iter NodesEnd, std::vector<std::shared_ptr<T>> &vpTarget, int Position)
+	// template<typename T, typename Iter>
+	// void InsertNodes(Iter NodesBegin, Iter NodesEnd, std::vector<std::shared_ptr<T>> &vpTarget, int Position)
 	//{
 	//	size_t Size = NodesEnd - NodesBegin;
 	//	for(int Offset = 0; Offset < Size; Offset++)
 	//	{
 	//		vpTarget.insert(vpTarget.begin() + Position + Offset, std::static_pointer_cast<T>(*(NodesBegin + Offset)));
 	//	}
-	//}
+	// }
 
 private:
 	static constexpr float ROW_HEIGHT = 12.0f;

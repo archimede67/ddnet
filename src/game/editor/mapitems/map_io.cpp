@@ -419,77 +419,36 @@ bool CEditorMap::Save(const char *pFileName)
 
 	// Save map objects
 	{
-		CMapObjectWriter MapObjectWriter{};
-		MapObjectWriter.m_pWriter = &Writer;
+		CMapItemTreeWriter ItemTreeWriter{};
+		ItemTreeWriter.m_pWriter = &Writer;
+		ItemTreeWriter.m_MapObjectWriter.m_pWriter = &Writer;
 
-		std::vector<std::shared_ptr<IEditorMapObject>> vpObjects;
+		std::vector<std::shared_ptr<IEditorMapObject>> vpRootObjects;
 
-		auto pObj1 = std::make_shared<CEditorMapTreeNodeMixin<CEditorParentGroup>>();
-		pObj1->m_Test = 12346;
+		auto pFolder1 = std::make_shared<CEditorMapTreeNodeMixin<CEditorParentGroup>>();
+		pFolder1->m_Collapse = false;
+		pFolder1->m_Test = 123;
+		pFolder1->m_Visible = true;
+		str_copy(pFolder1->m_aName, "Folder 1");
 
-		auto pObj2 = std::make_shared<CEditorMapTreeNodeMixin<CLayerGroupObject>>(42);
+		auto pFolder2 = std::make_shared<CEditorMapTreeNodeMixin<CEditorParentGroup>>();
+		pFolder2->m_Collapse = true;
+		pFolder2->m_Test = 456;
+		pFolder2->m_Visible = true;
+		str_copy(pFolder2->m_aName, "Folder 2");
 
-		pObj1->m_pMap = this;
-		pObj2->m_pMap = this;
+		auto pFolder3 = std::make_shared<CEditorMapTreeNodeMixin<CEditorParentGroup>>();
+		pFolder3->m_Collapse = false;
+		pFolder3->m_Test = 789;
+		pFolder3->m_Visible = false;
+		str_copy(pFolder3->m_aName, "Folder 3");
 
-		vpObjects.push_back(pObj1);
-		vpObjects.push_back(pObj2);
+		pFolder2->m_vpChildren.push_back(pFolder3);
+		pFolder1->m_vpChildren.push_back(pFolder2);
 
-		// for(size_t i = 0; i < vpObjects.size(); i++)
-		//{
-		//	// Cast the object back to the mixin used to create it
-		//	// TODO: find a way to make this better, without the use of std::dynamic_pointer_cast and without
-		//	// adding a virtual Save() method to IEditorMapObject
-		//	auto pMixin = std::dynamic_pointer_cast<IEditorMapObjectMixin>(vpObjects.at(i));
-		//	dbg_assert(pMixin != nullptr, "Could not save map object");
+		vpRootObjects.push_back(pFolder1);
 
-		//	// Save the editor object to a map item object. This returns a type erased class IMapItemObjectBase
-		//	// used to store the concrete type of the underlying item, that will then be used when writing to
-		//	// the data file
-		//	auto MapItemObject = pMixin->Save(MapObjectWriter);
-
-		//	// Pack the object into metadata+data, where the metadata is used to store the type of the item
-		//	// and data is the concrete data of the saved map item
-		//	auto PackedItem = MapItemObject.PackedItem();
-		//	dbg_assert(PackedItem.m_Size > 0, "Invalid packed item size");
-
-		//	// Write the packed item data
-		//	Writer.AddItem(MAPITEMTYPE_OBJECT, i, PackedItem.m_Size, PackedItem.m_pData);
-		//}
-
-		std::unordered_map<int, int> Ids{};
-
-		for(size_t i = 0; i < vpObjects.size(); i++)
-		{
-			IEditorMapObjectNode ObjectNode = vpObjects.at(i)->ToObjectNode();
-			IMapItemTreeNodeBase TreeNodeBase = ObjectNode.Write(MapObjectWriter);
-			IMapItemTreeNodeBase::CPackedItem PackedItem = TreeNodeBase.Pack();
-
-			CMapItemRawTreeNode Node{};
-			Node.m_ItemType = TreeNodeBase.Type();
-			Node.m_ItemIndex = Ids[Node.m_ItemType]++;
-			Node.m_FirstChildIndex = -1;
-			Node.m_NextSiblingIndex = -1;
-
-			Writer.AddItem(TreeNodeBase.Type(), i, PackedItem.m_Size, PackedItem.m_pData);
-			Writer.AddItem(MAPITEMTYPE_TREENODE, i, sizeof(Node), &Node);
-		}
-
-		// TODO:
-		// Try to use an alternative way. Instead of saving all objects in one giant array of 1 mapitem type,
-		// save each object type to their own array, and use a factory with the key type being int? or try to scope
-		// the enum class of mapitem types and use this as the keys
-		//
-		// Then saving would be done like it is now, but we save to a different mapitem type instead, in addition
-		// to saving the node's data in the MAPITEMTYPE_OBJECT array
-		// Loading would be different, it would read the node type and index pointer and instantiate the correct object
-		// through the factory, and then call the load method with the raw pointer which will then be converted into
-		// the concrete type to be loaded as an EditorMapObjectNode
-		//
-		// Now one question is, do the objects need to know about their children, or are the children only used as a
-		// hierarchy. Maybe they do need to know about their children, just like the LayerGroup do.
-		//
-		// How to make this more general though?
+		ItemTreeWriter.WriteRoot(vpRootObjects);
 	}
 
 	// finish the data file
@@ -1091,52 +1050,12 @@ bool CEditorMap::Load(const char *pFileName, int StorageType, const std::functio
 	{
 		CMapObjectReader MapObjectReader{};
 		MapObjectReader.m_pReader = &DataFile;
+		MapObjectReader.m_pfnErrorHandler = &ErrorHandler;
 
-		// int Start, Num;
-		// DataFile.GetType(MAPITEMTYPE_OBJECT, &Start, &Num);
+		CMapItemTreeReader ItemTreeReader(MapObjectReader);
+		ItemTreeReader.m_pReader = &DataFile;
 
-		// for(int i = 0; i < Num; i++)
-		//{
-		//	// Get the raw data of the packed item
-		//	void *pItem = DataFile.GetItem(Start + i);
-		//	// Cast to an object metadata to retrieve the type
-		//	CMapObjectMetadata *pMetadata = (CMapObjectMetadata *)pItem;
-		//	auto Type = pMetadata->m_Type;
-
-		//	// Use the stored type to instantiate the corresponding class using the factory
-		//	// This returns a smart pointer to IMapItemObjectBase which is a type erased class
-		//	// allowing us to store a concrete class and expose methods that aren't defined directly
-		//	// on that class but that can use the concrete type.
-		//	// This is to make sure that we don't add extra size to the stored class (which would be
-		//	// the case if we added virtual methods)
-		//	auto pObject = CMapItemObjectFactory::New(Type);
-		//	dbg_assert(pObject != nullptr, "Failed to convert saved map object");
-
-		//	// Load the raw data to an IEditorMapObject by using the above class, passing a
-		//	// CMapObjectReader on which the Load method of the corresponding type will be called
-		//	std::shared_ptr<IEditorMapObject> pMapObject = pObject->Load(MapObjectReader, pItem);
-		//	dbg_assert(pMapObject != nullptr, "Could not load map object of type");
-
-		//	// Finally, set the map and add it to the objects list
-		//	pMapObject->m_pMap = this;
-		//	m_vpObjects.push_back(pMapObject);
-		//}
-
-		int Start, Num;
-		DataFile.GetType(MAPITEMTYPE_TREENODE, &Start, &Num);
-		for(int i = 0; i < Num; i++)
-		{
-			CMapItemRawTreeNode *pRawNode = (CMapItemRawTreeNode *)DataFile.GetItem(Start + i);
-			dbg_assert(pRawNode != nullptr, "Failed to read raw tree node from map file");
-
-			std::shared_ptr<IMapItemTreeNodeBase> pTreeNodeBase = CMapItemTreeNodeFactory::New(pRawNode->m_ItemType);
-			dbg_assert(pTreeNodeBase != nullptr, "Failed to deduce tree node object from raw tree node item type");
-
-			void *pData = DataFile.GetItemOfType(pRawNode->m_ItemType, pRawNode->m_ItemIndex);
-			dbg_assert(pData != nullptr, "Failed to load data of tree node from map file");
-
-			pTreeNodeBase->Load(pData);
-		}
+		m_vpRootObjects = ItemTreeReader.ReatRoot();
 	}
 
 	PerformSanityChecks(ErrorHandler);
@@ -1184,31 +1103,10 @@ void CEditorMap::PerformSanityChecks(const std::function<void(const char *pError
 }
 
 template<typename T>
-IMapItemObjectBase::CModel<T>::CModel(const T &Object) :
-	m_PackedObject(Key(), Object)
+std::shared_ptr<IEditorMapObject> IMapItemTreeNodeBase::CModel<T>::Load(CMapObjectReader &Reader, const void *pData)
 {
-}
-
-template<typename T>
-std::shared_ptr<IEditorMapObject> IMapItemObjectBase::CModel<T>::Load(CMapObjectReader &Reader, const void *pItem)
-{
-	// If we get here, we know that pItem is a pointer to a packed object containing data of type T
-	m_PackedObject = *(CMapObjectPacked<T> *)pItem;
-	auto Object = Reader.Load(m_PackedObject.m_Object);
-	// return std::static_pointer_cast<decltype(Object)>(std::make_shared<CEditorMapObjectMixin<decltype(Object)>>(Object));
-	return nullptr;
-}
-
-template<typename T>
-IMapItemObjectBase::CPackedItem IMapItemObjectBase::CModel<T>::PackedItem()
-{
-	return IMapItemObjectBase::CPackedItem(&m_PackedObject, sizeof(m_PackedObject));
-}
-
-template<typename T>
-CMapItemObjectFactory::KeyType IMapItemObjectBase::CModel<T>::Key()
-{
-	return CMapItemObjectFactory::KeyFor<T>();
+	auto Object = Reader.Load(*(T *)pData);
+	return std::make_shared<CEditorMapTreeNodeMixin<decltype(Object)>>(Object);
 }
 
 template<typename T>
@@ -1225,41 +1123,140 @@ IMapItemTreeNodeBase IEditorMapObjectNode::CModel<T>::Write(CMapObjectWriter &Wr
 
 // ----------------------------------- Parent Group Object -----------------------------------
 
-auto CMapObjectReader::Load(const CMapItemParentGroupObject &Item)
+auto CMapObjectReader::Load(const CMapItemFolderNode &Item)
 {
-	// CEditorParentGroup ParentGroupObj;
+	CEditorParentGroup Object{};
 
-	// ParentGroupObj.m_Test = Item.m_Test;
+	Object.m_Test = Item.m_Test;
+	Object.m_Visible = Item.m_Visible;
+	Object.m_Collapse = Item.m_Collapse;
+	const char *pName = DataFile()->GetDataString(Item.m_Name);
+	if(pName == nullptr)
+	{
+		char aBuf[128];
+		str_format(aBuf, sizeof(aBuf), "Error: Failed to read item name from map info.");
+		Error(aBuf);
+		Object.m_aName[0] = '\0';
+	}
+	else
+	{
+		str_copy(Object.m_aName, pName);
+	}
 
-	// return ParentGroupObj;
-	return 0;
+	printf("Loading folder '%s'\n", Object.m_aName);
+
+	return Object;
 }
 
 auto CMapObjectWriter::Write(const CEditorParentGroup &Object)
 {
-	// CMapItemParentGroupObject Item;
-	// Item.m_Test = Object.m_Test;
-
-	// return Item;
 	CMapItemFolderNode Item{};
-	Item.m_SomeData = 123465;
+
+	Item.m_Version = CMapItemFolderNode::CURRENT_VERSION;
+	Item.m_Test = Object.m_Test;
+	Item.m_Visible = Object.m_Visible;
+	Item.m_Collapse = Object.m_Collapse;
+	Item.m_Name = Writer()->AddDataString(Object.m_aName);
+
+	printf("Saving folder node '%s'\n", Object.m_aName);
+
 	return Item;
 }
 
-// ----------------------------------- Layer Group Object -----------------------------------
+CMapItemTreeWriter::CMapItemTreeWriter() :
+	m_MapObjectWriter(), m_Index(0), m_IndexByType() {}
 
-auto CMapObjectReader::Load(const CMapItemLayerGroupObject &Item)
+void CMapItemTreeWriter::WriteRoot(const std::vector<std::shared_ptr<IEditorMapObject>> &vpRootObjects)
 {
-	// return CLayerGroupObject(Item.m_GroupIndex);
-	return 0;
+	WriteObjects(vpRootObjects, nullptr);
 }
 
-auto CMapObjectWriter::Write(const CLayerGroupObject &Object)
+void CMapItemTreeWriter::WriteObjects(const std::vector<std::shared_ptr<class IEditorMapObject>> &vpObjects, int *pFirstChild)
 {
-	// CMapItemLayerGroupObject Item{};
-	// Item.m_GroupIndex = Object.m_GroupIndex;
-	// return Item;
-	CMapItemFolderNode Item{};
-	Item.m_SomeData = 90831245;
-	return Item;
+	if(pFirstChild)
+		*pFirstChild = -1;
+
+	static std::unordered_map<int, const char *> s_Names{
+		{MAPITEMTYPE_FOLDER_NODE, "Folder node"},
+	};
+
+	for(size_t i = 0; i < vpObjects.size(); i++)
+	{
+		const auto &pObject = vpObjects.at(i);
+		int ObjectIndex = NextIndex();
+
+		if(pFirstChild && *pFirstChild == -1)
+			*pFirstChild = ObjectIndex;
+
+		IEditorMapObjectNode ObjectNode = pObject->ToObjectNode();
+		IMapItemTreeNodeBase TreeNodeBase = ObjectNode.Write(m_MapObjectWriter);
+		IMapItemTreeNodeBase::CPackedItem PackedItem = TreeNodeBase.Pack();
+
+		int FirstChildIndex;
+		WriteObjects(pObject->m_vpChildren, &FirstChildIndex);
+
+		CMapItemRawTreeNode Node{};
+		Node.m_ItemType = TreeNodeBase.Type();
+		Node.m_ItemIndex = NextTypeIndex(Node.m_ItemType);
+		Node.m_FirstChildIndex = FirstChildIndex;
+		Node.m_NextSiblingIndex = (i + 1) < vpObjects.size() ? m_Index : -1;
+
+		printf("(%d) Saving item of type '%s'\n", Node.m_ItemIndex, s_Names[Node.m_ItemType]);
+		Writer()->AddItem(Node.m_ItemType, Node.m_ItemIndex, PackedItem.m_Size, PackedItem.m_pData);
+
+		printf("[%d] Saving tree node, first child at %d, next sibling at %d\n", ObjectIndex, Node.m_FirstChildIndex, Node.m_NextSiblingIndex);
+		Writer()->AddItem(MAPITEMTYPE_TREENODE, ObjectIndex, sizeof(Node), &Node);
+	}
+}
+
+int CMapItemTreeWriter::NextTypeIndex(int Type)
+{
+	return m_IndexByType[Type]++;
+}
+
+int CMapItemTreeWriter::NextIndex()
+{
+	return m_Index++;
+}
+
+CMapItemTreeReader::CMapItemTreeReader(const CMapObjectReader &ObjectReader) :
+	m_ObjectReader(ObjectReader) {}
+
+std::vector<std::shared_ptr<IEditorMapObject>> CMapItemTreeReader::ReatRoot()
+{
+	return ReadObjects(0);
+}
+
+std::vector<std::shared_ptr<IEditorMapObject>> CMapItemTreeReader::ReadObjects(int FirstIndex)
+{
+	std::vector<std::shared_ptr<IEditorMapObject>> vpObjects{};
+
+	CMapItemRawTreeNode *pRawNode = (CMapItemRawTreeNode *)DataFile()->FindItem(MAPITEMTYPE_TREENODE, FirstIndex);
+	dbg_assert(pRawNode != nullptr, "Failed to read raw tree node from map file");
+
+	std::shared_ptr<IMapItemTreeNodeBase> pTreeNodeBase = CMapItemTreeNodeFactory::New(pRawNode->m_ItemType);
+	dbg_assert(pTreeNodeBase != nullptr, "Failed to deduce tree node object from raw tree node item type");
+
+	void *pData = DataFile()->GetItemOfType(pRawNode->m_ItemType, pRawNode->m_ItemIndex);
+	dbg_assert(pData != nullptr, "Failed to load data of tree node from map file");
+
+	std::shared_ptr<IEditorMapObject> pObject = pTreeNodeBase->Load(m_ObjectReader, pData);
+	dbg_assert(pObject != nullptr, "Failed to create map object");
+
+	int FirstChild = pRawNode->m_FirstChildIndex;
+	if(FirstChild >= 0)
+	{
+		auto vpChildren = ReadObjects(FirstChild);
+		pObject->m_vpChildren = vpChildren;
+	}
+	vpObjects.push_back(pObject);
+
+	int NextSiblingIndex = pRawNode->m_NextSiblingIndex;
+	if(NextSiblingIndex >= 0)
+	{
+		auto vpSiblings = ReadObjects(NextSiblingIndex);
+		vpObjects.insert(vpObjects.begin(), vpSiblings.begin(), vpSiblings.end());
+	}
+
+	return vpObjects;
 }

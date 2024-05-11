@@ -31,3 +31,18 @@ bool *CLayerGroupNode::Collapse() { return &m_pGroup->m_Collapse; }
 
 bool *CLayerNode::Visible() { return &m_pLayer->m_Visible; }
 bool *CLayerNode::Collapse() { return nullptr; }
+
+// -----------------------------------
+
+void CEditorFolderNode::AddChild(int Index, const std::shared_ptr<ITreeNode> &pChild)
+{
+	Folder()->m_vpChildren.insert(Folder()->m_vpChildren.begin() + Index, std::static_pointer_cast<CEditorFolderNode>(pChild)->Folder());
+}
+
+void CEditorFolderNode::RemoveChild(int Index)
+{
+	Folder()->m_vpChildren.erase(Folder()->m_vpChildren.begin() + Index);
+}
+
+bool *CEditorFolderNode::Visible() { return &m_pFolder->m_Visible; }
+bool *CEditorFolderNode::Collapse() { return &m_pFolder->m_Collapse; }

@@ -34,8 +34,8 @@ void CLayersView::Render(CUIRect LayersBox)
 {
 	CEditor *pEditor = Editor();
 	CEditorMap &Map = Editor()->m_Map;
-	//auto &SelectedGroup = Editor()->m_SelectedGroup;
-	//auto &vSelectedLayers = Editor()->m_vSelectedLayers;
+	// auto &SelectedGroup = Editor()->m_SelectedGroup;
+	// auto &vSelectedLayers = Editor()->m_vSelectedLayers;
 
 	CUIRect ButtonsBar;
 	LayersBox.HSplitBottom(20.0f, &LayersBox, &ButtonsBar);
@@ -49,9 +49,9 @@ void CLayersView::Render(CUIRect LayersBox)
 		m_TreeView.Start(&LayersBox, 12.0f, 14.0f, CDropTargetInfo::Accept({ITreeNode::TYPE_LAYER_GROUP, ITreeNode::TYPE_FOLDER}));
 		m_TreeView.DoAutoSpacing(4.0f);
 
-		//printf("\n------------- ");
-		//CTreeView::Print(m_TreeView.CurrentPath());
-		//printf(" -------------\n");
+		// printf("\n------------- ");
+		// CTreeView::Print(m_TreeView.CurrentPath());
+		// printf(" -------------\n");
 		for(auto &pNode : m_pTreeRoot->m_vpChildren)
 		{
 			RenderTreeNode(pNode);
@@ -76,8 +76,8 @@ void CLayersView::Render(CUIRect LayersBox)
 	// TODO: you can select group parents but you can't do anything in the map view if so
 
 	// find root nodes
-	//std::vector<bool> vRootNodes(Map.m_vGroupInfos.size());
-	//for(int g = 0; g < (int)Map.m_vGroupInfos.size(); g++)
+	// std::vector<bool> vRootNodes(Map.m_vGroupInfos.size());
+	// for(int g = 0; g < (int)Map.m_vGroupInfos.size(); g++)
 	//{
 	//	auto &GroupInfo = Map.m_vGroupInfos.at(g);
 	//	vRootNodes[g] = GroupInfo.m_ParentIndex == CEditorGroupInfo::PARENT_NONE;
@@ -87,7 +87,7 @@ void CLayersView::Render(CUIRect LayersBox)
 	//}
 
 	//// render layers
-	//for(int GroupInfoIndex = 0; GroupInfoIndex < (int)Map.m_vGroupInfos.size(); GroupInfoIndex++)
+	// for(int GroupInfoIndex = 0; GroupInfoIndex < (int)Map.m_vGroupInfos.size(); GroupInfoIndex++)
 	//{
 	//	if(!vRootNodes[GroupInfoIndex])
 	//		continue;
@@ -111,21 +111,21 @@ void CLayersView::Render(CUIRect LayersBox)
 	{
 		if(Input()->ShiftIsPressed())
 		{
-			//if(vSelectedLayers[vSelectedLayers.size() - 1] < (int)Map.m_vpGroups[SelectedGroup]->m_vpLayers.size() - 1)
+			// if(vSelectedLayers[vSelectedLayers.size() - 1] < (int)Map.m_vpGroups[SelectedGroup]->m_vpLayers.size() - 1)
 			//	Editor()->AddSelectedLayer(vSelectedLayers[vSelectedLayers.size() - 1] + 1);
 		}
 		else
 		{
-			//int CurrentLayer = 0;
-			//for(const auto &Selected : vSelectedLayers)
+			// int CurrentLayer = 0;
+			// for(const auto &Selected : vSelectedLayers)
 			//	CurrentLayer = maximum(Selected, CurrentLayer);
-			//Editor()->SelectLayer(CurrentLayer);
+			// Editor()->SelectLayer(CurrentLayer);
 
-			//if(vSelectedLayers[0] < (int)Map.m_vpGroups[SelectedGroup]->m_vpLayers.size() - 1)
+			// if(vSelectedLayers[0] < (int)Map.m_vpGroups[SelectedGroup]->m_vpLayers.size() - 1)
 			//{
 			//	Editor()->SelectLayer(vSelectedLayers[0] + 1);
-			//}
-			//else
+			// }
+			// else
 			//{
 			//	for(size_t Group = SelectedGroup + 1; Group < Map.m_vpGroups.size(); Group++)
 			//	{
@@ -135,7 +135,7 @@ void CLayersView::Render(CUIRect LayersBox)
 			//			break;
 			//		}
 			//	}
-			//}
+			// }
 		}
 		m_ScrollToSelectionNext = true;
 	}
@@ -143,21 +143,21 @@ void CLayersView::Render(CUIRect LayersBox)
 	{
 		if(Input()->ShiftIsPressed())
 		{
-			//if(vSelectedLayers[vSelectedLayers.size() - 1] > 0)
+			// if(vSelectedLayers[vSelectedLayers.size() - 1] > 0)
 			//	Editor()->AddSelectedLayer(vSelectedLayers[vSelectedLayers.size() - 1] - 1);
 		}
 		else
 		{
-			//int CurrentLayer = std::numeric_limits<int>::max();
-			//for(const auto &Selected : vSelectedLayers)
+			// int CurrentLayer = std::numeric_limits<int>::max();
+			// for(const auto &Selected : vSelectedLayers)
 			//	CurrentLayer = minimum(Selected, CurrentLayer);
-			//Editor()->SelectLayer(CurrentLayer);
+			// Editor()->SelectLayer(CurrentLayer);
 
-			//if(vSelectedLayers[0] > 0)
+			// if(vSelectedLayers[0] > 0)
 			//{
 			//	Editor()->SelectLayer(vSelectedLayers[0] - 1);
-			//}
-			//else
+			// }
+			// else
 			//{
 			//	for(int Group = SelectedGroup - 1; Group >= 0; Group--)
 			//	{
@@ -167,14 +167,14 @@ void CLayersView::Render(CUIRect LayersBox)
 			//			break;
 			//		}
 			//	}
-			//}
+			// }
 		}
 		m_ScrollToSelectionNext = true;
 	}
 
 	CUIRect AddGroupButton;
 	LayersBox.HSplitTop(ROW_HEIGHT + 1.0f, &AddGroupButton, &LayersBox);
-	//if(m_ScrollRegion.AddRect(AddGroupButton))
+	// if(m_ScrollRegion.AddRect(AddGroupButton))
 	//{
 	//	AddGroupButton.HSplitTop(ROW_HEIGHT, &AddGroupButton, 0);
 	//	static int s_AddGroupButton = 0;
@@ -184,9 +184,9 @@ void CLayersView::Render(CUIRect LayersBox)
 	//		//SelectedGroup = Map.m_vpGroups.size() - 1;
 	//		//Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionGroup>(Editor(), SelectedGroup, false));
 	//	}
-	//}
+	// }
 
-	//m_ScrollRegion.End();
+	// m_ScrollRegion.End();
 }
 
 void CLayersView::RenderTreeNode(const std::shared_ptr<CNode> &pNode)
@@ -200,6 +200,8 @@ void CLayersView::RenderTreeNode(const std::shared_ptr<CNode> &pNode)
 	case ITreeNode::TYPE_LAYER_GROUP:
 		RenderGroupNodeItem(pNode);
 		break;
+	case ITreeNode::TYPE_FOLDER:
+		RenderFolderNodeItem(pNode);
 	default:
 		break;
 	}
@@ -207,7 +209,7 @@ void CLayersView::RenderTreeNode(const std::shared_ptr<CNode> &pNode)
 
 void CLayersView::RenderLayerNodeItem(const std::shared_ptr<CNode> &pNode)
 {
-	//auto Item = m_TreeView.DoNode(&pLayer, false, ITreeNode::TYPE_LAYER, CDropTargetInfo::None());
+	// auto Item = m_TreeView.DoNode(&pLayer, false, ITreeNode::TYPE_LAYER, CDropTargetInfo::None());
 	std::shared_ptr<CLayerNode> pLayerNode = std::static_pointer_cast<CLayerNode>(pNode->m_pData);
 	RenderTreeNodeItem(LayerName(pLayerNode->Layer()), pNode);
 }
@@ -220,6 +222,12 @@ void CLayersView::RenderGroupNodeItem(const std::shared_ptr<CNode> &pNode)
 	char aBuf[64];
 	str_format(aBuf, sizeof(aBuf), "#%d %s", pNode->m_Index, pGroup->m_aName);
 	RenderTreeNodeItem(aBuf, pNode);
+}
+
+void CLayersView::RenderFolderNodeItem(const std::shared_ptr<CNode> &pNode)
+{
+	std::shared_ptr<CEditorFolderNode> pFolderNode = std::static_pointer_cast<CEditorFolderNode>(pNode->m_pData);
+	RenderTreeNodeItem(pFolderNode->Folder()->m_aName, pNode);
 }
 
 void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<CNode> &pNode)
@@ -317,7 +325,7 @@ void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<CN
 	}
 }
 
-//void CLayersView::RenderParentGroup(CUIRect *pRect, int Index, const CEditorGroupInfo &Info)
+// void CLayersView::RenderParentGroup(CUIRect *pRect, int Index, const CEditorGroupInfo &Info)
 //{
 //	char aBuf[64];
 //	CEditorMap &Map = Editor()->m_Map;
@@ -392,9 +400,9 @@ void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<CN
 //		pRect->HSplitTop(5.0f, &Slot, pRect);
 //		m_ScrollRegion.AddRect(Slot);
 //	}
-//}
+// }
 //
-//void CLayersView::RenderLayersGroup(CUIRect *pRect, const CEditorGroupInfo &Info)
+// void CLayersView::RenderLayersGroup(CUIRect *pRect, const CEditorGroupInfo &Info)
 //{
 //	char aBuf[64];
 //	CEditorMap &Map = Editor()->m_Map;
@@ -555,7 +563,7 @@ void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<CN
 //			}
 //		}
 //	}
-//}
+// }
 
 void CLayersView::ResetRenderContext()
 {
@@ -620,10 +628,10 @@ int CLayersView::DoSelectable(const void *pId, const char *pText, const CToggleF
 	bool Clicked, Abrupted;
 	int Result = Ui()->DoDraggableButtonLogic(pId, Checked, &Button, &Clicked, &Abrupted);
 
-	//if(Result)
+	// if(Result)
 	//{
 	//	if(Clicked)
-	//}
+	// }
 
 	CUIRect ButtonBar;
 	Button.VMargin(1.0f, &ButtonBar);
@@ -708,6 +716,12 @@ void CLayersView::BuildTree()
 		}
 	}
 
+	for(int i = 0; i < (int)Map.m_vpRootObjects.size(); i++)
+	{
+		std::shared_ptr<CEditorParentGroup> &pFolder = std::static_pointer_cast<CEditorParentGroup>(Map.m_vpRootObjects.at(i));
+		auto &pRootNode = m_pTreeRoot->AddChild(ITreeNode::TYPE_FOLDER, i, std::make_shared<CEditorFolderNode>(pFolder));
+	}
+
 	auto End = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<float> Duration = End - Start;
 	printf("BuildTree() took %.12fs (%" PRId64 "ms)\n", Duration.count(), std::chrono::duration_cast<std::chrono::milliseconds>(Duration).count());
@@ -758,7 +772,7 @@ void CLayersView::ApplyTreeChanges(const CTreeChanges &Changes)
 
 // ------------------------------------------------------------
 
-//void CLayersView::InternalRender(CTreeView &TreeView, const std::shared_ptr<TreeNode> &pNode)
+// void CLayersView::InternalRender(CTreeView &TreeView, const std::shared_ptr<TreeNode> &pNode)
 //{
 //	static auto &&DoBtn = [&](const void *pId, const char *pText, bool Checked, const CUIRect *pRect, bool HasChildren, bool *pClicked) {
 //		auto Color = Editor()->GetButtonColor(pId, Checked);
@@ -838,9 +852,9 @@ void CLayersView::ApplyTreeChanges(const CTreeChanges &Changes)
 //			InternalRender(TreeView, Child);
 //		TreeView.PopTree();
 //	}
-//}
+// }
 //
-//static std::shared_ptr<TreeNode> GenerateTestTree(const char *pDesc)
+// static std::shared_ptr<TreeNode> GenerateTestTree(const char *pDesc)
 //{
 //	std::shared_ptr<TreeNode> Root = std::make_shared<TreeNode>(TreeNode{
 //		"ROOT",
@@ -920,9 +934,9 @@ void CLayersView::ApplyTreeChanges(const CTreeChanges &Changes)
 //	}
 //
 //	return Root;
-//}
+// }
 //
-//void CLayersView::OnRender(CUIRect View)
+// void CLayersView::OnRender(CUIRect View)
 //{
 //	static CTreeView s_TreeView;
 //
@@ -1060,4 +1074,4 @@ void CLayersView::ApplyTreeChanges(const CTreeChanges &Changes)
 //		for(auto &Item : vDeleteAfter)
 //			Item.first->m_vpChildren.erase(Item.first->m_vpChildren.begin() + Item.second);
 //	}
-//}
+// }

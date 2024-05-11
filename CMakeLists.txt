@@ -2372,6 +2372,7 @@ if(CLIENT)
     mapitems/map.cpp
     mapitems/map_io.cpp
     mapitems/map_io.h
+    mapitems/map_object.cpp
     mapitems/map_object.h
     mapitems/sound.cpp
     mapitems/sound.h
