@@ -10,11 +10,13 @@ class IMapItemReader
 {
 protected:
 	class CDataFileReader *DataFile() { return m_pReader; }
+	class CEditorMap *Map() { return m_pMap; }
 
 	void Error(const char *pErrorMessage) { (*m_pfnErrorHandler)(pErrorMessage); }
 
 private:
 	class CDataFileReader *m_pReader;
+	class CEditorMap *m_pMap;
 	const std::function<void(const char *pErrorMessage)> *m_pfnErrorHandler;
 
 	friend class CEditorMap;
@@ -24,9 +26,11 @@ class IMapItemWriter
 {
 protected:
 	class CDataFileWriter *Writer() { return m_pWriter; }
+	class CEditorMap *Map() { return m_pMap; }
 
 private:
 	class CDataFileWriter *m_pWriter;
+	class CEditorMap *m_pMap;
 
 	friend class CEditorMap;
 };
@@ -35,14 +39,14 @@ class CMapObjectReader : public IMapItemReader
 {
 public:
 	auto Load(const struct CMapItemFolderNode &Item);
-	// auto Load(const struct CMapItemLayerGroupObject &Item);
+	auto Load(const struct CMapItemLayerGroupNode &Item);
 };
 
 class CMapObjectWriter : public IMapItemWriter
 {
 public:
 	auto Write(const class CEditorParentGroup &Object);
-	// auto Write(const class CLayerGroupObject &Object);
+	auto Write(const class CLayerGroupObject &Object);
 };
 
 class CMapItemTreeWriter : public IMapItemWriter
@@ -50,7 +54,7 @@ class CMapItemTreeWriter : public IMapItemWriter
 	friend class CEditorMap;
 
 public:
-	CMapItemTreeWriter();
+	CMapItemTreeWriter(const CMapObjectWriter &ObjectWriter);
 	void WriteRoot(const std::vector<std::shared_ptr<class IEditorMapObject>> &vpRootObjects);
 
 private:

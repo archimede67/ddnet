@@ -419,36 +419,40 @@ bool CEditorMap::Save(const char *pFileName)
 
 	// Save map objects
 	{
-		CMapItemTreeWriter ItemTreeWriter{};
+		CMapObjectWriter MapObjectWriter{};
+		MapObjectWriter.m_pWriter = &Writer;
+		MapObjectWriter.m_pMap = this;
+
+		CMapItemTreeWriter ItemTreeWriter(MapObjectWriter);
 		ItemTreeWriter.m_pWriter = &Writer;
-		ItemTreeWriter.m_MapObjectWriter.m_pWriter = &Writer;
+		ItemTreeWriter.m_pMap = this;
 
-		std::vector<std::shared_ptr<IEditorMapObject>> vpRootObjects;
+		// std::vector<std::shared_ptr<IEditorMapObject>> vpRootObjects;
 
-		auto pFolder1 = std::make_shared<CEditorMapTreeNodeMixin<CEditorParentGroup>>();
-		pFolder1->m_Collapse = false;
-		pFolder1->m_Test = 123;
-		pFolder1->m_Visible = true;
-		str_copy(pFolder1->m_aName, "Folder 1");
+		// auto pFolder1 = std::make_shared<CEditorMapTreeNodeMixin<CEditorParentGroup>>();
+		// pFolder1->m_Collapse = false;
+		// pFolder1->m_Test = 123;
+		// pFolder1->m_Visible = true;
+		// str_copy(pFolder1->m_aName, "Folder 1");
 
-		auto pFolder2 = std::make_shared<CEditorMapTreeNodeMixin<CEditorParentGroup>>();
-		pFolder2->m_Collapse = true;
-		pFolder2->m_Test = 456;
-		pFolder2->m_Visible = true;
-		str_copy(pFolder2->m_aName, "Folder 2");
+		// auto pFolder2 = std::make_shared<CEditorMapTreeNodeMixin<CEditorParentGroup>>();
+		// pFolder2->m_Collapse = true;
+		// pFolder2->m_Test = 456;
+		// pFolder2->m_Visible = true;
+		// str_copy(pFolder2->m_aName, "Folder 2");
 
-		auto pFolder3 = std::make_shared<CEditorMapTreeNodeMixin<CEditorParentGroup>>();
-		pFolder3->m_Collapse = false;
-		pFolder3->m_Test = 789;
-		pFolder3->m_Visible = false;
-		str_copy(pFolder3->m_aName, "Folder 3");
+		// auto pFolder3 = std::make_shared<CEditorMapTreeNodeMixin<CEditorParentGroup>>();
+		// pFolder3->m_Collapse = false;
+		// pFolder3->m_Test = 789;
+		// pFolder3->m_Visible = false;
+		// str_copy(pFolder3->m_aName, "Folder 3");
 
-		pFolder2->m_vpChildren.push_back(pFolder3);
-		pFolder1->m_vpChildren.push_back(pFolder2);
+		// pFolder2->m_vpChildren.push_back(pFolder3);
+		// pFolder1->m_vpChildren.push_back(pFolder2);
 
-		vpRootObjects.push_back(pFolder1);
+		// vpRootObjects.push_back(pFolder1);
 
-		ItemTreeWriter.WriteRoot(vpRootObjects);
+		ItemTreeWriter.WriteRoot(m_vpRootObjects);
 	}
 
 	// finish the data file
@@ -1050,10 +1054,12 @@ bool CEditorMap::Load(const char *pFileName, int StorageType, const std::functio
 	{
 		CMapObjectReader MapObjectReader{};
 		MapObjectReader.m_pReader = &DataFile;
+		MapObjectReader.m_pMap = this;
 		MapObjectReader.m_pfnErrorHandler = &ErrorHandler;
 
 		CMapItemTreeReader ItemTreeReader(MapObjectReader);
 		ItemTreeReader.m_pReader = &DataFile;
+		ItemTreeReader.m_pMap = this;
 
 		m_vpRootObjects = ItemTreeReader.ReatRoot();
 	}
@@ -1163,8 +1169,27 @@ auto CMapObjectWriter::Write(const CEditorParentGroup &Object)
 	return Item;
 }
 
-CMapItemTreeWriter::CMapItemTreeWriter() :
-	m_MapObjectWriter(), m_Index(0), m_IndexByType() {}
+// ------------------------------------------
+
+auto CMapObjectReader::Load(const CMapItemLayerGroupNode &Item)
+{
+	printf("Loading LayerGroup for group %d\n", Item.m_GroupIndex);
+	return CLayerGroupObject(Item.m_GroupIndex);
+}
+
+auto CMapObjectWriter::Write(const CLayerGroupObject &Object)
+{
+	printf("Writing LayerGroup for group %d\n", Object.m_GroupIndex);
+	CMapItemLayerGroupNode Item{};
+	Item.m_Version = CMapItemLayerGroupNode::CURRENT_VERSION;
+	Item.m_GroupIndex = Object.m_GroupIndex;
+	return Item;
+}
+
+// ------------------------------------------
+
+CMapItemTreeWriter::CMapItemTreeWriter(const CMapObjectWriter &ObjectWriter) :
+	m_MapObjectWriter(ObjectWriter), m_Index(0), m_IndexByType() {}
 
 void CMapItemTreeWriter::WriteRoot(const std::vector<std::shared_ptr<IEditorMapObject>> &vpRootObjects)
 {
@@ -1178,6 +1203,7 @@ void CMapItemTreeWriter::WriteObjects(const std::vector<std::shared_ptr<class IE
 
 	static std::unordered_map<int, const char *> s_Names{
 		{MAPITEMTYPE_FOLDER_NODE, "Folder node"},
+		{MAPITEMTYPE_LAYER_GROUP_NODE, "LayerGroup node"},
 	};
 
 	for(size_t i = 0; i < vpObjects.size(); i++)
@@ -1201,7 +1227,9 @@ void CMapItemTreeWriter::WriteObjects(const std::vector<std::shared_ptr<class IE
 		Node.m_FirstChildIndex = FirstChildIndex;
 		Node.m_NextSiblingIndex = (i + 1) < vpObjects.size() ? m_Index : -1;
 
-		printf("(%d) Saving item of type '%s'\n", Node.m_ItemIndex, s_Names[Node.m_ItemType]);
+		auto pLayerGroup = std::static_pointer_cast<CLayerGroupObject>(pObject);
+
+		printf("(%d) Saving item of type '%s' (index is %d)\n", Node.m_ItemIndex, s_Names[Node.m_ItemType], pLayerGroup->m_GroupIndex);
 		Writer()->AddItem(Node.m_ItemType, Node.m_ItemIndex, PackedItem.m_Size, PackedItem.m_pData);
 
 		printf("[%d] Saving tree node, first child at %d, next sibling at %d\n", ObjectIndex, Node.m_FirstChildIndex, Node.m_NextSiblingIndex);
@@ -1243,9 +1271,14 @@ std::vector<std::shared_ptr<IEditorMapObject>> CMapItemTreeReader::ReadObjects(i
 	std::shared_ptr<IEditorMapObject> pObject = pTreeNodeBase->Load(m_ObjectReader, pData);
 	dbg_assert(pObject != nullptr, "Failed to create map object");
 
+	printf("Reading object at %d\n", FirstIndex);
+
+	pObject->m_pMap = Map();
+
 	int FirstChild = pRawNode->m_FirstChildIndex;
 	if(FirstChild >= 0)
 	{
+		printf("Reading children, starting at %d\n", FirstChild);
 		auto vpChildren = ReadObjects(FirstChild);
 		pObject->m_vpChildren = vpChildren;
 	}
@@ -1254,8 +1287,9 @@ std::vector<std::shared_ptr<IEditorMapObject>> CMapItemTreeReader::ReadObjects(i
 	int NextSiblingIndex = pRawNode->m_NextSiblingIndex;
 	if(NextSiblingIndex >= 0)
 	{
+		printf("Reading next sibling at %d\n", NextSiblingIndex);
 		auto vpSiblings = ReadObjects(NextSiblingIndex);
-		vpObjects.insert(vpObjects.begin(), vpSiblings.begin(), vpSiblings.end());
+		vpObjects.insert(vpObjects.end(), vpSiblings.begin(), vpSiblings.end());
 	}
 
 	return vpObjects;

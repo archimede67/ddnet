@@ -1398,16 +1398,36 @@ void CUi::DoPopupMenu(const SPopupMenuId *pId, int X, int Y, int Width, int Heig
 	pNewMenu->m_Rect.x = X;
 	pNewMenu->m_Rect.y = Y;
 	pNewMenu->m_Rect.w = Width;
-	pNewMenu->m_Rect.h = Height;
+	pNewMenu->m_Height = Height;
 	pNewMenu->m_pContext = pContext;
 	pNewMenu->m_pfnFunc = pfnFunc;
+	pNewMenu->m_AutoHeight = false;
+}
+
+void CUi::DoPopupMenu(const SPopupMenuId *pId, int X, int Y, int Width, void *pContext, FPopupMenuAutoHeightFunction pfnFunc, const SPopupMenuProperties &Props)
+{
+	constexpr float Margin = SPopupMenu::POPUP_BORDER + SPopupMenu::POPUP_MARGIN;
+	if(X + Width > Screen()->w - Margin)
+		X = maximum<float>(X - Width, Margin);
+
+	m_vPopupMenus.emplace_back();
+	SPopupMenu *pNewMenu = &m_vPopupMenus.back();
+	pNewMenu->m_pId = pId;
+	pNewMenu->m_Props = Props;
+	pNewMenu->m_Rect.x = X;
+	pNewMenu->m_Rect.y = Y;
+	pNewMenu->m_Rect.w = Width;
+	pNewMenu->m_Height = 0;
+	pNewMenu->m_pContext = pContext;
+	pNewMenu->m_pfnAutoHeightFunc = pfnFunc;
+	pNewMenu->m_AutoHeight = true;
 }
 
 void CUi::RenderPopupMenus()
 {
 	for(size_t i = 0; i < m_vPopupMenus.size(); ++i)
 	{
-		const SPopupMenu &PopupMenu = m_vPopupMenus[i];
+		SPopupMenu &PopupMenu = m_vPopupMenus[i];
 		const SPopupMenuId *pId = PopupMenu.m_pId;
 		const bool Inside = MouseInside(&PopupMenu.m_Rect);
 		const bool Active = i == m_vPopupMenus.size() - 1;
@@ -1443,7 +1463,18 @@ void CUi::RenderPopupMenus()
 			SetHotScrollRegion(nullptr);
 		}
 
+		const bool HasAutoHeight = PopupMenu.m_AutoHeight;
+
 		CUIRect PopupRect = PopupMenu.m_Rect;
+		PopupRect.h = PopupMenu.m_Height;
+
+		if(HasAutoHeight)
+		{
+			constexpr float Margin = SPopupMenu::POPUP_BORDER + SPopupMenu::POPUP_MARGIN;
+			if(PopupRect.y + PopupRect.h > Screen()->h - Margin)
+				PopupRect.y = maximum<float>(PopupRect.y - PopupRect.h, Margin);
+		}
+
 		PopupRect.Draw(PopupMenu.m_Props.m_BorderColor, PopupMenu.m_Props.m_Corners, 3.0f);
 		PopupRect.Margin(SPopupMenu::POPUP_BORDER, &PopupRect);
 		PopupRect.Draw(PopupMenu.m_Props.m_BackgroundColor, PopupMenu.m_Props.m_Corners, 3.0f);
@@ -1451,7 +1482,19 @@ void CUi::RenderPopupMenus()
 
 		// The popup render function can open/close popups, which may resize the vector and thus
 		// invalidate the variable PopupMenu. We therefore store pId in a separate variable.
-		EPopupMenuFunctionResult Result = PopupMenu.m_pfnFunc(PopupMenu.m_pContext, PopupRect, Active);
+		EPopupMenuFunctionResult Result;
+		if(HasAutoHeight)
+		{
+			// Hide the popup if we need to compute the height so the popup does not flicker
+			if(PopupRect.h <= 0)
+				PopupRect.x = -100 * PopupRect.w;
+
+			PopupMenu.m_Height = 0;
+			Result = PopupMenu.m_pfnAutoHeightFunc(PopupMenu.m_pContext, PopupRect, Active, PopupMenu.m_Height);
+		}
+		else
+			Result = PopupMenu.m_pfnFunc(PopupMenu.m_pContext, PopupRect, Active);
+
 		if(Result != POPUP_KEEP_OPEN || (Active && ConsumeHotkey(HOTKEY_ESCAPE)))
 			ClosePopupMenu(pId, Result == POPUP_CLOSE_CURRENT_AND_DESCENDANTS);
 	}

@@ -2,6 +2,8 @@
 #define GAME_EDITOR_MAPITEMS_MAP_OBJECT_H
 
 #include <base/system.h>
+
+#include <game/editor/components/layers_view/node.h>
 #include <game/mapitems_object.h>
 #include <game/mapitems_object_types.h>
 
@@ -13,7 +15,11 @@ struct IEditorMapObject
 {
 public:
 	virtual ~IEditorMapObject() = default;
+
 	virtual void Render();
+	virtual CUi::EPopupMenuFunctionResult Popup(CUIRect View, int &Height) = 0;
+
+	virtual std::shared_ptr<ITreeNode> ToTreeNode(const std::shared_ptr<IEditorMapObject> &Self) = 0;
 
 protected:
 	CEditorMap *Map() { return m_pMap; }
@@ -34,6 +40,7 @@ private:
 
 	friend class CEditorMap;
 	friend class CMapItemTreeWriter;
+	friend class CMapItemTreeReader;
 
 public:
 	std::vector<std::shared_ptr<IEditorMapObject>> m_vpChildren;

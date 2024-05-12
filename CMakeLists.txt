@@ -2316,6 +2316,7 @@ if(CLIENT)
     components/layer_selector.h
     components/layers_view/layers_view.cpp
     components/layers_view/layers_view.h
+    components/layers_view/node.cpp
     components/layers_view/node.h
     components/layers_view/nodes.cpp
     components/layers_view/nodes.h

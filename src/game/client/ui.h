@@ -314,6 +314,7 @@ public:
 	 * @return Value from the @link EPopupMenuFunctionResult @endlink enum.
 	 */
 	typedef EPopupMenuFunctionResult (*FPopupMenuFunction)(void *pContext, CUIRect View, bool Active);
+	typedef EPopupMenuFunctionResult (*FPopupMenuAutoHeightFunction)(void *pContext, CUIRect View, bool Active, int &Height);
 
 	/**
 	 * Callback that is called when one or more popups are closed.
@@ -382,7 +383,13 @@ private:
 		SPopupMenuProperties m_Props;
 		CUIRect m_Rect;
 		void *m_pContext;
-		FPopupMenuFunction m_pfnFunc;
+		union
+		{
+			FPopupMenuFunction m_pfnFunc;
+			FPopupMenuAutoHeightFunction m_pfnAutoHeightFunc;
+		};
+		int m_Height;
+		bool m_AutoHeight;
 	};
 	std::vector<SPopupMenu> m_vPopupMenus;
 	FPopupMenuClosedCallback m_pfnPopupMenuClosedCallback = nullptr;
@@ -606,7 +613,19 @@ public:
 	void RenderProgressSpinner(vec2 Center, float OuterRadius, const SProgressSpinnerProperties &Props = {}) const;
 
 	// popup menu
+	struct SPopupMenuCallWrapper
+	{
+		SPopupMenuCallWrapper(FPopupMenuFunction pfnFunc) :
+			m_pfnFunc(pfnFunc) {}
+
+		EPopupMenuFunctionResult operator()(void *pContext, CUIRect View, bool Active, int &Height)
+		{
+		}
+
+		FPopupMenuFunction m_pfnFunc;
+	};
 	void DoPopupMenu(const SPopupMenuId *pId, int X, int Y, int Width, int Height, void *pContext, FPopupMenuFunction pfnFunc, const SPopupMenuProperties &Props = {});
+	void DoPopupMenu(const SPopupMenuId *pId, int X, int Y, int Width, void *pContext, FPopupMenuAutoHeightFunction pfnFunc, const SPopupMenuProperties &Props = {});
 	void RenderPopupMenus();
 	void ClosePopupMenu(const SPopupMenuId *pId, bool IncludeDescendants = false);
 	void ClosePopupMenus();

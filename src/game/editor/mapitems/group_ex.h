@@ -9,7 +9,9 @@
 class CEditorParentGroup : public IEditorMapObject
 {
 public:
-	void Render() override;
+	CUi::EPopupMenuFunctionResult Popup(CUIRect View, int &Height) override;
+
+	std::shared_ptr<ITreeNode> ToTreeNode(const std::shared_ptr<IEditorMapObject> &Self) override;
 
 public:
 	char m_aName[16];
@@ -25,7 +27,10 @@ public:
 	CLayerGroupObject(int GroupIndex) :
 		m_GroupIndex(GroupIndex) {}
 
-	void Render() override;
+	virtual void Render() override;
+	CUi::EPopupMenuFunctionResult Popup(CUIRect View, int &Height) override;
+
+	std::shared_ptr<ITreeNode> ToTreeNode(const std::shared_ptr<IEditorMapObject> &Self) override;
 
 public:
 	int m_GroupIndex;

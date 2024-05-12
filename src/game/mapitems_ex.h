@@ -52,6 +52,18 @@ struct CMapItemFolderNode : IMapItemTreeNode
 	int m_Test;
 };
 
+struct CMapItemLayerGroupNode : IMapItemTreeNode
+{
+	MACRO_MAPITEM_TREENODE(MAPITEMTYPE_LAYER_GROUP_NODE);
+
+	enum
+	{
+		CURRENT_VERSION = 1
+	};
+
+	int m_GroupIndex;
+};
+
 // ----------------------------------------
 
 void RegisterMapItemTypeUuids(class CUuidManager *pManager);
