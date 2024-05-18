@@ -19,8 +19,10 @@ void CLayersView::Init(CEditor *pEditor)
 	m_ScrollToSelectionNext = false;
 	m_ParentPopupContext.m_pEditor = pEditor;
 
-	m_pTreeRoot = std::make_shared<CNode>(ITreeNode::TYPE_ROOT, 0, std::make_shared<CEditorMapNode>(&Editor()->m_Map));
+	m_pTreeRoot = std::make_shared<CNode>(ITreeNode::TYPE_ROOT, std::make_shared<CEditorMapNode>(&Editor()->m_Map));
 	m_TreeNav = CTreeNavigator(m_pTreeRoot);
+
+	m_LastSelectedNodePath = {};
 
 	BuildTree();
 }
@@ -32,10 +34,10 @@ void CLayersView::OnMapLoad()
 
 void CLayersView::Render(CUIRect LayersBox)
 {
+	m_Selecting.clear();
+
 	CEditor *pEditor = Editor();
 	CEditorMap &Map = Editor()->m_Map;
-	// auto &SelectedGroup = Editor()->m_SelectedGroup;
-	// auto &vSelectedLayers = Editor()->m_vSelectedLayers;
 
 	CUIRect ButtonsBar;
 	LayersBox.HSplitBottom(20.0f, &LayersBox, &ButtonsBar);
@@ -49,9 +51,10 @@ void CLayersView::Render(CUIRect LayersBox)
 		m_TreeView.Start(&LayersBox, 12.0f, 14.0f, CDropTargetInfo::Accept({ITreeNode::TYPE_LAYER_GROUP, ITreeNode::TYPE_FOLDER}));
 		m_TreeView.DoAutoSpacing(4.0f);
 
-		for(auto &pNode : m_pTreeRoot->m_vpChildren)
+		for(unsigned int i = 0; i < (unsigned int)m_pTreeRoot->m_vpChildren.size(); i++)
 		{
-			RenderTreeNode(pNode);
+			const auto &pNode = m_pTreeRoot->m_vpChildren[i];
+			RenderTreeNode({i}, pNode);
 			m_TreeView.DoSpacing(4.0f);
 		}
 
@@ -79,6 +82,9 @@ void CLayersView::Render(CUIRect LayersBox)
 		{
 			// if(vSelectedLayers[vSelectedLayers.size() - 1] < (int)Map.m_vpGroups[SelectedGroup]->m_vpLayers.size() - 1)
 			//	Editor()->AddSelectedLayer(vSelectedLayers[vSelectedLayers.size() - 1] + 1);
+			auto It = m_TreeNav.At(m_LastSelectedNodePath)++;
+			m_LastSelectedNodePath = It.Path();
+			SelectTreeNode(*It);
 		}
 		else
 		{
@@ -155,25 +161,87 @@ void CLayersView::Render(CUIRect LayersBox)
 	// m_ScrollRegion.End();
 }
 
-void CLayersView::RenderTreeNode(const std::shared_ptr<CNode> &pNode)
+void CLayersView::ClearSelection()
 {
-	RenderTreeNodeItem(pNode->m_pData->Name(), pNode);
+	while(!m_SelectedNodes.empty())
+	{
+		const auto pSelected = m_SelectedNodes.begin();
+		pSelected->m_pNode->m_pData->OnDeselect();
+		m_SelectedNodes.erase(pSelected);
+	}
 }
 
-void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<CNode> &pNode)
+void CLayersView::DeselectType(int Type)
 {
-	static auto &&DoBtn = [&](const void *pId, const char *pText, int Checked, const CUIRect *pRect, bool HasChildren, bool *pClicked) {
+	const std::vector<std::shared_ptr<CNode>> vpNodes = FindIf(m_pTreeRoot, [Type](const auto &pNode) { return pNode->m_Type == Type; });
+	for(auto &pNode : vpNodes)
+	{
+		if(m_SelectedNodes.count(pNode))
+		{
+			pNode->m_pData->OnDeselect();
+			m_SelectedNodes.erase(pNode);
+		}
+	}
+}
+
+void CLayersView::RenderTreeNode(const CTreeNodePath &NodePath, const std::shared_ptr<CNode> &pNode)
+{
+	RenderTreeNodeItem(NodePath, pNode->m_pData->Name(), pNode);
+}
+
+void CLayersView::RenderTreeNodeItem(const CTreeNodePath &NodePath, const char *pName, const std::shared_ptr<CNode> &pNode)
+{
+	static auto &&DoBtn = [&](const void *pId, const char *pText, const int Checked, const CUIRect *pRect, bool HasChildren, bool *pClicked, bool *pDown) {
 		auto Color = Editor()->GetButtonColor(pId, Checked);
 		pRect->Draw(Color, !HasChildren ? IGraphics::CORNER_ALL : IGraphics::CORNER_R, 3.0f);
 		CUIRect Label;
 		pRect->VMargin(5.0f, &Label);
 		Editor()->Ui()->DoLabel(&Label, pText, 10.0f, TEXTALIGN_ML);
-		return Editor()->Ui()->DoDraggableButtonLogic(pId, Checked, pRect, pClicked, nullptr);
+		return Editor()->Ui()->DoDraggableButtonLogic(pId, Checked, pRect, pClicked, nullptr, pDown);
 	};
 
-	bool IsSelected = m_vpSelectedNodes.find(pNode) != m_vpSelectedNodes.end();
+	const static auto &&SelectNode = [&](const CTreeNodePath &Path, const std::shared_ptr<CNode> &pSelected) {
+		if(m_SelectedNodes.count(pSelected))
+			return;
 
-	bool Dragging = m_TreeView.Dragging();
+		switch(pSelected->m_pData->OnSelect())
+		{
+		case ENodeSelectResult::ALLOW:
+			m_SelectedNodes.insert(pSelected);
+			m_LastSelectedNodePath = Path;
+			break;
+		case ENodeSelectResult::OVERRIDE:
+			ClearSelection();
+			m_SelectedNodes.insert(pSelected);
+			m_LastSelectedNodePath = Path;
+			break;
+		case ENodeSelectResult::OVERRIDE_TYPE:
+			DeselectType(pSelected->m_Type);
+			m_SelectedNodes.insert(pSelected);
+			m_LastSelectedNodePath = Path;
+		default:
+		case ENodeSelectResult::NONE:
+			break;
+		}
+	};
+
+	const static auto &&SelectSingleNode = [&](const CTreeNodePath &Path, const std::shared_ptr<CNode> &pSelected) {
+		ClearSelection();
+		SelectNode(Path, pSelected);
+	};
+
+	const static auto &&ToggleSelected = [&](const CTreeNodePath &Path, const std::shared_ptr<CNode> &pSelected, const bool Selected) {
+		if(Selected)
+		{
+			pSelected->m_pData->OnDeselect();
+			m_SelectedNodes.erase(pSelected);
+		}
+		else
+			SelectNode(Path, pSelected);
+	};
+
+	const bool IsSelected = m_SelectedNodes.find(pNode) != m_SelectedNodes.end();
+	const bool Dragging = m_TreeView.Dragging();
 
 	bool *pCollapse = pNode->m_pData->Collapse();
 	bool *pVisible = pNode->m_pData->Visible();
@@ -191,7 +259,13 @@ void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<CN
 	}
 
 	auto Item = m_TreeView.DoNode(pNode->m_pData.get(), IsSelected, pNode->m_Type, DropTargetInfo);
-	const bool Shift = Editor()->Input()->ShiftIsPressed();
+
+	// Shift is used to add multiple nodes to the selection, starting from the last selected node to the clicked node
+	const bool SelectMultipleAdditiveModifier = Editor()->Input()->ShiftIsPressed();
+	// Ctrl is used to add a single node to the selection
+	const bool ToggleSelectionModifier = Editor()->Input()->ModifierIsPressed();
+
+	const bool AnyModifier = SelectMultipleAdditiveModifier || ToggleSelectionModifier;
 
 	if(Item.m_IsTargetParent)
 	{
@@ -213,38 +287,55 @@ void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<CN
 	if(pNode->m_Type == ITreeNode::TYPE_ENTITIES_LAYER)
 		Checked += 6;
 
-	int Res = DoBtn(pNode->m_pData.get(), pName, Checked, &Item.m_Rect, ChildrenExists, &Clicked);
+	bool MouseWasDown;
+	const int Res = DoBtn(pNode->m_pData.get(), pName, Checked, &Item.m_Rect, ChildrenExists, &Clicked, &MouseWasDown);
 
 	if(Res)
 	{
 		if(!Dragging)
 		{
-			if(!Shift && !IsSelected)
+			if(MouseWasDown)
 			{
-				m_vpSelectedNodes.clear();
-				m_vpSelectedNodes.insert(pNode);
+				// Simple click: set the selected node
+				if(!AnyModifier && !IsSelected)
+					SelectSingleNode(NodePath, pNode);
+				// Ctrl click: toggle node selection
+				else if(ToggleSelectionModifier)
+					ToggleSelected(NodePath, pNode, IsSelected);
+				// Shift click: select nodes from last to current
+				else if(SelectMultipleAdditiveModifier)
+				{
+					if(m_LastSelectedNodePath.empty())
+						SelectSingleNode(NodePath, pNode);
+					else
+					{
+						// Somehow compute the nodes to select?
+						auto Path = NodePath;
+						auto Between = m_TreeNav.Between(m_LastSelectedNodePath, NodePath);
+
+						for(CTreeNavigator::CIterator It = Between.begin(); It != Between.end(); It++)
+						{
+							SelectTreeNode(*It);
+						}
+
+						SelectNode(NodePath, pNode);
+					}
+				}
 			}
 
 			if(Clicked)
 			{
 				if(Res == 1)
 				{
-					if(!Shift)
-					{
-						m_vpSelectedNodes.clear();
-						m_vpSelectedNodes.insert(pNode);
-					}
-					else
-					{
-						if(!IsSelected)
-							m_vpSelectedNodes.insert(pNode);
-						else
-							m_vpSelectedNodes.erase(pNode);
-					}
+					if(!AnyModifier)
+						SelectSingleNode(NodePath, pNode);
 				}
 				else if(Res == 2)
 				{
-					// TODO: open popup
+					// Only select that node to not confuse the user
+					m_SelectedNodes.clear();
+					SelectNode(NodePath, pNode);
+
 					Ui()->DoPopupMenu(pNode->m_pData.get(), Ui()->MouseX(), Ui()->MouseY(), 120, pNode->m_pData.get(), ITreeNode::RenderPopup);
 				}
 			}
@@ -254,8 +345,11 @@ void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<CN
 	if(ChildrenExists && !*pCollapse)
 	{
 		m_TreeView.PushTree();
-		for(auto &Child : pNode->m_vpChildren)
-			RenderTreeNode(Child);
+		for(unsigned int k = 0; k < (unsigned int)pNode->m_vpChildren.size(); k++)
+		{
+			CTreeNodePath ChildPath = NodePath;
+			RenderTreeNode(ChildPath / k, pNode->m_vpChildren[k]);
+		}
 		m_TreeView.PopTree();
 	}
 }
@@ -385,19 +479,27 @@ void CLayersView::BuildTreeNodeChildren(const std::shared_ptr<CNode> &pNode, con
 	{
 		auto &pObject = vpObject.at(i);
 		auto pTreeNode = pObject->ToTreeNode(pObject);
+		pTreeNode->m_pLayers = this;
+		pTreeNode->m_pEditor = Editor();
+
 		if(!pTreeNode->IsLeaf())
 		{
-			auto &pChild = pNode->AddChild(pTreeNode->Type(), i, pTreeNode);
+			auto &pChild = pNode->AddChild(pTreeNode->Type(), pTreeNode);
+			pChild->m_pNodeParent = pNode;
+
 			if(pTreeNode->Type() == ITreeNode::TYPE_LAYER_GROUP)
 			{
 				std::shared_ptr<CLayerGroupObject> pLayerGroup = std::static_pointer_cast<CLayerGroupObject>(pObject);
-				printf("Adding child to tree for layer group %d\n", pLayerGroup->m_GroupIndex);
 
 				auto &vpLayers = Editor()->m_Map.m_vpGroups[pLayerGroup->m_GroupIndex]->m_vpLayers;
-				for(int i = 0; i < (int)vpLayers.size(); i++)
+				for(int k = 0; k < (int)vpLayers.size(); k++)
 				{
-					auto &pLayer = vpLayers.at(i);
-					pChild->AddChild(pLayer->IsEntitiesLayer() ? ITreeNode::TYPE_ENTITIES_LAYER : ITreeNode::TYPE_LAYER, i, std::make_shared<CLayerNode>(pLayer));
+					auto &pLayer = vpLayers.at(k);
+					auto pLayerNode = std::make_shared<CLayerNode>(pLayerGroup->m_GroupIndex, k, pLayer);
+					pLayerNode->m_pLayers = this;
+					pLayerNode->m_pEditor = Editor();
+					const auto &pLayerTreeNode = pChild->AddChild(pLayer->IsEntitiesLayer() ? ITreeNode::TYPE_ENTITIES_LAYER : ITreeNode::TYPE_LAYER, pLayerNode);
+					pLayerTreeNode->m_pNodeParent = pChild;
 				}
 			}
 			else
@@ -440,7 +542,7 @@ void CLayersView::ApplyTreeChanges(const CTreeChanges &Changes)
 
 	if(!pToNode->m_pData->IsLeaf())
 	{
-		std::shared_ptr<ITreeParentNode> pNode = std::static_pointer_cast<ITreeParentNode>(pToNode->m_pData);
+		const std::shared_ptr<ITreeParentNode> pNode = std::static_pointer_cast<ITreeParentNode>(pToNode->m_pData);
 		for(int Offset = 0; Offset < vpSubTree.size(); Offset++)
 		{
 			pNode->AddChild(Position + Offset, *(vpSubTree.rbegin() + Offset));
@@ -449,4 +551,48 @@ void CLayersView::ApplyTreeChanges(const CTreeChanges &Changes)
 
 	// Update tree
 	BuildTree();
+}
+
+void CLayersView::SelectTreeNode(const std::shared_ptr<CNode> &pNode)
+{
+	if(m_SelectedNodes.count(pNode) || m_Selecting.count(pNode))
+		return;
+
+	m_Selecting.insert(pNode);
+
+	switch(pNode->m_pData->OnSelect())
+	{
+	case ENodeSelectResult::ALLOW:
+		m_SelectedNodes.insert(pNode);
+		break;
+	case ENodeSelectResult::OVERRIDE:
+		ClearSelection();
+		m_SelectedNodes.insert(pNode);
+		break;
+	case ENodeSelectResult::OVERRIDE_TYPE:
+		DeselectType(pNode->m_Type);
+		m_SelectedNodes.insert(pNode);
+		break;
+	default:
+	case ENodeSelectResult::NONE:
+		break;
+	}
+}
+
+std::vector<std::shared_ptr<CLayersView::CNode>> CLayersView::FindIf(const std::shared_ptr<CNode> &pRoot,
+	const std::function<bool(const std::shared_ptr<CNode> &)> &fnPredicate)
+{
+	std::vector<std::shared_ptr<CNode>> vpNodes{};
+
+	if(fnPredicate(pRoot))
+		vpNodes.push_back(pRoot);
+
+	for(auto &pChild : pRoot->m_vpChildren)
+	{
+		auto vFound = FindIf(pChild, fnPredicate);
+		if(!vFound.empty())
+			vpNodes.insert(vpNodes.end(), vFound.begin(), vFound.end());
+	}
+
+	return vpNodes;
 }

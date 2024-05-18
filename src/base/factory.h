@@ -7,16 +7,14 @@
 
 #include <functional>
 #include <memory>
-#include <type_traits>
 #include <unordered_map>
-#include <vector>
 
 /**
  * Factory class
  *
- * @param TKey The type of the key used to register objects
- * @param T The base class of objects stored
- * @param Ret (optional) The type of created objects. By default this is equal to T
+ * @tparam TKey The type of the key used to register objects
+ * @tparam T The base class of objects stored
+ * @tparam Ret (optional) The type of created objects. By default, this is equal to T
  */
 template<typename TKey, typename T, typename Ret = T>
 class CFactoryRegistry
@@ -50,7 +48,7 @@ public:
 	 * Gets the key for a specified class. The class requires to have a trait struct
 	 * which is defined using the MACRO_FACTORY_REGISTER_FULL macro.
 	 *
-	 * @param C The class to get the key for
+	 * @tparam C The class to get the key for
 	 *
 	 * @return The key associated to C. If the class C does not contain a key trait,
 	 * this will result in a compilation error.
@@ -81,8 +79,8 @@ private:
 	{
 		// Registry map. The map itself is not stored as a static member inside this class
 		// in order to avoid static initialization order fiasco
-		static std::unordered_map<TKey, FuncType> Reg;
-		return Reg;
+		static std::unordered_map<TKey, FuncType> s_Reg;
+		return s_Reg;
 	}
 
 	/**
@@ -195,7 +193,6 @@ private: \
 		return &CTypeRegisterer<TKey, _trait, FACTORY::BaseType, std::decay<decltype(*this)>::type, FACTORY::RetType>::ms_Instance; \
 	} \
 \
-public: \
-	static_assert(true, "")
+public:
 
 #endif

@@ -414,21 +414,33 @@ int CUi::DoButtonLogic(const void *pId, int Checked, const CUIRect *pRect)
 	return ReturnValue;
 }
 
-int CUi::DoDraggableButtonLogic(const void *pId, int Checked, const CUIRect *pRect, bool *pClicked, bool *pAbrupted)
+int CUi::DoDraggableButtonLogic(const void *pId, int Checked, const CUIRect *pRect, bool *pClicked, bool *pAbrupted, bool *pMouseDown)
 {
 	// logic
 	int ReturnValue = 0;
 	const bool Inside = MouseHovered(pRect);
 
+	static bool s_MouseWasDown = false;
+
 	if(pClicked != nullptr)
 		*pClicked = false;
 	if(pAbrupted != nullptr)
 		*pAbrupted = false;
+	if(pMouseDown)
+		*pMouseDown = false;
 
 	if(CheckActiveItem(pId))
 	{
 		dbg_assert(m_ActiveDraggableButtonLogicButton >= 0, "m_ActiveDraggableButtonLogicButton invalid");
 		if(m_ActiveDraggableButtonLogicButton == 0)
+		if(!s_MouseWasDown)
+		{
+			s_MouseWasDown = true;
+			if(pMouseDown)
+				*pMouseDown = true;
+		}
+
+		if(s_ButtonUsed == 0)
 		{
 			if(Checked >= 0)
 				ReturnValue = 1 + m_ActiveDraggableButtonLogicButton;
@@ -438,6 +450,8 @@ int CUi::DoDraggableButtonLogic(const void *pId, int Checked, const CUIRect *pRe
 					*pClicked = true;
 				SetActiveItem(nullptr);
 				m_ActiveDraggableButtonLogicButton = -1;
+				s_ButtonUsed = -1;
+				s_MouseWasDown = false;
 			}
 			if(MouseButton(1))
 			{
@@ -445,6 +459,8 @@ int CUi::DoDraggableButtonLogic(const void *pId, int Checked, const CUIRect *pRe
 					*pAbrupted = true;
 				SetActiveItem(nullptr);
 				m_ActiveDraggableButtonLogicButton = -1;
+				s_ButtonUsed = -1;
+				s_MouseWasDown = false;
 			}
 		}
 		else if(!MouseButton(m_ActiveDraggableButtonLogicButton))
@@ -455,6 +471,8 @@ int CUi::DoDraggableButtonLogic(const void *pId, int Checked, const CUIRect *pRe
 				*pClicked = true;
 			SetActiveItem(nullptr);
 			m_ActiveDraggableButtonLogicButton = -1;
+			s_ButtonUsed = -1;
+			s_MouseWasDown = false;
 		}
 	}
 	else if(HotItem() == pId)

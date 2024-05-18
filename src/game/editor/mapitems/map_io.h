@@ -6,6 +6,8 @@
 #include <memory>
 #include <vector>
 
+struct IEditorMapObject;
+
 class IMapItemReader
 {
 protected:
@@ -55,13 +57,13 @@ class CMapItemTreeWriter : public IMapItemWriter
 
 public:
 	CMapItemTreeWriter(const CMapObjectWriter &ObjectWriter);
-	void WriteRoot(const std::vector<std::shared_ptr<class IEditorMapObject>> &vpRootObjects);
+	void WriteRoot(const std::vector<std::shared_ptr<IEditorMapObject>> &vpRootObjects);
 
 private:
 	int NextTypeIndex(int Type);
 	int NextIndex();
 
-	void WriteObjects(const std::vector<std::shared_ptr<class IEditorMapObject>> &vpObjects, int *pFirstChild);
+	void WriteObjects(const std::vector<std::shared_ptr<IEditorMapObject>> &vpObjects, int *pFirstChild);
 
 private:
 	CMapObjectWriter m_MapObjectWriter;
@@ -73,10 +75,10 @@ class CMapItemTreeReader : public IMapItemReader
 {
 public:
 	CMapItemTreeReader(const CMapObjectReader &ObjectReader);
-	std::vector<std::shared_ptr<IEditorMapObject>> ReatRoot();
+	std::vector<std::shared_ptr<IEditorMapObject>> ReadRoot();
 
 private:
-	std::vector<std::shared_ptr<IEditorMapObject>> ReadObjects(int Index);
+	std::vector<std::shared_ptr<IEditorMapObject>> ReadObjects(int FirstIndex);
 
 private:
 	CMapObjectReader m_ObjectReader;

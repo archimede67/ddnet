@@ -6,17 +6,54 @@
 #include "ui_scrollregion.h"
 
 #include <iterator>
-#include <unordered_map>
 #include <unordered_set>
 
 // A path is simply a list of numbers, using a convenient name here.
 // It is mainly used to identify a node (the path to a node) within the tree.
-typedef std::vector<int> CTreeNodePath;
+using CTreeNodePath = std::vector<unsigned int>;
+
+// Creates a child path
+inline CTreeNodePath operator/(const CTreeNodePath &Path, const unsigned Rhs)
+{
+	auto NewPath = Path;
+	NewPath.push_back(Rhs);
+	return NewPath;
+}
+
+inline CTreeNodePath operator/=(const CTreeNodePath &Path, const unsigned Rhs)
+{
+	return Path / Rhs;
+}
+
+// Go up one level, effectively returns parent path
+inline CTreeNodePath operator--(const CTreeNodePath &Path, int)
+{
+	auto ParentPath = Path;
+	ParentPath.pop_back();
+	return ParentPath;
+}
+
+// Go to next sibling
+inline CTreeNodePath operator++(const CTreeNodePath &Path)
+{
+	auto SiblingPath = Path;
+	SiblingPath.back()++;
+	return SiblingPath;
+}
+
+// Go to previous sibling
+inline CTreeNodePath operator--(const CTreeNodePath &Path)
+{
+	auto SiblingPath = Path;
+	if(SiblingPath.back() > 0)
+		SiblingPath.back()--;
+	return SiblingPath;
+}
 
 struct CTreeViewItem
 {
 	CUIRect m_Rect; // The rect of the element in the tree
-	bool m_IsTargetParent; // Wether or not this item is a drag target parent
+	bool m_IsTargetParent; // Whether this item is a drag target parent
 	CTreeNodePath m_Path; // The path to this node/item
 };
 
@@ -59,7 +96,9 @@ public:
 
 private:
 	CDropTargetInfo() :
-		m_IsDropTarget(false), m_vAcceptTypes() {}
+		m_IsDropTarget(false)
+	{
+	}
 
 private:
 	bool m_IsDropTarget; // Indicates if this is a drop target that is accepting something
@@ -72,10 +111,14 @@ private:
 class CTreeChanges
 {
 private:
-	CTreeChanges() :
-		m_vFrom(), m_To() {}
-	CTreeChanges(const std::vector<CTreeNodePath> &vFrom, CTreeNodePath &To) :
-		m_vFrom(vFrom), m_To(To) {}
+	CTreeChanges()
+	{
+	}
+
+	CTreeChanges(const std::vector<CTreeNodePath> &vFrom, CTreeNodePath To) :
+		m_vFrom(vFrom), m_To(std::move(To))
+	{
+	}
 
 public:
 	// Gets the list of initial paths (parent paths that were selected)
@@ -85,7 +128,7 @@ public:
 	const CTreeNodePath &To() const { return m_To; }
 
 	// Checks if there are any changes
-	bool Empty() const { return m_vFrom.size() == 0; }
+	bool Empty() const { return m_vFrom.empty(); }
 
 private:
 	std::vector<CTreeNodePath> m_vFrom;
@@ -111,7 +154,7 @@ private:
 		float m_Indent;
 		int m_ItemIndex;
 
-		void Begin(CUIRect &View, float Indent)
+		void Begin(const CUIRect &View, const float Indent)
 		{
 			m_vSubTrees.clear();
 			m_View = View;
@@ -120,7 +163,7 @@ private:
 			m_ItemIndex = 0;
 		}
 
-		void NextSlot(float Cut, CUIRect *pSlot)
+		void NextSlot(const float Cut, CUIRect *pSlot)
 		{
 			m_View.HSplitTop(Cut, pSlot, &m_View);
 		}
@@ -145,9 +188,8 @@ private:
 		}
 	};
 
-	class CPopoutContext : public CContext
+	struct CDraggedContext : CContext
 	{
-	public:
 		std::unordered_set<int> m_vTypes;
 		std::vector<CTreeNodePath> m_vOriginalPaths;
 	};
@@ -164,7 +206,8 @@ public:
 public:
 	CTreeView();
 
-	void Start(CUIRect *pView, float Indent, float ItemHeight, const CDropTargetInfo &RootDropTargetInfo = CDropTargetInfo::AcceptAll());
+	void Start(CUIRect *pView, float Indent, float ItemHeight,
+		const CDropTargetInfo &RootDropTargetInfo = CDropTargetInfo::AcceptAll());
 	CTreeViewItem DoNode(const void *pId, bool Selected, int Type, const CDropTargetInfo &DropTargetInfo);
 	void PushTree();
 	void PopTree();
@@ -174,12 +217,8 @@ public:
 	void DoSpacing(float Spacing);
 
 	bool Dragging() const;
-
 	EDragStatus DragStatus() const { return m_DragStatus; }
-	const CTreeNodePath &CurrentPath() const
-	{
-		return m_CurrentPath;
-	}
+	const CTreeNodePath &CurrentPath() const { return m_CurrentPath; }
 
 private:
 	enum class EDragResult
@@ -196,7 +235,7 @@ private:
 	void Place(bool ValidTarget, CUIRect *pRect);
 
 	inline bool ShouldClearSelected();
-	inline bool ShouldBePopout();
+	inline bool ShouldBeDragged() const;
 
 	void OnDragStop();
 	void OnDragConfirm();
@@ -223,22 +262,24 @@ private:
 	CScrollRegion m_ScrollRegion;
 
 	float m_InitialMouseY;
-	float m_PopoutY;
-	float m_PopoutX;
-	float m_PopoutHeight;
-	float m_PopoutOffset;
+	float m_DraggedPanelY;
+	float m_DraggedPanelX;
+	float m_DraggedPanelHeight;
+	float m_DraggedPanelOffset;
 	CTreeNodePath m_SelectedPath;
 
 	CContext m_ViewContext;
-	CPopoutContext m_PopoutContext;
+	CDraggedContext m_DraggedContext;
 
 	std::optional<CTreeNodePath> m_HighlightPath;
+
 	enum class EState
 	{
 		STATE_NONE,
 		STATE_DRAG_START,
 		STATE_DRAGGING,
 	};
+
 	EState m_State;
 
 	enum class EDragEndState
@@ -247,10 +288,11 @@ private:
 		STATE_DRAG_CONFIRM,
 		STATE_DRAG_CANCEL,
 	};
+
 	EDragEndState m_DragEndState;
 
 	CTreeNodePath m_CurrentPath;
-	//int m_PathCounter;
+	// int m_PathCounter;
 	CTreeNodePath m_CurrentTargetPath;
 	std::optional<CTreeNodePath> m_TargetPath;
 
@@ -263,7 +305,7 @@ public:
 	static void Print(const CTreeNodePath &Path)
 	{
 		printf("/");
-		for(int p : Path)
+		for(const unsigned p : Path)
 			printf("%d/", p);
 	}
 };

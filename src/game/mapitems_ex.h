@@ -39,7 +39,7 @@ struct IMapItemTreeNode
 
 struct CMapItemFolderNode : IMapItemTreeNode
 {
-	MACRO_MAPITEM_TREENODE(MAPITEMTYPE_FOLDER_NODE);
+	MACRO_MAPITEM_TREENODE(MAPITEMTYPE_FOLDER_NODE)
 
 	enum
 	{
@@ -54,7 +54,7 @@ struct CMapItemFolderNode : IMapItemTreeNode
 
 struct CMapItemLayerGroupNode : IMapItemTreeNode
 {
-	MACRO_MAPITEM_TREENODE(MAPITEMTYPE_LAYER_GROUP_NODE);
+	MACRO_MAPITEM_TREENODE(MAPITEMTYPE_LAYER_GROUP_NODE)
 
 	enum
 	{

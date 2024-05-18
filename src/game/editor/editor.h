@@ -46,6 +46,7 @@
 
 #include <deque>
 #include <functional>
+#include <game/editor/components/debug_view.h>
 #include <map>
 #include <memory>
 #include <string>
@@ -206,7 +207,7 @@ public:
 	void SaveMapItemNode();
 
 	bool Load(const char *pFilename, int StorageType, const std::function<void(const char *pErrorMessage)> &ErrorHandler);
-	void PerformSanityChecks(const std::function<void(const char *pErrorMessage)> &ErrorHandler);
+	void PerformSanityChecks(const std::function<void(const char *pErrorMessage)> &ErrorHandler) const;
 
 	// DDRace
 
@@ -287,6 +288,7 @@ class CEditor : public IEditor
 	CMapView m_MapView;
 	CLayerSelector m_LayerSelector;
 	CLayersView m_LayersView;
+	CDebugView m_DebugView;
 
 	bool m_EditorWasUsedBefore = false;
 

@@ -5,7 +5,6 @@
 
 #include <game/editor/components/layers_view/node.h>
 #include <game/mapitems_object.h>
-#include <game/mapitems_object_types.h>
 
 #include <memory>
 
@@ -22,7 +21,7 @@ public:
 	virtual std::shared_ptr<ITreeNode> ToTreeNode(const std::shared_ptr<IEditorMapObject> &Self) = 0;
 
 protected:
-	CEditorMap *Map() { return m_pMap; }
+	CEditorMap *Map() const { return m_pMap; }
 
 protected:
 	IEditorMapObject() = default;
@@ -46,8 +45,8 @@ public:
 	std::vector<std::shared_ptr<IEditorMapObject>> m_vpChildren;
 };
 
-template<typename Object, typename std::enable_if_t<std::is_base_of_v<IEditorMapObject, Object>, bool> = true>
-struct CEditorMapTreeNodeMixin : public Object
+template<typename Object, std::enable_if_t<std::is_base_of_v<IEditorMapObject, Object>, bool> = true>
+struct CEditorMapTreeNodeMixin : Object
 {
 	template<typename... Args>
 	CEditorMapTreeNodeMixin(Args &&...Arguments) :

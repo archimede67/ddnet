@@ -2031,7 +2031,6 @@ set_src(GAME_SHARED GLOB src/game
   mapitems_ex.h
   mapitems_ex_types.h
   mapitems_object.h
-  mapitems_object_types.h
   prng.cpp
   prng.h
   teamscore.cpp
@@ -2312,6 +2311,8 @@ if(CLIENT)
     component.h
     components/auto_map.cpp
     components/auto_map.h
+	components/debug_view.cpp
+	components/debug_view.h
     components/layer_selector.cpp
     components/layer_selector.h
     components/layers_view/layers_view.cpp
@@ -2320,6 +2321,8 @@ if(CLIENT)
     components/layers_view/node.h
     components/layers_view/nodes.cpp
     components/layers_view/nodes.h
+    components/layers_view/node_refs.cpp
+    components/layers_view/node_refs.h
     components/map_grid.cpp
     components/map_grid.h
     components/map_view.cpp

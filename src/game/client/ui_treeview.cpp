@@ -6,7 +6,7 @@ CTreeView::CTreeView()
 	m_Indent = 12.0f;
 	m_AutoSpacing = 0.0f;
 	m_pDragId = m_pHotId = m_pClickedId = nullptr;
-	m_PopoutX = m_PopoutY = 0;
+	m_DraggedPanelX = m_DraggedPanelY = 0;
 	m_State = EState::STATE_NONE;
 	m_DragEndState = EDragEndState::STATE_NONE;
 	m_DragStatus = EDragStatus::NONE;
@@ -16,12 +16,12 @@ CTreeView::CTreeView()
 	m_HighlightPath.reset();
 
 	m_InitialMouseY = 0;
-	m_PopoutHeight = 0;
-	m_PopoutOffset = 0;
+	m_DraggedPanelHeight = 0;
+	m_DraggedPanelOffset = 0;
 	m_vCurrentDropTargetInfo = {};
 
-	m_PopoutContext.m_vTypes.clear();
-	m_PopoutContext.m_vOriginalPaths.clear();
+	m_DraggedContext.m_vTypes.clear();
+	m_DraggedContext.m_vOriginalPaths.clear();
 }
 
 void CTreeView::Start(CUIRect *pView, float Indent, float ItemHeight, const CDropTargetInfo &RootDropTargetInfo)
@@ -46,18 +46,18 @@ void CTreeView::Start(CUIRect *pView, float Indent, float ItemHeight, const CDro
 	m_ScrollRegion.Begin(&m_Root, &ScrollOffset, &ScrollParams);
 
 	m_ViewContext.Begin(m_Root, Indent);
-	m_PopoutContext.Begin(m_Root, Indent);
+	m_DraggedContext.Begin(m_Root, Indent);
 
 	m_ViewContext.m_View.y += ScrollOffset.y;
 
 	if(Dragging())
 	{
-		m_PopoutContext.m_View.x = m_PopoutX;
-		m_PopoutContext.m_View.w = maximum(0.0f, m_Root.w - (m_PopoutX - m_Root.x));
-		m_PopoutContext.m_View.y = m_PopoutY;
-		m_PopoutContext.m_View.h = m_PopoutHeight;
+		m_DraggedContext.m_View.x = m_DraggedPanelX;
+		m_DraggedContext.m_View.w = maximum(0.0f, m_Root.w - (m_DraggedPanelX - m_Root.x));
+		m_DraggedContext.m_View.y = m_DraggedPanelY;
+		m_DraggedContext.m_View.h = m_DraggedPanelHeight;
 
-		m_PopoutX = m_Root.x;
+		m_DraggedPanelX = m_Root.x;
 	}
 }
 
@@ -76,7 +76,7 @@ CTreeChanges CTreeView::End()
 		m_ViewContext.m_View.HSplitTop(m_ItemHeight, &Space, nullptr);
 		m_ScrollRegion.AddRect(Space);
 
-		float MouseY = Ui()->MouseY() + m_PopoutOffset + (ItemIndex() > 0 ? m_AutoSpacing : 0);
+		float MouseY = Ui()->MouseY() + m_DraggedPanelOffset + (ItemIndex() > 0 ? m_AutoSpacing : 0);
 		if(MouseY >= Space.y)
 		{
 			if(IsValidDropTarget(m_vCurrentDropTargetInfo.back()))
@@ -103,7 +103,7 @@ CTreeChanges CTreeView::End()
 	{
 		auto ToPath = *m_TargetPath;
 
-		CTreeChanges Changes(m_PopoutContext.m_vOriginalPaths, ToPath);
+		CTreeChanges Changes(m_DraggedContext.m_vOriginalPaths, std::move(ToPath));
 
 		m_TargetPath.reset();
 		m_CurrentTargetPath.clear();
@@ -126,7 +126,7 @@ CTreeViewItem CTreeView::DoNode(const void *pId, bool Selected, int Type, const 
 
 	if(m_pDragId == pId)
 	{
-		m_PopoutY = maximum(m_Root.y - (ItemIndex() > 0 ? m_AutoSpacing : 0), Ui()->MouseY() + m_PopoutOffset);
+		m_DraggedPanelY = maximum(m_Root.y - (ItemIndex() > 0 ? m_AutoSpacing : 0), Ui()->MouseY() + m_DraggedPanelOffset);
 	}
 
 	bool Dragged = UpdateNode(pId, Selected, Type);
@@ -140,7 +140,7 @@ CTreeViewItem CTreeView::DoNode(const void *pId, bool Selected, int Type, const 
 
 	if(Context() == &m_ViewContext)
 	{
-		float MouseY = Ui()->MouseY() + m_PopoutOffset;
+		float MouseY = Ui()->MouseY() + m_DraggedPanelOffset;
 		MouseY = maximum(m_Root.y + 0.01f, MouseY);
 
 		if(Dragging())
@@ -152,9 +152,9 @@ CTreeViewItem CTreeView::DoNode(const void *pId, bool Selected, int Type, const 
 			{
 				if(MouseY >= (SubTree.y - Area) && MouseY <= SubTree.y + SubTree.h)
 				{
-					if(SubTree.x > m_PopoutX && !m_HighlightPath)
+					if(SubTree.x > m_DraggedPanelX && !m_HighlightPath)
 					{
-						m_PopoutX = SubTree.x;
+						m_DraggedPanelX = SubTree.x;
 					}
 				}
 			}
@@ -173,13 +173,13 @@ CTreeViewItem CTreeView::DoNode(const void *pId, bool Selected, int Type, const 
 			}
 			else if(MouseY >= Bottom.y && MouseY <= Bottom.y + Bottom.h)
 			{
-				if(!m_PopoutContext.m_vTypes.empty())
+				if(!m_DraggedContext.m_vTypes.empty())
 				{
 					const bool ValidTarget = IsValidDropTarget(DropTargetInfo);
 
 					if(ValidTarget)
 					{
-						m_PopoutX = Bottom.x;
+						m_DraggedPanelX = Bottom.x;
 						m_HighlightPath = m_CurrentPath;
 
 						// The target insertion will be at the beginning of the children
@@ -213,7 +213,7 @@ CTreeViewItem CTreeView::DoNode(const void *pId, bool Selected, int Type, const 
 		if(!m_pDragId && m_pClickedId == pId && absolute(Ui()->MouseY() - m_InitialMouseY) > 5.0f)
 		{
 			m_pDragId = pId;
-			m_PopoutOffset = (m_ViewContext.m_View.y - 1 * (m_ItemHeight)-m_InitialMouseY);
+			m_DraggedPanelOffset = (m_ViewContext.m_View.y - 1 * (m_ItemHeight)-m_InitialMouseY);
 		}
 	}
 	else if(Result == EDragResult::DRAG_RESULT_CANCEL)
@@ -265,7 +265,7 @@ void CTreeView::PopTree()
 
 	if(Dragging() && Context() == &m_ViewContext)
 	{
-		float MouseY = Ui()->MouseY() + m_PopoutOffset;
+		float MouseY = Ui()->MouseY() + m_DraggedPanelOffset;
 		MouseY = maximum(m_Root.y + 0.01f, MouseY);
 
 		const bool ValidTarget = IsValidDropTarget(m_vCurrentDropTargetInfo.back());
@@ -277,7 +277,7 @@ void CTreeView::PopTree()
 			m_ViewContext.m_View.HSplitTop(m_ItemHeight, &FakeItem, nullptr);
 
 			Place(ValidTarget, &FakeItem);
-			m_PopoutX = SubTree.x;
+			m_DraggedPanelX = SubTree.x;
 		}
 	}
 
@@ -325,8 +325,8 @@ bool CTreeView::UpdateNode(const void *pId, bool Selected, int Type)
 		m_SelectedPath = m_CurrentPath;
 		if(m_State == EState::STATE_DRAG_START)
 		{
-			m_PopoutContext.m_vOriginalPaths.push_back(m_CurrentPath);
-			m_PopoutContext.m_vTypes.insert(Type);
+			m_DraggedContext.m_vOriginalPaths.push_back(m_CurrentPath);
+			m_DraggedContext.m_vTypes.insert(Type);
 		}
 	}
 	else if(ShouldClearSelected() && !Selected)
@@ -344,8 +344,8 @@ bool CTreeView::ShouldClearSelected()
 
 void CTreeView::NextSlot(float Cut, CUIRect *pSlot)
 {
-	if(m_State == EState::STATE_DRAG_START && ShouldBePopout())
-		m_PopoutHeight += Cut;
+	if(m_State == EState::STATE_DRAG_START && ShouldBeDragged())
+		m_DraggedPanelHeight += Cut;
 	Context()->NextSlot(Cut, pSlot);
 }
 
@@ -370,7 +370,7 @@ void CTreeView::OnDragCancel()
 
 void CTreeView::OnDragStart()
 {
-	m_PopoutHeight = 0;
+	m_DraggedPanelHeight = 0;
 	m_State = EState::STATE_DRAG_START;
 }
 
@@ -384,25 +384,25 @@ void CTreeView::OnTarget(const CTreeNodePath &Path)
 	m_CurrentTargetPath = Path;
 }
 
-bool CTreeView::ShouldBePopout()
+bool CTreeView::ShouldBeDragged() const
 {
 	return Dragging() && !m_SelectedPath.empty();
 }
 
 CTreeView::CContext *CTreeView::Context()
 {
-	return (m_State == EState::STATE_DRAGGING && ShouldBePopout()) ? &m_PopoutContext : &m_ViewContext;
+	return (m_State == EState::STATE_DRAGGING && ShouldBeDragged()) ? &m_DraggedContext : &m_ViewContext;
 }
 
 void CTreeView::Reset()
 {
-	m_PopoutContext.m_vTypes.clear();
-	m_PopoutContext.m_vOriginalPaths.clear();
+	m_DraggedContext.m_vTypes.clear();
+	m_DraggedContext.m_vOriginalPaths.clear();
 }
 
 bool CTreeView::IsValidDropTarget(const CDropTargetInfo &Info)
 {
-	return std::all_of(m_PopoutContext.m_vTypes.begin(), m_PopoutContext.m_vTypes.end(), [&Info](int Type) { return Info.IsAccepting(Type); });
+	return std::all_of(m_DraggedContext.m_vTypes.begin(), m_DraggedContext.m_vTypes.end(), [&Info](int Type) { return Info.IsAccepting(Type); });
 }
 
 int CTreeView::ItemIndex() { return Context()->m_ItemIndex; }
@@ -414,7 +414,7 @@ void CTreeView::Place(bool ValidTarget, CUIRect *pRect)
 	if(ValidTarget)
 	{
 		CUIRect Space;
-		NextSlot(m_PopoutHeight - m_ItemHeight, &Space);
+		NextSlot(m_DraggedPanelHeight - m_ItemHeight, &Space);
 
 		if(pRect)
 			m_ScrollRegion.AddRect(*pRect);
