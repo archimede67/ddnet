@@ -13,6 +13,19 @@ enum
 	END_MAPITEMTYPES_UUID,
 };
 
+struct CMapItemTest
+{
+	enum
+	{
+		CURRENT_VERSION = 1
+	};
+
+	int m_Version;
+	int m_aFields[2];
+	int m_Field3;
+	int m_Field4;
+};
+
 struct CMapItemAutoMapperConfig
 {
 	enum

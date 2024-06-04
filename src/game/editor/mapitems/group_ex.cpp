@@ -15,7 +15,7 @@ void CLayerGroupObject::Render()
 
 std::shared_ptr<ITreeNode> CLayerGroupObject::ToTreeNode(const std::shared_ptr<IEditorMapObject> &Self)
 {
-	return std::make_shared<CLayerGroupNode>(m_GroupIndex, Map()->m_vpGroups[std::static_pointer_cast<CLayerGroupObject>(Self)->m_GroupIndex]);
+	return std::make_shared<CLayerGroupNode>(m_GroupIndex, std::static_pointer_cast<CLayerGroupObject>(Self), Map()->m_vpGroups[std::static_pointer_cast<CLayerGroupObject>(Self)->m_GroupIndex]);
 }
 
 CUi::EPopupMenuFunctionResult CLayerGroupObject::Popup(CUIRect View, int &Height)

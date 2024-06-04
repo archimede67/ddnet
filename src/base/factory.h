@@ -112,13 +112,22 @@ struct CTypeRegisterer
 	static const typename CFactoryRegistry<TKey, Base, RetType>::CRegisterer ms_Instance;
 };
 
+template<class T>
+struct CTypeMaker
+{
+	static T Create()
+	{
+		return T();
+	}
+};
+
 // Declare the registerer instance. The register class takes a function and a key to register a specific type.
 // The key is obtained from the trait class, which is passed as a template argument from the macro below.
 // The function used to create a new instance is simply a lambda that returns a regular object of the derived type.
 // In order for this member to be initialized, it needs to be used (referenced) from somewhere.
 template<typename TKey, typename Trait, typename Base, typename Derived, typename RetType>
 const typename CFactoryRegistry<TKey, Base, RetType>::CRegisterer
-	CTypeRegisterer<TKey, Trait, Base, Derived, RetType>::ms_Instance([]() -> RetType { return Derived(); }, Trait::Key());
+	CTypeRegisterer<TKey, Trait, Base, Derived, RetType>::ms_Instance(&CTypeMaker<Derived>::Create, Trait::Key());
 
 /**
  * Main macro to perform registration of a class into a factory.

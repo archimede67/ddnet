@@ -6,6 +6,13 @@
 #include <memory>
 #include <vector>
 
+class CRootObject final : public IEditorMapObject
+{
+public:
+	CUi::EPopupMenuFunctionResult Popup(CUIRect View, int &Height) override { return CUi::POPUP_CLOSE_CURRENT; }
+	std::shared_ptr<ITreeNode> ToTreeNode(const std::shared_ptr<IEditorMapObject> &Self) override { return nullptr; }
+};
+
 class CEditorParentGroup : public IEditorMapObject
 {
 public:
@@ -27,7 +34,7 @@ public:
 	CLayerGroupObject(int GroupIndex) :
 		m_GroupIndex(GroupIndex) {}
 
-	virtual void Render() override;
+	void Render() override;
 	CUi::EPopupMenuFunctionResult Popup(CUIRect View, int &Height) override;
 
 	std::shared_ptr<ITreeNode> ToTreeNode(const std::shared_ptr<IEditorMapObject> &Self) override;

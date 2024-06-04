@@ -100,7 +100,7 @@ void CEditorMap::Clean()
 	m_vpEnvelopes.clear();
 	m_vpImages.clear();
 	m_vpSounds.clear();
-	m_vpRootObjects.clear();
+	m_pTreeRoot = std::make_shared<CRootObject>();
 
 	m_MapInfo.Reset();
 	m_MapInfoTmp.Reset();
@@ -191,9 +191,9 @@ std::shared_ptr<CLayerGroup> CEditorMap::NewGroup(bool CreateInfo)
 	// pGroupObject->m_pMap = this;
 	// m_vpRootObjects.push_back(pGroupObject);
 
-	std::shared_ptr<CEditorMapTreeNodeMixin<CLayerGroupObject>> pFolder = std::make_shared<CEditorMapTreeNodeMixin<CLayerGroupObject>>(Index);
-	pFolder->m_pMap = this;
-	m_vpRootObjects.push_back(pFolder);
+	const auto pGroupObj = CreateObject<CLayerGroupObject>(Index);
+	pGroupObj->m_pMap = this;
+	m_pTreeRoot->m_vpChildren.push_back(pGroupObj);
 
 	// if(CreateInfo)
 	//{

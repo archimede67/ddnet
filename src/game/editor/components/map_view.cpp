@@ -107,7 +107,7 @@ void CMapView::RenderMap()
 	}
 
 	// TODO: iterate over objects here...
-	for(auto &pObject : Map.m_vpRootObjects)
+	for(auto &pObject : Map.m_pTreeRoot->m_vpChildren)
 	{
 		pObject->Render();
 	}

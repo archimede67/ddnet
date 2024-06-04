@@ -1407,9 +1407,9 @@ set(EXPECTED_DATA
   editor/background.png
   editor/checker.png
   editor/cursor.png
-  editor/cursor_resize.png
-  editor/cursor_not_allowed.png
   editor/cursor_move_here.png
+  editor/cursor_not_allowed.png
+  editor/cursor_resize.png
   editor/entities/DDNet.png
   editor/entities/FNG.png
   editor/entities/Race.png
@@ -1871,6 +1871,7 @@ set_src(BASE GLOB_RECURSE src/base
   hash.cpp
   hash.h
   hash_bundled.cpp
+  hash_combine.h
   hash_ctxt.h
   hash_libtomcrypt.cpp
   hash_openssl.cpp
@@ -1883,6 +1884,8 @@ set_src(BASE GLOB_RECURSE src/base
   system.cpp
   system.h
   tl/threading.h
+  traits.h
+  tuple.h
   types.h
   unicode/confusables.cpp
   unicode/confusables.h
@@ -2295,6 +2298,7 @@ if(CLIENT)
     render.h
     render_map.cpp
     skin.h
+	tree_path.h
     ui.cpp
     ui.h
     ui_listbox.cpp
@@ -2321,8 +2325,9 @@ if(CLIENT)
     components/layers_view/node.h
     components/layers_view/nodes.cpp
     components/layers_view/nodes.h
-    components/layers_view/node_refs.cpp
-    components/layers_view/node_refs.h
+    components/layers_view/queries.cpp
+    components/layers_view/queries.h
+	components/layers_view/traits.h
     components/map_grid.cpp
     components/map_grid.h
     components/map_view.cpp

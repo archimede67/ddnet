@@ -4,8 +4,6 @@
 #include <game/client/ui.h>
 
 #include <memory>
-#include <unordered_set>
-#include <vector>
 
 struct IEditorMapObject;
 
@@ -31,14 +29,10 @@ public:
 		TYPE_LAYER_GROUP,
 		TYPE_FOLDER,
 	};
-	enum EFlags
-	{
-		FLAG_NONE = 0,
-		FLAG_NO_MULTI_SELECTION = 1 << 0, // The same node type cannot be selected multiple times
-	};
 
-	explicit ITreeNode(const EType Type, const int Flags = FLAG_NONE) :
-		m_Type(Type), m_Flags(Flags), m_pLayers(nullptr)
+public:
+	explicit ITreeNode(const EType Type) :
+		m_Type(Type), m_pLayers(nullptr), m_pEditor(nullptr)
 	{
 	}
 
@@ -48,27 +42,29 @@ public:
 	virtual bool *Collapse() = 0;
 	virtual bool *Visible() = 0;
 	virtual const void *Id() = 0;
+
 	virtual std::shared_ptr<IEditorMapObject> Object() { return nullptr; }
-	virtual ENodeSelectResult OnSelect() { return ENodeSelectResult::NONE; }
+	virtual ENodeSelectResult OnSelect() { return ENodeSelectResult::ALLOW; }
 	virtual void OnDeselect() {}
 
 	virtual bool IsLeaf() { return true; }
+	virtual void Decorate(CUIRect View) {}
 
 	EType Type() const { return m_Type; }
-	int Flags() const { return m_Flags; }
-	virtual const char *Name() const = 0;
+	virtual const char *Name() = 0;
 
 protected:
 	virtual CUi::EPopupMenuFunctionResult Popup(CUIRect View, int &Height);
 	CLayersView *Layers() const { return m_pLayers; }
 	class CEditor *Editor() const { return m_pEditor; }
 
+	bool Hovered();
+
 private:
 	static CUi::EPopupMenuFunctionResult RenderPopup(void *pContext, CUIRect View, bool Active, int &Height);
 
 private:
 	EType m_Type;
-	int m_Flags;
 	CLayersView *m_pLayers;
 	CEditor *m_pEditor;
 };
@@ -78,19 +74,19 @@ class ITreeParentNode : public ITreeNode
 	friend class CLayersView;
 
 public:
-	ITreeParentNode(const EType Type, const int Flags = FLAG_NONE) :
-		ITreeNode(Type, Flags)
+	struct CIndex
+	{
+		size_t m_Index;
+	};
+
+public:
+	ITreeParentNode(const EType Type) :
+		ITreeNode(Type)
 	{
 	}
 
-	virtual void AddChild(int Index, const std::shared_ptr<ITreeNode> &pChild);
-	virtual void RemoveChild(int Index);
-
-	void AddChildren(const std::vector<std::shared_ptr<ITreeNode>> &vpChildren)
-	{
-		for(int i = 0; i < (int)vpChildren.size(); i++)
-			AddChild(i, vpChildren.at(i));
-	}
+	virtual void AddChild(const CIndex &Index, const std::shared_ptr<ITreeNode> &pChild);
+	virtual void RemoveChild(const CIndex &Index, const std::shared_ptr<ITreeNode> &pChild);
 
 	bool IsLeaf() override { return false; }
 };

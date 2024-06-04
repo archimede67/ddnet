@@ -6,6 +6,8 @@
 #include <game/client/ui_treeview.h>
 
 #include <game/editor/component.h>
+#include <game/editor/components/layers_view/queries.h>
+#include <game/editor/components/layers_view/traits.h>
 #include <game/editor/popups.h>
 
 #include <game/editor/mapitems/group_ex.h>
@@ -14,13 +16,6 @@ using namespace EditorPopups;
 
 class CEditorMap;
 class CLayer;
-
-struct CNodeRef
-{
-	virtual ~CNodeRef() = default;
-	virtual bool Equals(const CNodeRef &Other);
-	bool operator==(const CNodeRef &Other) { return Equals(Other); }
-};
 
 template<class TNodeData, typename EType>
 class CTreeNode
@@ -31,14 +26,14 @@ public:
 
 	CTreeNode() :
 		m_Type(-1), m_pData(nullptr), m_vpChildren(), m_pNodeParent(nullptr) {}
-	CTreeNode(EType Type, std::shared_ptr<TNodeData> pData) :
-		m_Type(static_cast<int>(Type)), m_pData(pData), m_vpChildren(), m_pNodeParent(nullptr) {}
+	CTreeNode(EType Type, const CTreeNodePath &Path, std::shared_ptr<TNodeData> pData) :
+		m_Type(static_cast<int>(Type)), m_Path(Path), m_pData(std::move(pData)), m_vpChildren(), m_pNodeParent(nullptr) {}
 
 public:
 	template<typename T>
 	std::shared_ptr<CTreeNode> &AddChild(EType Type, const std::shared_ptr<T> &Child)
 	{
-		m_vpChildren.push_back(std::make_shared<CTreeNode>(Type, std::static_pointer_cast<TNodeData>(Child)));
+		m_vpChildren.push_back(std::make_shared<CTreeNode>(Type, m_Path / static_cast<int>(m_vpChildren.size()), std::static_pointer_cast<TNodeData>(Child)));
 		return m_vpChildren.back();
 	}
 
@@ -49,6 +44,7 @@ public:
 
 public:
 	int m_Type; // Type of the node
+	CTreeNodePath m_Path; // Path to the node
 	std::shared_ptr<TNodeData> m_pData;
 	std::vector<std::shared_ptr<CTreeNode>> m_vpChildren;
 	std::shared_ptr<CTreeNode> m_pNodeParent;
@@ -73,7 +69,7 @@ public:
 
 		std::pair<CTreeNodePath, std::shared_ptr<TNode>> Next(const CTreeNodePath &Path, const std::shared_ptr<TNode> &pNode, const int Dir)
 		{
-			if(Path.empty())
+			if(Path.Empty())
 				return std::make_pair(CTreeNodePath{}, nullptr);
 
 			dbg_assert(pNode != nullptr, "Node cannot be null");
@@ -85,14 +81,14 @@ public:
 					return std::make_pair(NextPath, pNode->m_vpChildren[0]);
 			}
 
-			const unsigned Index = Path.back();
+			const unsigned Index = Path.Index();
 			auto &pNodeParent = pNode->m_pNodeParent;
 
 			// No next node, have to go up by one at least
 			if(Index + (Dir > 0 ? 1 : -1) >= pNodeParent->m_vpChildren.size())
-				return Next(Path--, pNodeParent, Dir);
+				return Next(Path.Parent(), pNodeParent, Dir);
 
-			return std::make_pair(Dir > 0 ? ++Path : --Path, pNodeParent->m_vpChildren[Index + 1]);
+			return std::make_pair(Dir > 0 ? Path.NextSibling() : Path.PreviousSibling(), pNodeParent->m_vpChildren[Index + 1]);
 		}
 
 	public:
@@ -126,11 +122,11 @@ public:
 		CTreeNodePath m_CurrentPath;
 	};
 
-	class CBetween
+	class CRange
 	{
 	public:
-		CBetween(CTreeNavigator *pNavigator, const CTreeNodePath &From, const CTreeNodePath &To) :
-			m_pNavigator(pNavigator), m_From(From), m_To(To)
+		CRange(CTreeNavigator *pNavigator, CTreeNodePath From, CTreeNodePath To) :
+			m_pNavigator(pNavigator), m_From(std::move(From)), m_To(std::move(To))
 		{
 		}
 
@@ -159,11 +155,11 @@ public:
 		return pNode;
 	}
 
-	CBetween Between(const CTreeNodePath &From, const CTreeNodePath &To)
+	CRange Range(const CTreeNodePath &From, const CTreeNodePath &To)
 	{
 		if(To < From)
-			return CBetween(this, To, From);
-		return CBetween(this, From, To);
+			return CRange(this, To, From);
+		return CRange(this, From, To);
 	}
 
 	CIterator At(const CTreeNodePath &Path) { return CIterator(this, Path); }
@@ -178,13 +174,22 @@ public:
 	ITreeNode::EType m_Type;
 	std::shared_ptr<CTreeNode<ITreeNode, ITreeNode::EType>> m_pNode;
 	const void *m_pNodeId;
+	size_t m_SelectionIndex;
+
+	CTreeNodeInfo(const size_t Index, const std::shared_ptr<CTreeNode<ITreeNode, ITreeNode::EType>> &pNode) :
+		m_Type(static_cast<ITreeNode::EType>(pNode->m_Type)), m_pNode(pNode), m_pNodeId(pNode->m_pData->Id()), m_SelectionIndex(Index)
+	{
+	}
 
 	CTreeNodeInfo(const std::shared_ptr<CTreeNode<ITreeNode, ITreeNode::EType>> &pNode) :
-		m_Type(static_cast<ITreeNode::EType>(pNode->m_Type)), m_pNode(pNode), m_pNodeId(pNode->m_pData->Id()) {}
+		CTreeNodeInfo(-1, pNode) {}
+
 	CTreeNodeInfo() :
 		CTreeNodeInfo(nullptr) {}
 	CTreeNodeInfo(std::nullptr_t) :
-		m_Type(ITreeNode::TYPE_NONE), m_pNode(nullptr), m_pNodeId(nullptr) {}
+		m_Type(ITreeNode::TYPE_NONE), m_pNode(nullptr), m_pNodeId(nullptr), m_SelectionIndex(-1)
+	{
+	}
 
 	bool operator==(const CTreeNodeInfo &Other) const { return Other.m_pNodeId == m_pNodeId; }
 	bool operator==(std::nullptr_t) const { return m_pNodeId == nullptr; }
@@ -196,8 +201,17 @@ class CTreeView;
 
 class CLayersView final : public CEditorComponent
 {
+	struct STreeNodeInfoHasher
+	{
+		size_t operator()(const CTreeNodeInfo &Info) const
+		{
+			return std::hash<const void *>()(Info.m_pNodeId);
+		}
+	};
+
 	using CNode = CTreeNode<ITreeNode, ITreeNode::EType>;
 	using CTreeNavigator = CTreeNavigator<CNode>;
+	using CNodeSet = std::unordered_set<CTreeNodeInfo, STreeNodeInfoHasher>;
 
 public:
 	CLayersView() = default;
@@ -220,14 +234,6 @@ private:
 			m_pIcon(nullptr) {}
 	};
 
-	struct STreeNodeInfoHasher
-	{
-		size_t operator()(const CTreeNodeInfo &Info) const
-		{
-			return std::hash<const void *>()(Info.m_pNodeId);
-		}
-	};
-
 private:
 	CTreeView m_TreeView;
 	std::shared_ptr<CNode> m_pTreeRoot;
@@ -238,25 +244,27 @@ private:
 	SRenderContext m_RenderContext;
 	SParentGroupPopupContext m_ParentPopupContext;
 
-	std::unordered_set<CTreeNodeInfo, STreeNodeInfoHasher> m_SelectedNodes;
+	CNodeSet m_SelectedNodes;
 	CTreeNodePath m_LastSelectedNodePath;
-	std::unordered_set<CTreeNodeInfo, STreeNodeInfoHasher> m_Selecting;
+	CNodeSet m_Selecting;
+
+	std::unordered_map<CNodeQueryHash, std::vector<CTreeNodeInfo>, CNodeQueryHash::Hasher> m_SelectionQueryCache;
 
 public:
 	// Select node(s) based on a node reference
-	template<typename Ref>
-	void Select(const Ref &NodeRef)
+	template<typename Query>
+	void Select(const Query &SearchQuery)
 	{
-		auto vpNodes = FindIf(m_pTreeRoot, [NodeRef](const auto &pNode) { return NodeRef(pNode->m_pData); });
+		auto vpNodes = FindIf(m_pTreeRoot, [SearchQuery](const auto &pNode) { return SearchQuery(pNode->m_pData); });
 		for(auto &pNode : vpNodes)
 			SelectTreeNode(pNode);
 	}
 
 	// Deselect node(s) based on a node reference
-	template<typename Ref>
-	void Deselect(const Ref &NodeRef)
+	template<typename Query>
+	void Deselect(const Query &SearchQuery)
 	{
-		auto vpNodes = FindIf(m_pTreeRoot, [NodeRef](const auto &pNode) { return NodeRef(pNode->m_pData); });
+		auto vpNodes = FindIf(m_pTreeRoot, [SearchQuery](const auto &pNode) { return SearchQuery(pNode->m_pData); });
 		for(auto &pNode : vpNodes)
 		{
 			pNode->m_pData->OnDeselect();
@@ -264,20 +272,52 @@ public:
 		}
 	}
 
+	template<typename Query>
+	std::vector<std::shared_ptr<CNode>> Query(const Query &SearchQuery)
+	{
+		return FindIf(m_pTreeRoot, [SearchQuery](const auto &pNode) { return SearchQuery(pNode->m_Path, pNode->m_pData); });
+	}
+
+	template<typename Query, std::enable_if_t<QueryTraits::IsHashed<Query>::value, bool> = true>
+	std::vector<CTreeNodeInfo> SelectedNodes(const Query &SearchQuery)
+	{
+		const CNodeQueryHash QueryHash = CNodeQueryHash::Combine(typeid(Query).hash_code(), SearchQuery.Hash());
+		const auto It = m_SelectionQueryCache.find(QueryHash);
+		if(It == m_SelectionQueryCache.end())
+		{
+			auto &Entry = m_SelectionQueryCache[QueryHash];
+			Entry = {};
+			for(auto &Selected : m_SelectedNodes)
+			{
+				if(SearchQuery(Selected.m_pNode->m_pData))
+					Entry.push_back(Selected);
+			}
+			return Entry;
+		}
+		return It->second;
+	}
+
+	const CNodeSet &Selection() { return m_SelectedNodes; }
+
 	void ClearSelection();
 	void DeselectType(int Type);
 
+	void DoIcon(const char *pIcon, const CUIRect *pRect, float FontSize);
+
+	void GroupSelection();
+	void UngroupSelection();
+
+	void Group(const std::vector<CTreeNodePath> &vOriginalPaths, const CTreeNodePath &TargetPath);
+
 private:
-	void RenderTreeNode(const CTreeNodePath &NodePath, const std::shared_ptr<CNode> &pNode);
-	void RenderTreeNodeItem(const CTreeNodePath &NodePath, const char *pName, const std::shared_ptr<CNode> &pNode);
+	void RenderTreeNode(const std::shared_ptr<CNode> &pNode);
+	void RenderTreeNodeItem(const char *pName, const std::shared_ptr<CNode> &pNode);
 
 	inline void ResetRenderContext();
 
 	// int DoSelectable(const void *pId, const char *pText, const CToggleFlags &Flags, int Checked, const CUIRect *pRect, const char *pToolTip, const SExtraRenderInfo &Extra = {});
 
 	int DoToggleIconButton(const void *pButtonId, const void *pParentId, const char *pIcon, bool Checked, const CUIRect *pRect, const char *pToolTip);
-	void DoIcon(const char *pIcon, const CUIRect *pRect, float FontSize);
-
 	bool CanHandleInput() const;
 
 	void BuildTree();
@@ -285,6 +325,7 @@ private:
 	void ApplyTreeChanges(const CTreeChanges &Changes);
 
 	void SelectTreeNode(const std::shared_ptr<CNode> &pNode);
+	static void SetParent(const std::shared_ptr<CNode> &pNode, const std::shared_ptr<IEditorMapObject> &pParent, int TargetPosition);
 
 	template<typename Ref>
 	static std::shared_ptr<CNode> Find(const std::shared_ptr<CNode> &pRoot, const Ref &NodeRef)

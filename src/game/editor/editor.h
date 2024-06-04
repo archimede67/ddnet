@@ -107,7 +107,7 @@ public:
 	std::vector<std::shared_ptr<CEnvelope>> m_vpEnvelopes;
 	std::vector<std::shared_ptr<CEditorSound>> m_vpSounds;
 
-	std::vector<std::shared_ptr<IEditorMapObject>> m_vpRootObjects;
+	std::shared_ptr<CRootObject> m_pTreeRoot;
 
 	class CMapInfo
 	{
@@ -155,6 +155,12 @@ public:
 	void VisitEnvelopeReferences(F &&Visitor);
 
 	std::shared_ptr<CLayerGroup> NewGroup(bool CreateInfo = true);
+
+	template<typename T, typename... Args, std::enable_if_t<std::is_base_of_v<IEditorMapObject, T>, bool> = true>
+	std::shared_ptr<CEditorMapTreeNodeMixin<T>> CreateObject(Args &&...Arguments)
+	{
+		return std::make_shared<CEditorMapTreeNodeMixin<T>>(std::forward<Args>(Arguments)...);
+	}
 
 	// CEditorGroupInfo &GroupSelection(const std::vector<int> &vSelectedGroupItems);
 	// void UngroupSelection(const std::vector<int> &vSelectedGroupItems);
@@ -757,10 +763,11 @@ public:
 	bool m_ShowPicker;
 
 	std::vector<int> m_vSelectedLayers;
+	int m_SelectedGroup;
+
 	std::vector<int> m_vSelectedQuads;
 	int m_SelectedQuadPoint;
 	int m_SelectedQuadIndex;
-	int m_SelectedGroup;
 	int m_SelectedQuadPoints;
 	int m_SelectedEnvelope;
 	std::vector<std::pair<int, int>> m_vSelectedEnvelopePoints;

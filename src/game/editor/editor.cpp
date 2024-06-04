@@ -41,8 +41,6 @@
 #include "editor_actions.h"
 
 #include <chrono>
-#include <game/editor/components/debug_view.h>
-#include <game/editor/components/layers_view/node_refs.h>
 #include <iterator>
 #include <limits>
 #include <type_traits>
@@ -500,7 +498,7 @@ void CEditor::SelectLayer(int LayerIndex, int GroupIndex)
 void CEditor::AddSelectedLayer(int LayerIndex)
 {
 	// m_vSelectedLayers.push_back(LayerIndex);
-	LayersView()->Select(CLayerNodeRef(m_SelectedGroup, LayerIndex));
+	LayersView()->Select(CLayerNodeQuery(m_SelectedGroup, LayerIndex));
 	m_QuadKnifeActive = false;
 }
 

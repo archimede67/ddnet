@@ -33,7 +33,7 @@ void CTreeView::Start(CUIRect *pView, float Indent, float ItemHeight, const CDro
 	m_vCurrentDropTargetInfo = {RootDropTargetInfo};
 	m_DragStatus = EDragStatus::NONE;
 
-	m_SelectedPath.clear();
+	m_SelectedPath = {};
 	m_TargetPath.reset();
 	m_HighlightPath.reset();
 	m_CurrentPath = {0};
@@ -85,7 +85,7 @@ CTreeChanges CTreeView::End()
 			}
 			else
 			{
-				m_CurrentTargetPath.clear();
+				m_CurrentTargetPath.Clear();
 				m_DragStatus = EDragStatus::NOT_ALLOWED;
 			}
 		}
@@ -106,7 +106,7 @@ CTreeChanges CTreeView::End()
 		CTreeChanges Changes(m_DraggedContext.m_vOriginalPaths, std::move(ToPath));
 
 		m_TargetPath.reset();
-		m_CurrentTargetPath.clear();
+		m_CurrentTargetPath.Clear();
 		Reset();
 
 		return Changes;
@@ -182,9 +182,8 @@ CTreeViewItem CTreeView::DoNode(const void *pId, bool Selected, int Type, const 
 						m_DraggedPanelX = Bottom.x;
 						m_HighlightPath = m_CurrentPath;
 
-						// The target insertion will be at the beginning of the children
-						auto Path = m_CurrentPath;
-						Path.push_back(0);
+						// The target insertion will be at the beginning of the children list
+						auto Path = m_CurrentPath.Child(0);
 						OnTarget(Path);
 
 						m_DragStatus = EDragStatus::MOVE_HERE;
@@ -235,7 +234,7 @@ CTreeViewItem CTreeView::DoNode(const void *pId, bool Selected, int Type, const 
 		Item.m_IsTargetParent = true;
 
 	Item.m_Path = m_CurrentPath;
-	m_CurrentPath.back()++;
+	m_CurrentPath++;
 
 	return Item;
 }
@@ -252,8 +251,8 @@ void CTreeView::DoSpacing(float Spacing)
 
 void CTreeView::PushTree()
 {
-	m_CurrentPath.back()--;
-	m_CurrentPath.push_back(0);
+	m_CurrentPath--;
+	m_CurrentPath.Push();
 	m_vCurrentDropTargetInfo.push_back(m_LastDropTargetInfo);
 	Context()->Push();
 }
@@ -261,7 +260,7 @@ void CTreeView::PushTree()
 void CTreeView::PopTree()
 {
 	if(ShouldClearSelected())
-		m_SelectedPath.clear();
+		m_SelectedPath.Clear();
 
 	if(Dragging() && Context() == &m_ViewContext)
 	{
@@ -282,10 +281,10 @@ void CTreeView::PopTree()
 	}
 
 	if(m_CurrentPath == m_SelectedPath)
-		m_SelectedPath.clear();
+		m_SelectedPath.Clear();
 
-	m_CurrentPath.pop_back();
-	m_CurrentPath.back()++;
+	m_CurrentPath.Pop();
+	m_CurrentPath++;
 	m_vCurrentDropTargetInfo.pop_back();
 
 	Context()->Pop();
@@ -320,7 +319,7 @@ CTreeView::EDragResult CTreeView::DoDrag(const void *pId, CUIRect *pRect)
 
 bool CTreeView::UpdateNode(const void *pId, bool Selected, int Type)
 {
-	if(Selected && (m_SelectedPath.empty() || m_CurrentPath.size() <= m_SelectedPath.size()))
+	if(Selected && (m_SelectedPath.Empty() || m_CurrentPath.Length() <= m_SelectedPath.Length()))
 	{
 		m_SelectedPath = m_CurrentPath;
 		if(m_State == EState::STATE_DRAG_START)
@@ -331,15 +330,15 @@ bool CTreeView::UpdateNode(const void *pId, bool Selected, int Type)
 	}
 	else if(ShouldClearSelected() && !Selected)
 	{
-		m_SelectedPath.clear();
+		m_SelectedPath.Clear();
 	}
 
-	return Dragging() && !m_SelectedPath.empty();
+	return Dragging() && !m_SelectedPath.Empty();
 }
 
 bool CTreeView::ShouldClearSelected()
 {
-	return !m_SelectedPath.empty() && m_CurrentPath.size() <= m_SelectedPath.size();
+	return !m_SelectedPath.Empty() && m_CurrentPath.Length() <= m_SelectedPath.Length();
 }
 
 void CTreeView::NextSlot(float Cut, CUIRect *pSlot)
@@ -358,7 +357,7 @@ void CTreeView::OnDragStop()
 void CTreeView::OnDragConfirm()
 {
 	OnDragStop();
-	if(!m_CurrentTargetPath.empty())
+	if(!m_CurrentTargetPath.Empty())
 		m_TargetPath = m_CurrentTargetPath;
 }
 
@@ -386,7 +385,7 @@ void CTreeView::OnTarget(const CTreeNodePath &Path)
 
 bool CTreeView::ShouldBeDragged() const
 {
-	return Dragging() && !m_SelectedPath.empty();
+	return Dragging() && !m_SelectedPath.Empty();
 }
 
 CTreeView::CContext *CTreeView::Context()
@@ -427,7 +426,7 @@ void CTreeView::Place(bool ValidTarget, CUIRect *pRect)
 	}
 	else
 	{
-		m_CurrentTargetPath.clear();
+		m_CurrentTargetPath.Clear();
 		m_DragStatus = EDragStatus::NOT_ALLOWED;
 	}
 };

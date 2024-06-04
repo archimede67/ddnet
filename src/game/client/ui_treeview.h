@@ -1,54 +1,12 @@
 ﻿#ifndef GAME_CLIENT_UI_TREEVIEW_H
 #define GAME_CLIENT_UI_TREEVIEW_H
 
+#include "tree_path.h"
 #include "ui.h"
 #include "ui_rect.h"
 #include "ui_scrollregion.h"
 
-#include <iterator>
 #include <unordered_set>
-
-// A path is simply a list of numbers, using a convenient name here.
-// It is mainly used to identify a node (the path to a node) within the tree.
-using CTreeNodePath = std::vector<unsigned int>;
-
-// Creates a child path
-inline CTreeNodePath operator/(const CTreeNodePath &Path, const unsigned Rhs)
-{
-	auto NewPath = Path;
-	NewPath.push_back(Rhs);
-	return NewPath;
-}
-
-inline CTreeNodePath operator/=(const CTreeNodePath &Path, const unsigned Rhs)
-{
-	return Path / Rhs;
-}
-
-// Go up one level, effectively returns parent path
-inline CTreeNodePath operator--(const CTreeNodePath &Path, int)
-{
-	auto ParentPath = Path;
-	ParentPath.pop_back();
-	return ParentPath;
-}
-
-// Go to next sibling
-inline CTreeNodePath operator++(const CTreeNodePath &Path)
-{
-	auto SiblingPath = Path;
-	SiblingPath.back()++;
-	return SiblingPath;
-}
-
-// Go to previous sibling
-inline CTreeNodePath operator--(const CTreeNodePath &Path)
-{
-	auto SiblingPath = Path;
-	if(SiblingPath.back() > 0)
-		SiblingPath.back()--;
-	return SiblingPath;
-}
 
 struct CTreeViewItem
 {
@@ -300,14 +258,6 @@ private:
 	CDropTargetInfo m_LastDropTargetInfo;
 
 	EDragStatus m_DragStatus;
-
-public:
-	static void Print(const CTreeNodePath &Path)
-	{
-		printf("/");
-		for(const unsigned p : Path)
-			printf("%d/", p);
-	}
 };
 
 #endif

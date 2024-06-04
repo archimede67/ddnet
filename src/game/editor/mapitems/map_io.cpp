@@ -427,7 +427,7 @@ bool CEditorMap::Save(const char *pFileName)
 		ItemTreeWriter.m_pWriter = &Writer;
 		ItemTreeWriter.m_pMap = this;
 
-		ItemTreeWriter.WriteRoot(m_vpRootObjects);
+		ItemTreeWriter.WriteRoot(m_pTreeRoot->m_vpChildren);
 	}
 
 	// finish the data file
@@ -1040,7 +1040,7 @@ bool CEditorMap::Load(const char *pFilename, int StorageType, const std::functio
 			ItemTreeReader.m_pReader = &DataFile;
 			ItemTreeReader.m_pMap = this;
 
-			m_vpRootObjects = ItemTreeReader.ReadRoot();
+			m_pTreeRoot->m_vpChildren = ItemTreeReader.ReadRoot();
 		}
 	}
 

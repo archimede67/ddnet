@@ -5,6 +5,7 @@
 
 #include <memory>
 
+class CLayerGroupObject;
 class CLayer;
 class CLayerGroup;
 class CLayerNode;
@@ -18,13 +19,15 @@ public:
 	CEditorMapNode(CEditorMap *pMap) :
 		ITreeParentNode(TYPE_ROOT), m_pMap(pMap) {}
 
-	void AddChild(int Index, const std::shared_ptr<ITreeNode> &pChild) override;
-	void RemoveChild(int Index) override;
+	void AddChild(const CIndex &Index, const std::shared_ptr<ITreeNode> &pChild) override;
+	void RemoveChild(const CIndex &Index, const std::shared_ptr<ITreeNode> &pChild) override;
+
+	std::shared_ptr<IEditorMapObject> Object() override;
 
 	bool *Visible() override { return nullptr; }
 	bool *Collapse() override { return nullptr; }
 	const void *Id() override { return m_pMap; }
-	const char *Name() const override { return "Root"; }
+	const char *Name() override { return "Root"; }
 
 private:
 	CEditorMap *m_pMap;
@@ -34,28 +37,32 @@ private:
 class CLayerGroupNode final : public ITreeParentNode
 {
 public:
-	CLayerGroupNode(int Index, const std::shared_ptr<CLayerGroup> &pGroup);
+	CLayerGroupNode(int Index, const std::shared_ptr<CLayerGroupObject> &pGroupObject, const std::shared_ptr<CLayerGroup> &pGroup);
 
-	void AddChild(int Index, const std::shared_ptr<ITreeNode> &pChild) override;
-	void RemoveChild(int Index) override;
+	void AddChild(const CIndex &Index, const std::shared_ptr<ITreeNode> &pChild) override;
+	void RemoveChild(const CIndex &Index, const std::shared_ptr<ITreeNode> &pChild) override;
 
 	bool *Visible() override;
 	bool *Collapse() override;
 	const void *Id() override { return m_pGroup.get(); }
-	const char *Name() const override { return m_aName; }
+	const char *Name() override;
 
 	ENodeSelectResult OnSelect() override;
 	void OnDeselect() override;
+	void Decorate(CUIRect View) override;
 
-	const std::shared_ptr<CLayerGroup> &Group() { return m_pGroup; }
+	const std::shared_ptr<CLayerGroup> &Group() const { return m_pGroup; }
+
 	CUi::EPopupMenuFunctionResult Popup(CUIRect View, int &Height) override;
+	std::shared_ptr<IEditorMapObject> Object() override;
 
 private:
 	int m_GroupIndex;
+	std::shared_ptr<CLayerGroupObject> m_pGroupObject;
 	std::shared_ptr<CLayerGroup> m_pGroup;
 	char m_aName[32];
 
-	friend struct CLayerGroupNodeRef;
+	friend struct CLayerGroupNodeQuery;
 };
 
 class CEditorFolderNode final : public ITreeParentNode
@@ -67,7 +74,7 @@ public:
 	bool *Visible() override;
 	bool *Collapse() override;
 	const void *Id() override { return m_pFolder.get(); }
-	const char *Name() const override;
+	const char *Name() override;
 
 	const std::shared_ptr<CEditorParentGroup> &Folder() { return m_pFolder; }
 	std::shared_ptr<IEditorMapObject> Object() override;
@@ -86,7 +93,7 @@ public:
 	bool *Visible() override;
 	bool *Collapse() override;
 	const void *Id() override { return m_pLayer.get(); }
-	const char *Name() const override;
+	const char *Name() override;
 
 	ENodeSelectResult OnSelect() override;
 	void OnDeselect() override;
@@ -99,8 +106,8 @@ private:
 	int m_Index;
 	std::shared_ptr<CLayer> m_pLayer;
 
-	friend struct CLayerNodeRef;
-	friend struct CLayerGroupNodeChildrenRef;
+	friend struct CLayerNodeQuery;
+	friend struct CLayerGroupNodeChildrenQuery;
 };
 
 #endif
