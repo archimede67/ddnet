@@ -314,6 +314,7 @@ void CScoreboard::RenderScoreboard(float x, float y, float w, int Team, const ch
 		rendered = -24;
 
 	int OldDDTeam = -1;
+	int CurrentDDTeamSize = 0;
 
 	for(int i = 0; i < MAX_CLIENTS; i++)
 	{
@@ -363,6 +364,8 @@ void CScoreboard::RenderScoreboard(float x, float y, float w, int Team, const ch
 				Corners |= IGraphics::CORNER_BL | IGraphics::CORNER_BR;
 			Graphics()->DrawRect(x - 10.0f, y, w, LineHeight + Spacing, Color, Corners, RoundRadius);
 
+			CurrentDDTeamSize++;
+
 			if(NextDDTeam != DDTeam)
 			{
 				if(m_pClient->m_Snap.m_aTeamSize[0] > 8)
@@ -385,6 +388,21 @@ void CScoreboard::RenderScoreboard(float x, float y, float w, int Team, const ch
 					Cursor.m_LineWidth = NameLength + 3;
 				}
 				TextRender()->TextEx(&Cursor, aBuf, -1);
+
+				// Render team size number when team contains more than 1 player
+				// Number is rendered at the beginning of the team in the scoreboard, while team number
+				// is rendered at the end of the team
+				if(CurrentDDTeamSize > 1)
+				{
+					str_format(aBuf, sizeof(aBuf), "%d", CurrentDDTeamSize);
+					CTextCursor TeamSizeCursor = Cursor;
+					TeamSizeCursor.m_LineWidth = 2;
+					float Offset = m_pClient->m_Snap.m_aTeamSize[0] > 8 ? FontSize - FontSize / 1.5f : FontSize;
+					TextRender()->SetCursor(&TeamSizeCursor, x - 10.0f, y - (LineHeight + Spacing) * (CurrentDDTeamSize - 1) + Offset, FontSize / 1.5f, TEXTFLAG_RENDER);
+					TextRender()->TextEx(&TeamSizeCursor, aBuf, -1);
+				}
+
+				CurrentDDTeamSize = 0;
 			}
 		}
 
@@ -635,7 +653,7 @@ void CScoreboard::OnRender()
 				TextRender()->Text(Width / 2 - TextWidth / 2, 39, 86.0f, aText, -1.0f);
 			}
 
-			//decrease width, because team games use additional offsets
+			// decrease width, because team games use additional offsets
 			w -= 10.0f;
 
 			int NumPlayers = maximum(m_pClient->m_Snap.m_aTeamSize[TEAM_RED], m_pClient->m_Snap.m_aTeamSize[TEAM_BLUE]);
