@@ -316,6 +316,9 @@ void CScoreboard::RenderScoreboard(float x, float y, float w, int Team, const ch
 	int OldDDTeam = -1;
 	int CurrentDDTeamSize = 0;
 
+	int MaxTeamSize = m_pClient->ConfigManager()->Values()->m_SvMaxTeamSize;
+	const bool Small = m_pClient->m_Snap.m_aTeamSize[0] > 8;
+
 	for(int i = 0; i < MAX_CLIENTS; i++)
 	{
 		// make sure that we render the correct team
@@ -368,7 +371,7 @@ void CScoreboard::RenderScoreboard(float x, float y, float w, int Team, const ch
 
 			if(NextDDTeam != DDTeam)
 			{
-				if(m_pClient->m_Snap.m_aTeamSize[0] > 8)
+				if(Small)
 				{
 					if(DDTeam == TEAM_SUPER)
 						str_copy(aBuf, Localize("Super"));
@@ -381,8 +384,15 @@ void CScoreboard::RenderScoreboard(float x, float y, float w, int Team, const ch
 				{
 					if(DDTeam == TEAM_SUPER)
 						str_copy(aBuf, Localize("Super"));
-					else
+					else if(CurrentDDTeamSize > 1)
+					{
 						str_format(aBuf, sizeof(aBuf), Localize("Team %d"), DDTeam);
+						str_format(aBuf, sizeof(aBuf), "%s - %d/%d", aBuf, CurrentDDTeamSize, MaxTeamSize);
+					}
+					else
+					{
+						str_format(aBuf, sizeof(aBuf), Localize("Team %d"), DDTeam);
+					}
 					tw = TextRender()->TextWidth(FontSize, aBuf, -1, -1.0f);
 					TextRender()->SetCursor(&Cursor, ScoreOffset + w / 2.0f - tw / 2.0f, y + LineHeight, FontSize / 1.5f, TEXTFLAG_RENDER | TEXTFLAG_STOP_AT_END);
 					Cursor.m_LineWidth = NameLength + 3;
@@ -392,9 +402,9 @@ void CScoreboard::RenderScoreboard(float x, float y, float w, int Team, const ch
 				// Render team size number when team contains more than 1 player
 				// Number is rendered at the beginning of the team in the scoreboard, while team number
 				// is rendered at the end of the team
-				if(CurrentDDTeamSize > 1)
+				if(Small && CurrentDDTeamSize > 1)
 				{
-					str_format(aBuf, sizeof(aBuf), "%d", CurrentDDTeamSize);
+					str_format(aBuf, sizeof(aBuf), "%d/%d", CurrentDDTeamSize, MaxTeamSize);
 					CTextCursor TeamSizeCursor = Cursor;
 					TeamSizeCursor.m_LineWidth = 2;
 					float Offset = m_pClient->m_Snap.m_aTeamSize[0] > 8 ? FontSize - FontSize / 1.5f : FontSize;
@@ -411,7 +421,8 @@ void CScoreboard::RenderScoreboard(float x, float y, float w, int Team, const ch
 		// background so it's easy to find the local player or the followed one in spectator mode
 		if((!m_pClient->m_Snap.m_SpecInfo.m_Active && pInfo->m_Local) || (m_pClient->m_Snap.m_SpecInfo.m_SpectatorId == SPEC_FREEVIEW && pInfo->m_Local) || (m_pClient->m_Snap.m_SpecInfo.m_Active && pInfo->m_ClientId == m_pClient->m_Snap.m_SpecInfo.m_SpectatorId))
 		{
-			Graphics()->DrawRect(x, y, w - 20.0f, LineHeight, ColorRGBA(1.0f, 1.0f, 1.0f, 0.25f), IGraphics::CORNER_ALL, RoundRadius);
+			auto TeamSizeWidth = Small ? TextRender()->TextWidth(FontSize / 1.5f, "64/64") * 0.8f : 0;
+			Graphics()->DrawRect(x + TeamSizeWidth, y, w - 20.0 - TeamSizeWidth, LineHeight, ColorRGBA(1.0f, 1.0f, 1.0f, 0.25f), IGraphics::CORNER_ALL, RoundRadius);
 		}
 
 		// score
