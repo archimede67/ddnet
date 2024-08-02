@@ -5,7 +5,7 @@
 void CDebugView::OnRender(CUIRect View)
 {
 	CUIRect Panel;
-	View.VSplitRight(250.0f, nullptr, &Panel);
+	View.VSplitLeft(100.0f, &Panel, nullptr);
 
 	Panel.Margin(16.0f, &Panel);
 	RenderSelection(Panel);
@@ -27,7 +27,7 @@ void CDebugView::RenderSelection(CUIRect View)
 	for(const auto &SelectedPath : Editor()->LayersView()->Selection())
 	{
 		View.HSplitTop(12.0f, &Rect, &View);
-		SelectedPath.m_pNode->m_Path.ToString(aBuf);
+		SelectedPath.m_pNode->Path().ToString(aBuf);
 		Ui()->DoLabel(&Rect, aBuf, 8.0f, TEXTALIGN_ML);
 	}
 

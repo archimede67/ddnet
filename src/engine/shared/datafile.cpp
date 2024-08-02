@@ -538,14 +538,6 @@ void *CDataFileReader::GetItemOfType(int Type, int Index, int *pId, CUuid *pUuid
 
 void CDataFileReader::GetType(int Type, int *pStart, int *pNum)
 {
-	auto It = m_TypeOffsets.find(Type);
-	if(It != m_TypeOffsets.end())
-	{
-		*pStart = It->second.m_Start;
-		*pNum = It->second.m_Num;
-		return;
-	}
-
 	*pStart = 0;
 	*pNum = 0;
 
@@ -562,8 +554,6 @@ void CDataFileReader::GetType(int Type, int *pStart, int *pNum)
 			break;
 		}
 	}
-
-	m_TypeOffsets.insert(std::make_pair(Type, CTypeOffset{*pStart, *pNum}));
 }
 
 int CDataFileReader::FindItemIndex(int Type, int Id)

@@ -1880,6 +1880,7 @@ set_src(BASE GLOB_RECURSE src/base
   log.h
   logger.h
   math.h
+  observer.h
   rust.h
   system.cpp
   system.h
@@ -2385,6 +2386,8 @@ if(CLIENT)
     mapitems/map_object.h
     mapitems/sound.cpp
     mapitems/sound.h
+	map_updater.cpp
+	map_updater.h
     popups.cpp
     popups.h
     smooth_value.cpp

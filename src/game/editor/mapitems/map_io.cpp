@@ -440,16 +440,35 @@ bool CEditorMap::Save(const char *pFileName)
 
 bool CEditorMap::Load(const char *pFilename, int StorageType, const std::function<void(const char *pErrorMessage)> &ErrorHandler)
 {
+	printf("Loading '%s' %d\n", pFilename, StorageType);
+	const auto &Storage = m_pEditor->Storage();
+
 	CDataFileReader DataFile;
-	if(!DataFile.Open(m_pEditor->Storage(), pFilename, StorageType))
+	if(!DataFile.Open(Storage, pFilename, StorageType))
 		return false;
 
-	// check version
+	// Check unsupported version
 	const CMapItemVersion *pItemVersion = static_cast<CMapItemVersion *>(DataFile.FindItem(MAPITEMTYPE_VERSION, 0));
-	if(pItemVersion == nullptr || pItemVersion->m_Version != CMapItemVersion::CURRENT_VERSION)
+	if(pItemVersion == nullptr || pItemVersion->m_Version > CMapItemVersion::CURRENT_VERSION)
 	{
 		ErrorHandler("Error: The map has an unsupported version.");
 		return false;
+	}
+
+	// Check for older version
+	if(pItemVersion->m_Version < CMapItemVersion::CURRENT_VERSION)
+	{
+		// Prompt the user that this map file is outdated and if they wish to upgrade it
+		// Upgrading will rename the current map to <map name>_out_v1.map and will save the new version to
+		// the loaded map file
+		m_pEditor->m_PopupEventType = CEditor::POPEVENT_OUTDATED_MAPFILE;
+		m_pEditor->m_PopupEventActivated = true;
+
+		// Prepare the updater
+		m_pEditor->m_MapUpdater.Prepare(pFilename, StorageType, pItemVersion->m_Version);
+
+		// Don't show a loading error
+		return true;
 	}
 
 	Clean();
@@ -646,7 +665,7 @@ bool CEditorMap::Load(const char *pFilename, int StorageType, const std::functio
 			if(pGItem->m_Version < 1 || pGItem->m_Version > CMapItemGroup::CURRENT_VERSION)
 				continue;
 
-			std::shared_ptr<CLayerGroup> pGroup = NewGroup(pGItem->m_Version < 4);
+			std::shared_ptr<CLayerGroup> pGroup = NewGroup();
 			pGroup->m_ParallaxX = pGItem->m_ParallaxX;
 			pGroup->m_ParallaxY = pGItem->m_ParallaxY;
 			pGroup->m_OffsetX = pGItem->m_OffsetX;
@@ -1051,6 +1070,11 @@ bool CEditorMap::Load(const char *pFilename, int StorageType, const std::functio
 	m_LastModifiedTime = -1.0f;
 	m_LastSaveTime = m_pEditor->Client()->GlobalTime();
 	return true;
+}
+
+void CEditorMap::UpdateMapFile(const char *pFilename, const char *pRenamedFilename, int StorageType,
+	const std::function<void(const char *pErrorMessage)> &ErrorHandler)
+{
 }
 
 void CEditorMap::PerformSanityChecks(const std::function<void(const char *pErrorMessage)> &ErrorHandler) const

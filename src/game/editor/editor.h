@@ -47,6 +47,7 @@
 #include <deque>
 #include <functional>
 #include <game/editor/components/debug_view.h>
+#include <game/editor/map_updater.h>
 #include <map>
 #include <memory>
 #include <string>
@@ -154,20 +155,13 @@ public:
 	template<typename F>
 	void VisitEnvelopeReferences(F &&Visitor);
 
-	std::shared_ptr<CLayerGroup> NewGroup(bool CreateInfo = true);
+	std::shared_ptr<CLayerGroup> NewGroup();
 
 	template<typename T, typename... Args, std::enable_if_t<std::is_base_of_v<IEditorMapObject, T>, bool> = true>
 	std::shared_ptr<CEditorMapTreeNodeMixin<T>> CreateObject(Args &&...Arguments)
 	{
 		return std::make_shared<CEditorMapTreeNodeMixin<T>>(std::forward<Args>(Arguments)...);
 	}
-
-	// CEditorGroupInfo &GroupSelection(const std::vector<int> &vSelectedGroupItems);
-	// void UngroupSelection(const std::vector<int> &vSelectedGroupItems);
-	// void NewGroups(const std::vector<int> &vSelectedGroupItems);
-	// void NewNestedGroups(const std::vector<int> &vSelectedGroupItems);
-	// CEditorGroupInfo &NewParentGroup();
-	// int GroupInfoIndex(CEditorGroupInfo::EType Type, int GroupIndex);
 
 	int SwapGroups(int Index0, int Index1)
 	{
@@ -210,9 +204,9 @@ public:
 
 	// io
 	bool Save(const char *pFilename);
-	void SaveMapItemNode();
 
 	bool Load(const char *pFilename, int StorageType, const std::function<void(const char *pErrorMessage)> &ErrorHandler);
+	void UpdateMapFile(const char *pFilename, const char *pRenamedFilename, int StorageType, const std::function<void(const char *pErrorMessage)> &ErrorHandler);
 	void PerformSanityChecks(const std::function<void(const char *pErrorMessage)> &ErrorHandler) const;
 
 	// DDRace
@@ -504,6 +498,7 @@ public:
 	bool HandleMapDrop(const char *pFilename, int StorageType) override;
 	bool Append(const char *pFilename, int StorageType, bool IgnoreHistory = false);
 	void LoadCurrentMap();
+	void ExecuteMapUpdate();
 	void Render();
 
 	void RenderPressedKeys(CUIRect View);
@@ -585,7 +580,8 @@ public:
 		POPEVENT_PLACE_BORDER_TILES,
 		POPEVENT_PIXELART_BIG_IMAGE,
 		POPEVENT_PIXELART_MANY_COLORS,
-		POPEVENT_PIXELART_TOO_MANY_COLORS
+		POPEVENT_PIXELART_TOO_MANY_COLORS,
+		POPEVENT_OUTDATED_MAPFILE
 	};
 
 	int m_PopupEventType;
@@ -813,6 +809,7 @@ public:
 	static const void *ms_pUiGotContext;
 
 	CEditorMap m_Map;
+	CMapUpdater m_MapUpdater;
 	std::deque<std::shared_ptr<CDataFileWriterFinishJob>> m_WriterFinishJobs;
 
 	int m_ShiftBy;

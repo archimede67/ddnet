@@ -7,45 +7,24 @@
 #include <game/editor/mapitems/layer_group.h>
 #include <game/editor/mapitems/sound.h>
 
-void CEditorMapNode::AddChild(const CIndex &Index, const std::shared_ptr<ITreeNode> &pChild)
-{
-	ITreeParentNode::AddChild(Index, pChild);
-
-	// if(pChild->Type() == ITreeNode::TYPE_LAYER_GROUP)
-	//{
-	//	m_pMap->m_vpGroups.insert(m_pMap->m_vpGroups.begin() + Index.m_TypeIndex, std::static_pointer_cast<CLayerGroupNode>(pChild)->Group());
-	// }
-}
-
-void CEditorMapNode::RemoveChild(const CIndex &Index, const std::shared_ptr<ITreeNode> &pChild)
-{
-	ITreeParentNode::RemoveChild(Index, pChild);
-
-	// if(pChild->Type() == ITreeNode::TYPE_LAYER_GROUP)
-	//{
-	//	m_pMap->m_vpGroups.erase(m_pMap->m_vpGroups.begin() + Index.m_TypeIndex);
-	// }
-}
-
 std::shared_ptr<IEditorMapObject> CEditorMapNode::Object()
 {
 	return std::static_pointer_cast<IEditorMapObject>(m_pMap->m_pTreeRoot);
 }
 
+void CEditorMapNode::OnChildAdded(const size_t &Index, const std::shared_ptr<ITreeNode> &pChild)
+{
+	ITreeNode::OnChildAdded(Index, pChild);
+}
+
+void CEditorMapNode::OnChildRemoved(const size_t &Index, const std::shared_ptr<ITreeNode> &pChild)
+{
+	ITreeNode::OnChildRemoved(Index, pChild);
+}
+
 CLayerGroupNode::CLayerGroupNode(const int Index, const std::shared_ptr<CLayerGroupObject> &pGroupObject, const std::shared_ptr<CLayerGroup> &pGroup) :
-	ITreeParentNode(TYPE_LAYER_GROUP), m_GroupIndex(Index), m_pGroupObject(pGroupObject), m_pGroup(pGroup), m_aName{}
+	ITreeNode(TYPE_LAYER_GROUP), m_GroupIndex(Index), m_pGroupObject(pGroupObject), m_pGroup(pGroup), m_aName{}
 {
-}
-
-void CLayerGroupNode::AddChild(const CIndex &Index, const std::shared_ptr<ITreeNode> &pChild)
-{
-	// Maybe check if pChild can be a valid child of this node?
-	Group()->m_vpLayers.insert(Group()->m_vpLayers.begin() + Index.m_Index, std::static_pointer_cast<CLayerNode>(pChild)->Layer());
-}
-
-void CLayerGroupNode::RemoveChild(const CIndex &Index, const std::shared_ptr<ITreeNode> &pChild)
-{
-	Group()->m_vpLayers.erase(Group()->m_vpLayers.begin() + Index.m_Index);
 }
 
 bool *CLayerGroupNode::Visible() { return &Group()->m_Visible; }
@@ -71,6 +50,7 @@ void CLayerGroupNode::OnDeselect()
 	// Deselect all children
 	printf("CLayerGroupNode::OnDeselect() [m_GroupIndex = %d]\n", m_GroupIndex);
 	Layers()->Deselect(CLayerGroupNodeChildrenQuery(m_GroupIndex));
+	Editor()->m_SelectedGroup = -1;
 }
 
 void CLayerGroupNode::Decorate(CUIRect View)
@@ -92,6 +72,31 @@ CUi::EPopupMenuFunctionResult CLayerGroupNode::Popup(CUIRect View, int &Height)
 std::shared_ptr<IEditorMapObject> CLayerGroupNode::Object()
 {
 	return std::static_pointer_cast<IEditorMapObject>(m_pGroupObject);
+}
+
+void CLayerGroupNode::OnChildAdded(const size_t &Index, const std::shared_ptr<ITreeNode> &pChild)
+{
+	if(pChild->Type() == TYPE_LAYER || pChild->Type() == TYPE_ENTITIES_LAYER)
+	{
+		const std::shared_ptr<CLayerNode> pLayerNode = std::static_pointer_cast<CLayerNode>(pChild);
+		Group()->m_vpLayers.insert(Group()->m_vpLayers.begin() + Index, pLayerNode->Layer());
+	}
+	else
+	{
+		ITreeNode::OnChildAdded(Index, pChild);
+	}
+}
+
+void CLayerGroupNode::OnChildRemoved(const size_t &Index, const std::shared_ptr<ITreeNode> &pChild)
+{
+	if(pChild->Type() == TYPE_LAYER || pChild->Type() == TYPE_ENTITIES_LAYER)
+	{
+		Group()->m_vpLayers.erase(Group()->m_vpLayers.begin() + Index);
+	}
+	else
+	{
+		ITreeNode::OnChildRemoved(Index, pChild);
+	}
 }
 
 bool *CLayerNode::Visible() { return &m_pLayer->m_Visible; }
@@ -144,6 +149,7 @@ void CLayerNode::OnDeselect()
 	printf("CLayerNode::OnDeselect() [m_GroupIndex = %d, m_Index = %d]\n", m_GroupIndex, m_Index);
 	auto &vSelectedLayers = Editor()->m_vSelectedLayers;
 	vSelectedLayers.erase(std::remove_if(vSelectedLayers.begin(), vSelectedLayers.end(), [&](const int Index) { return Index == m_Index; }), vSelectedLayers.end());
+	Editor()->m_SelectedGroup = -1;
 }
 
 CUi::EPopupMenuFunctionResult CLayerNode::Popup(const CUIRect View, int &Height)

@@ -10,7 +10,7 @@ class CRootObject final : public IEditorMapObject
 {
 public:
 	CUi::EPopupMenuFunctionResult Popup(CUIRect View, int &Height) override { return CUi::POPUP_CLOSE_CURRENT; }
-	std::shared_ptr<ITreeNode> ToTreeNode(const std::shared_ptr<IEditorMapObject> &Self) override { return nullptr; }
+	std::shared_ptr<ITreeNode> ToTreeNode(const std::shared_ptr<IEditorMapObject> &Self) override;
 };
 
 class CEditorParentGroup : public IEditorMapObject
@@ -41,6 +41,20 @@ public:
 
 public:
 	int m_GroupIndex;
+};
+
+class CLayerObject : public IEditorMapObject
+{
+public:
+	CLayerObject(int GroupIndex, int LayerIndex) :
+		m_GroupIndex(GroupIndex), m_LayerIndex(LayerIndex) {}
+
+	CUi::EPopupMenuFunctionResult Popup(CUIRect View, int &Height) override;
+	std::shared_ptr<ITreeNode> ToTreeNode(const std::shared_ptr<IEditorMapObject> &Self) override;
+
+private:
+	int m_GroupIndex;
+	int m_LayerIndex;
 };
 
 #endif

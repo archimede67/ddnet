@@ -105,7 +105,7 @@ public: // Iterators
 	PathElements::const_iterator end() const { return m_vPathElements.end(); }
 
 	template<int N>
-	void ToString(char (&aBuf)[N])
+	void ToString(char (&aBuf)[N]) const
 	{
 		str_copy(aBuf, "");
 		for(const auto &Element : m_vPathElements)

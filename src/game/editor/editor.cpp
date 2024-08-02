@@ -486,12 +486,13 @@ CSoundSource *CEditor::GetSelectedSource() const
 
 void CEditor::SelectLayer(int LayerIndex, int GroupIndex)
 {
+	LayersView()->ClearSelection();
+	DeselectQuads();
+	DeselectQuadPoints();
+
 	if(GroupIndex != -1)
 		m_SelectedGroup = GroupIndex;
 
-	m_vSelectedLayers.clear();
-	DeselectQuads();
-	DeselectQuadPoints();
 	AddSelectedLayer(LayerIndex);
 }
 
@@ -7706,6 +7707,7 @@ void CEditor::Init()
 	m_ZoomEnvelopeX.Init(this);
 	m_ZoomEnvelopeY.Init(this);
 	m_Map.m_pEditor = this;
+	m_MapUpdater.m_pEditor = this;
 
 	m_vComponents.emplace_back(m_MapView);
 	m_vComponents.emplace_back(m_MapSettingsBackend);
@@ -8095,6 +8097,13 @@ void CEditor::LoadCurrentMap()
 	vec2 Center = pGameClient->m_Camera.m_Center;
 
 	MapView()->SetWorldOffset(Center);
+}
+
+void CEditor::ExecuteMapUpdate()
+{
+	m_MapUpdater.Execute([&](const char *pErrorMessage) {
+		ShowFileDialogError(pErrorMessage);
+	});
 }
 
 bool CEditor::Save(const char *pFilename)

@@ -3,14 +3,26 @@
 #include <game/editor/editor.h>
 #include <game/editor/mapitems/map_object.h>
 
-void ITreeParentNode::AddChild(const CIndex &Index, const std::shared_ptr<ITreeNode> &pChild)
+// void ITreeParentNode::AddChild(const CIndex &Index, const std::shared_ptr<ITreeNode> &pChild)
+//{
+//	Object()->m_vpChildren.insert(Object()->m_vpChildren.begin() + Index.m_Index, pChild->Object());
+// }
+//
+// void ITreeParentNode::RemoveChild(const CIndex &Index, const std::shared_ptr<ITreeNode> &pChild)
+//{
+//	Object()->m_vpChildren.erase(Object()->m_vpChildren.begin() + Index.m_Index);
+// }
+
+void ITreeNode::Clear()
 {
-	Object()->m_vpChildren.insert(Object()->m_vpChildren.begin() + Index.m_Index, pChild->Object());
+	m_vpChildren.clear();
 }
 
-void ITreeParentNode::RemoveChild(const CIndex &Index, const std::shared_ptr<ITreeNode> &pChild)
+void ITreeNode::AddChild(const std::shared_ptr<ITreeNode> &pNode)
 {
-	Object()->m_vpChildren.erase(Object()->m_vpChildren.begin() + Index.m_Index);
+	pNode->m_pNodeParent = shared_from_this();
+	pNode->m_Path = m_Path / m_vpChildren.size();
+	m_vpChildren.push_back(pNode);
 }
 
 CUi::EPopupMenuFunctionResult ITreeNode::Popup(CUIRect View, int &Height)
@@ -25,6 +37,16 @@ CUi::EPopupMenuFunctionResult ITreeNode::Popup(CUIRect View, int &Height)
 bool ITreeNode::Hovered()
 {
 	return Editor()->Ui()->HotItem() == Id();
+}
+
+void ITreeNode::OnChildAdded(const size_t &Index, const std::shared_ptr<ITreeNode> &pChild)
+{
+	Object()->m_vpChildren.insert(Object()->m_vpChildren.begin() + Index, pChild->Object());
+}
+
+void ITreeNode::OnChildRemoved(const size_t &Index, const std::shared_ptr<ITreeNode> &pChild)
+{
+	Object()->m_vpChildren.erase(Object()->m_vpChildren.begin() + Index);
 }
 
 CUi::EPopupMenuFunctionResult ITreeNode::RenderPopup(void *pContext, CUIRect View, bool Active, int &Height)

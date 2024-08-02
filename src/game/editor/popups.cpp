@@ -498,7 +498,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupGroup(void *pContext, CUIRect View, 
 			pEditor->m_Map.MakeTeleLayer(pTeleLayer);
 			pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->AddLayer(pTeleLayer);
 			int LayerIndex = pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->m_vpLayers.size() - 1;
-			pEditor->SelectLayer(LayerIndex);
+			pEditor->SelectLayer(LayerIndex, pEditor->m_SelectedGroup);
 			pEditor->m_pBrush->Clear();
 			pEditor->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(pEditor, pEditor->m_SelectedGroup, LayerIndex));
 			return CUi::POPUP_CLOSE_CURRENT;
@@ -517,7 +517,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupGroup(void *pContext, CUIRect View, 
 			pEditor->m_Map.MakeSpeedupLayer(pSpeedupLayer);
 			pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->AddLayer(pSpeedupLayer);
 			int LayerIndex = pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->m_vpLayers.size() - 1;
-			pEditor->SelectLayer(LayerIndex);
+			pEditor->SelectLayer(LayerIndex, pEditor->m_SelectedGroup);
 			pEditor->m_pBrush->Clear();
 			pEditor->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(pEditor, pEditor->m_SelectedGroup, LayerIndex));
 			return CUi::POPUP_CLOSE_CURRENT;
@@ -536,7 +536,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupGroup(void *pContext, CUIRect View, 
 			pEditor->m_Map.MakeTuneLayer(pTuneLayer);
 			pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->AddLayer(pTuneLayer);
 			int LayerIndex = pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->m_vpLayers.size() - 1;
-			pEditor->SelectLayer(LayerIndex);
+			pEditor->SelectLayer(LayerIndex, pEditor->m_SelectedGroup);
 			pEditor->m_pBrush->Clear();
 			pEditor->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(pEditor, pEditor->m_SelectedGroup, LayerIndex));
 			return CUi::POPUP_CLOSE_CURRENT;
@@ -555,7 +555,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupGroup(void *pContext, CUIRect View, 
 			pEditor->m_Map.MakeFrontLayer(pFrontLayer);
 			pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->AddLayer(pFrontLayer);
 			int LayerIndex = pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->m_vpLayers.size() - 1;
-			pEditor->SelectLayer(LayerIndex);
+			pEditor->SelectLayer(LayerIndex, pEditor->m_SelectedGroup);
 			pEditor->m_pBrush->Clear();
 			pEditor->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(pEditor, pEditor->m_SelectedGroup, LayerIndex));
 			return CUi::POPUP_CLOSE_CURRENT;
@@ -574,7 +574,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupGroup(void *pContext, CUIRect View, 
 			pEditor->m_Map.MakeSwitchLayer(pSwitchLayer);
 			pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->AddLayer(pSwitchLayer);
 			int LayerIndex = pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->m_vpLayers.size() - 1;
-			pEditor->SelectLayer(LayerIndex);
+			pEditor->SelectLayer(LayerIndex, pEditor->m_SelectedGroup);
 			pEditor->m_pBrush->Clear();
 			pEditor->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(pEditor, pEditor->m_SelectedGroup, LayerIndex));
 			return CUi::POPUP_CLOSE_CURRENT;
@@ -590,7 +590,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupGroup(void *pContext, CUIRect View, 
 		std::shared_ptr<CLayer> pQuadLayer = std::make_shared<CLayerQuads>(pEditor);
 		pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->AddLayer(pQuadLayer);
 		int LayerIndex = pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->m_vpLayers.size() - 1;
-		pEditor->SelectLayer(LayerIndex);
+		pEditor->SelectLayer(LayerIndex, pEditor->m_SelectedGroup);
 		pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->m_Collapse = false;
 		pEditor->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(pEditor, pEditor->m_SelectedGroup, LayerIndex));
 		return CUi::POPUP_CLOSE_CURRENT;
@@ -606,7 +606,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupGroup(void *pContext, CUIRect View, 
 		pTileLayer->m_pEditor = pEditor;
 		pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->AddLayer(pTileLayer);
 		int LayerIndex = pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->m_vpLayers.size() - 1;
-		pEditor->SelectLayer(LayerIndex);
+		pEditor->SelectLayer(LayerIndex, pEditor->m_SelectedGroup);
 		pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->m_Collapse = false;
 		pEditor->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(pEditor, pEditor->m_SelectedGroup, LayerIndex));
 		return CUi::POPUP_CLOSE_CURRENT;
@@ -621,7 +621,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupGroup(void *pContext, CUIRect View, 
 		std::shared_ptr<CLayer> pSoundLayer = std::make_shared<CLayerSounds>(pEditor);
 		pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->AddLayer(pSoundLayer);
 		int LayerIndex = pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->m_vpLayers.size() - 1;
-		pEditor->SelectLayer(LayerIndex);
+		pEditor->SelectLayer(LayerIndex, pEditor->m_SelectedGroup);
 		pEditor->m_Map.m_vpGroups[pEditor->m_SelectedGroup]->m_Collapse = false;
 		pEditor->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(pEditor, pEditor->m_SelectedGroup, LayerIndex));
 		return CUi::POPUP_CLOSE_CURRENT;
@@ -1995,9 +1995,17 @@ CUi::EPopupMenuFunctionResult CEditor::PopupEvent(void *pContext, CUIRect View, 
 {
 	CEditor *pEditor = static_cast<CEditor *>(pContext);
 
+	enum EButtons
+	{
+		BTN_NONE = 0,
+		BTN_CANCEL = 1 << 0,
+		BTN_CONFIRM = 1 << 1
+	};
+	int Buttons = BTN_CONFIRM | BTN_CANCEL;
+
 	const char *pTitle;
 	const char *pMessage;
-	char aMessageBuf[128];
+	char aMessageBuf[256];
 	if(pEditor->m_PopupEventType == POPEVENT_EXIT)
 	{
 		pTitle = "Exit the editor";
@@ -2027,33 +2035,39 @@ CUi::EPopupMenuFunctionResult CEditor::PopupEvent(void *pContext, CUIRect View, 
 	{
 		pTitle = "Save sound";
 		pMessage = "The file already exists.\n\nDo you want to overwrite the sound?";
+		Buttons = BTN_CONFIRM;
 	}
 	else if(pEditor->m_PopupEventType == POPEVENT_LARGELAYER)
 	{
 		pTitle = "Large layer";
 		pMessage = "You are trying to set the height or width of a layer to more than 1000 tiles. This is actually possible, but only rarely necessary. It may cause the editor to work slower and will result in a larger file size as well as higher memory usage for client and server.";
+		Buttons = BTN_CONFIRM;
 	}
 	else if(pEditor->m_PopupEventType == POPEVENT_PREVENTUNUSEDTILES)
 	{
 		pTitle = "Unused tiles disabled";
 		pMessage = "Unused tiles can't be placed by default because they could get a use later and then destroy your map.\n\nActivate the 'Allow Unused' setting to be able to place every tile.";
+		Buttons = BTN_CONFIRM;
 	}
 	else if(pEditor->m_PopupEventType == POPEVENT_IMAGEDIV16)
 	{
 		pTitle = "Image width/height";
 		pMessage = "The width or height of this image is not divisible by 16. This is required for images used in tile layers.";
+		Buttons = BTN_CONFIRM;
 	}
 	else if(pEditor->m_PopupEventType == POPEVENT_IMAGE_MAX)
 	{
 		pTitle = "Max images";
 		str_format(aMessageBuf, sizeof(aMessageBuf), "The client only allows a maximum of %" PRIzu " images.", MAX_MAPIMAGES);
 		pMessage = aMessageBuf;
+		Buttons = BTN_CONFIRM;
 	}
 	else if(pEditor->m_PopupEventType == POPEVENT_SOUND_MAX)
 	{
 		pTitle = "Max sounds";
 		str_format(aMessageBuf, sizeof(aMessageBuf), "The client only allows a maximum of %" PRIzu " sounds.", MAX_MAPSOUNDS);
 		pMessage = aMessageBuf;
+		Buttons = BTN_CONFIRM;
 	}
 	else if(pEditor->m_PopupEventType == POPEVENT_PLACE_BORDER_TILES)
 	{
@@ -2068,12 +2082,19 @@ CUi::EPopupMenuFunctionResult CEditor::PopupEvent(void *pContext, CUIRect View, 
 	else if(pEditor->m_PopupEventType == POPEVENT_PIXELART_MANY_COLORS)
 	{
 		pTitle = "Many colors";
-		pMessage = "The selected image contains many colors, which will lead to a big mapfile. You may want to consider reducing the number of colors.\n\nContinue anyway?";
+		pMessage = "The selected image contains many colors, which will lead to a big map file. You may want to consider reducing the number of colors.\n\nContinue anyway?";
 	}
 	else if(pEditor->m_PopupEventType == POPEVENT_PIXELART_TOO_MANY_COLORS)
 	{
 		pTitle = "Too many colors";
 		pMessage = "The client only supports 64 images but more would be needed to add the selected image as tileart.";
+		Buttons = BTN_CONFIRM;
+	}
+	else if(pEditor->m_PopupEventType == POPEVENT_OUTDATED_MAPFILE)
+	{
+		pTitle = "Outdated map file";
+		str_format(aMessageBuf, sizeof(aMessageBuf), "This map has been created with an older client and needs to be updated. This action is irreversible, however the original map file will be saved as '%s'.\n\nContinue?", fs_filename(pEditor->m_MapUpdater.OriginalMapFilename()));
+		pMessage = aMessageBuf;
 	}
 	else
 	{
@@ -2097,12 +2118,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupEvent(void *pContext, CUIRect View, 
 
 	// button bar
 	ButtonBar.VSplitLeft(110.0f, &Button, &ButtonBar);
-	if(pEditor->m_PopupEventType != POPEVENT_LARGELAYER &&
-		pEditor->m_PopupEventType != POPEVENT_PREVENTUNUSEDTILES &&
-		pEditor->m_PopupEventType != POPEVENT_IMAGEDIV16 &&
-		pEditor->m_PopupEventType != POPEVENT_IMAGE_MAX &&
-		pEditor->m_PopupEventType != POPEVENT_SOUND_MAX &&
-		pEditor->m_PopupEventType != POPEVENT_PIXELART_TOO_MANY_COLORS)
+	if((Buttons & BTN_CANCEL) != BTN_NONE)
 	{
 		static int s_CancelButton = 0;
 		if(pEditor->DoButton_Editor(&s_CancelButton, "Cancel", 0, &Button, 0, nullptr))
@@ -2180,6 +2196,10 @@ CUi::EPopupMenuFunctionResult CEditor::PopupEvent(void *pContext, CUIRect View, 
 		else if(pEditor->m_PopupEventType == POPEVENT_PIXELART_MANY_COLORS)
 		{
 			pEditor->AddTileart();
+		}
+		else if(pEditor->m_PopupEventType == POPEVENT_OUTDATED_MAPFILE)
+		{
+			pEditor->ExecuteMapUpdate();
 		}
 		pEditor->m_PopupEventWasActivated = false;
 		return CUi::POPUP_CLOSE_CURRENT;

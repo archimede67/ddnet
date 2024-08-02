@@ -52,7 +52,7 @@ void CLayers::Init(class IKernel *pKernel)
 					}
 
 					IsEntities = true;
-					//break;
+					// break;
 				}
 				if(pTilemap->m_Flags & TILESLAYERFLAG_TELE)
 				{
@@ -149,7 +149,7 @@ void CLayers::InitBackground(class IMap *pMap)
 						m_pGameGroup->m_ClipW = 0;
 						m_pGameGroup->m_ClipH = 0;
 					}
-					//We don't care about tile layers.
+					// We don't care about tile layers.
 				}
 			}
 		}

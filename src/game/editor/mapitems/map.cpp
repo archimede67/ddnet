@@ -178,42 +178,25 @@ void CEditorMap::MakeTuneLayer(const std::shared_ptr<CLayer> &pLayer)
 	m_pTuneLayer->m_pEditor = m_pEditor;
 }
 
-std::shared_ptr<CLayerGroup> CEditorMap::NewGroup(bool CreateInfo)
+std::shared_ptr<CLayerGroup> CEditorMap::NewGroup()
 {
 	const int Index = (int)m_vpGroups.size();
 
-	OnModify();
-	std::shared_ptr<CLayerGroup> pGroup = std::make_shared<CLayerGroup>();
+	// Create the group
+	auto pGroup = std::make_shared<CLayerGroup>();
 	pGroup->m_pMap = this;
 	m_vpGroups.push_back(pGroup);
 
-	// std::shared_ptr<CLayerGroupObject> pGroupObject = std::make_shared<CLayerGroupObject>(Index);
-	// pGroupObject->m_pMap = this;
-	// m_vpRootObjects.push_back(pGroupObject);
+	// Subscribe to the group changes (new layer, layer swap, delete layer, etc.)
+	pGroup->m_Observable.Subscribe([&] { m_pEditor->LayersView()->Rebuild(); });
 
+	// Create the group object linked to this group and add it to the map's root
 	const auto pGroupObj = CreateObject<CLayerGroupObject>(Index);
 	pGroupObj->m_pMap = this;
 	m_pTreeRoot->m_vpChildren.push_back(pGroupObj);
 
-	// if(CreateInfo)
-	//{
-	//	// Insert a group info for each layers group
-	//	CEditorGroupInfo Info;
-	//	Info.m_GroupIndex = Index;
-	//	Info.m_Type = CEditorGroupInfo::TYPE_LAYER_GROUP;
-	//	Info.m_ParentIndex = CEditorGroupInfo::PARENT_NONE;
-	//	m_vGroupInfos.push_back(Info);
-	// }
-
-	// TODO: removeme
-	// std::shared_ptr<CEditorParentGroup> pGroupParent = std::make_shared<CEditorParentGroup>();
-	// str_format(pGroupParent->m_aName, sizeof(pGroupParent->m_aName), "Test Parent #%d", (int)m_vpGroupParents.size());
-	// CEditorGroupInfo ParentInfo;
-	// ParentInfo.m_GroupIndex = (int)m_vpGroupParents.size();
-	// ParentInfo.m_Children.push_back(m_vGroupInfos.size() - 1);
-	// ParentInfo.m_Type = CEditorGroupInfo::PARENT_GROUP;
-	// m_vpGroupParents.push_back(pGroupParent);
-	// m_vGroupInfos.push_back(ParentInfo);
+	// Notify the map that it has changed
+	OnModify();
 
 	return pGroup;
 }

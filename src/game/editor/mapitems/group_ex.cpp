@@ -15,7 +15,17 @@ void CLayerGroupObject::Render()
 
 std::shared_ptr<ITreeNode> CLayerGroupObject::ToTreeNode(const std::shared_ptr<IEditorMapObject> &Self)
 {
-	return std::make_shared<CLayerGroupNode>(m_GroupIndex, std::static_pointer_cast<CLayerGroupObject>(Self), Map()->m_vpGroups[std::static_pointer_cast<CLayerGroupObject>(Self)->m_GroupIndex]);
+	return std::make_shared<CLayerGroupNode>(m_GroupIndex, std::static_pointer_cast<CLayerGroupObject>(Self), Map()->m_vpGroups[m_GroupIndex]);
+}
+
+CUi::EPopupMenuFunctionResult CLayerObject::Popup(CUIRect View, int &Height)
+{
+	return CUi::POPUP_KEEP_OPEN;
+}
+
+std::shared_ptr<ITreeNode> CLayerObject::ToTreeNode(const std::shared_ptr<IEditorMapObject> &Self)
+{
+	return std::make_shared<CLayerNode>(m_GroupIndex, m_LayerIndex, Map()->m_vpGroups[m_GroupIndex]->m_vpLayers[m_LayerIndex]);
 }
 
 CUi::EPopupMenuFunctionResult CLayerGroupObject::Popup(CUIRect View, int &Height)
@@ -26,6 +36,11 @@ CUi::EPopupMenuFunctionResult CLayerGroupObject::Popup(CUIRect View, int &Height
 std::shared_ptr<ITreeNode> CEditorParentGroup::ToTreeNode(const std::shared_ptr<IEditorMapObject> &Self)
 {
 	return std::make_shared<CEditorFolderNode>(std::static_pointer_cast<CEditorParentGroup>(Self));
+}
+
+std::shared_ptr<ITreeNode> CRootObject::ToTreeNode(const std::shared_ptr<IEditorMapObject> &Self)
+{
+	return std::make_shared<CEditorMapNode>(Map());
 }
 
 CUi::EPopupMenuFunctionResult CEditorParentGroup::Popup(CUIRect View, int &Height)

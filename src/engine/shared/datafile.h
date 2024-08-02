@@ -31,7 +31,7 @@ class CDataFileReader
 
 public:
 	CDataFileReader() :
-		m_pDataFile(nullptr), m_TypeOffsets() {}
+		m_pDataFile(nullptr) {}
 	~CDataFileReader() { Close(); }
 
 	CDataFileReader &operator=(CDataFileReader &&Other)
@@ -65,15 +65,6 @@ public:
 	SHA256_DIGEST Sha256() const;
 	unsigned Crc() const;
 	int MapSize() const;
-
-private:
-	// Cache for accessed item types
-	struct CTypeOffset
-	{
-		int m_Start;
-		int m_Num;
-	};
-	std::unordered_map<int, CTypeOffset> m_TypeOffsets;
 };
 
 // write access

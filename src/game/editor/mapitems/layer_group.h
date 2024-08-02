@@ -3,6 +3,8 @@
 
 #include "layer.h"
 
+#include <base/observer.h>
+
 #include <memory>
 #include <vector>
 
@@ -12,6 +14,8 @@ public:
 	class CEditorMap *m_pMap;
 
 	std::vector<std::shared_ptr<CLayer>> m_vpLayers;
+
+	CObservable<> m_Observable;
 
 	int m_OffsetX;
 	int m_OffsetY;
@@ -53,6 +57,7 @@ public:
 	void Clear()
 	{
 		m_vpLayers.clear();
+		m_Observable.Notify();
 	}
 
 	void AddLayer(const std::shared_ptr<CLayer> &pLayer);

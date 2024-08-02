@@ -20,7 +20,7 @@ void CLayersView::Init(CEditor *pEditor)
 	m_ScrollToSelectionNext = false;
 	m_ParentPopupContext.m_pEditor = pEditor;
 
-	m_pTreeRoot = std::make_shared<CNode>(ITreeNode::TYPE_ROOT, CTreeNodePath(), std::make_shared<CEditorMapNode>(&Editor()->m_Map));
+	m_pTreeRoot = std::make_shared<CEditorMapNode>(&Editor()->m_Map);
 	m_TreeNav = CTreeNavigator(m_pTreeRoot);
 
 	m_LastSelectedNodePath = {};
@@ -46,17 +46,19 @@ void CLayersView::Render(CUIRect LayersBox)
 	static int s_NewGroupBtn = 0;
 	if(Editor()->DoButton_Editor(&s_NewGroupBtn, "New group", 0, &ButtonsBar, 0, ""))
 	{
+		Map.NewGroup();
+		Rebuild();
 	}
 
 	{
 		m_TreeView.Start(&LayersBox, 12.0f, 14.0f, CDropTargetInfo::Accept({ITreeNode::TYPE_LAYER_GROUP, ITreeNode::TYPE_FOLDER}));
-		m_TreeView.DoAutoSpacing(4.0f);
+		m_TreeView.DoAutoSpacing(3.0f);
 
 		for(unsigned int i = 0; i < (unsigned int)m_pTreeRoot->m_vpChildren.size(); i++)
 		{
 			const auto &pNode = m_pTreeRoot->m_vpChildren[i];
 			RenderTreeNode(pNode);
-			m_TreeView.DoSpacing(4.0f);
+			m_TreeView.DoSpacing(3.0f);
 		}
 
 		auto Changes = m_TreeView.End();
@@ -168,30 +170,30 @@ void CLayersView::ClearSelection()
 	while(!m_SelectedNodes.empty())
 	{
 		const auto pSelected = m_SelectedNodes.begin();
-		pSelected->m_pNode->m_pData->OnDeselect();
+		pSelected->m_pNode->OnDeselect();
 		m_SelectedNodes.erase(pSelected);
 	}
 }
 
 void CLayersView::DeselectType(int Type)
 {
-	const std::vector<std::shared_ptr<CNode>> vpNodes = FindIf(m_pTreeRoot, [Type](const auto &pNode) { return pNode->m_Type == Type; });
+	const std::vector<std::shared_ptr<ITreeNode>> vpNodes = FindIf(m_pTreeRoot, [Type](const auto &pNode) { return pNode->m_Type == Type; });
 	for(auto &pNode : vpNodes)
 	{
 		if(m_SelectedNodes.count(pNode))
 		{
-			pNode->m_pData->OnDeselect();
+			pNode->OnDeselect();
 			m_SelectedNodes.erase(pNode);
 		}
 	}
 }
 
-void CLayersView::RenderTreeNode(const std::shared_ptr<CNode> &pNode)
+void CLayersView::RenderTreeNode(const std::shared_ptr<ITreeNode> &pNode)
 {
-	RenderTreeNodeItem(pNode->m_pData->Name(), pNode);
+	RenderTreeNodeItem(pNode->Name(), pNode);
 }
 
-void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<CNode> &pNode)
+void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<ITreeNode> &pNode)
 {
 	static auto &&DoBtn = [&](const void *pId, const char *pText, const int Checked, const CUIRect *pRect, bool HasChildren, bool *pClicked, bool *pDown) {
 		const auto Color = Editor()->GetButtonColor(pId, Checked);
@@ -202,15 +204,15 @@ void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<CN
 		return Editor()->Ui()->DoDraggableButtonLogic(pId, Checked, pRect, pClicked, nullptr, pDown);
 	};
 
-	const static auto &&SelectSingleNode = [&](const std::shared_ptr<CNode> &pSelected) {
+	const static auto &&SelectSingleNode = [&](const std::shared_ptr<ITreeNode> &pSelected) {
 		ClearSelection();
 		SelectTreeNode(pSelected);
 	};
 
-	const static auto &&ToggleSelected = [&](const std::shared_ptr<CNode> &pSelected, const bool Selected) {
+	const static auto &&ToggleSelected = [&](const std::shared_ptr<ITreeNode> &pSelected, const bool Selected) {
 		if(Selected)
 		{
-			pSelected->m_pData->OnDeselect();
+			pSelected->OnDeselect();
 			m_SelectedNodes.erase(pSelected);
 		}
 		else
@@ -220,22 +222,22 @@ void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<CN
 	const bool IsSelected = m_SelectedNodes.find(pNode) != m_SelectedNodes.end();
 	const bool Dragging = m_TreeView.Dragging();
 
-	bool *pCollapse = pNode->m_pData->Collapse();
-	bool *pVisible = pNode->m_pData->Visible();
+	bool *pCollapse = pNode->Collapse();
+	bool *pVisible = pNode->Visible();
 
 	CDropTargetInfo DropTargetInfo = CDropTargetInfo::None();
 	if(pNode->m_Type == ITreeNode::TYPE_FOLDER)
 		DropTargetInfo = CDropTargetInfo::Accept({ITreeNode::TYPE_FOLDER, ITreeNode::TYPE_LAYER_GROUP});
 	else if(pNode->m_Type == ITreeNode::TYPE_LAYER_GROUP)
 	{
-		std::shared_ptr<CLayerGroupNode> pGroupNode = std::static_pointer_cast<CLayerGroupNode>(pNode->m_pData);
+		std::shared_ptr<CLayerGroupNode> pGroupNode = std::static_pointer_cast<CLayerGroupNode>(pNode);
 		if(pGroupNode->Group() == Editor()->m_Map.m_pGameGroup)
 			DropTargetInfo = CDropTargetInfo::Accept({ITreeNode::TYPE_LAYER, ITreeNode::TYPE_ENTITIES_LAYER});
 		else // Do not accept entities layers on non game groups
 			DropTargetInfo = CDropTargetInfo::Accept({ITreeNode::TYPE_LAYER});
 	}
 
-	auto Item = m_TreeView.DoNode(pNode->m_pData.get(), IsSelected, pNode->m_Type, DropTargetInfo);
+	auto Item = m_TreeView.DoNode(pNode.get(), IsSelected, pNode->m_Type, DropTargetInfo);
 
 	CUIRect Rect = Item.m_Rect;
 
@@ -267,9 +269,9 @@ void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<CN
 		Checked += 6;
 
 	bool MouseWasDown;
-	const int Res = DoBtn(pNode->m_pData.get(), pName, Checked, &Item.m_Rect, ChildrenExists, &Clicked, &MouseWasDown);
+	const int Res = DoBtn(pNode.get(), pName, Checked, &Item.m_Rect, ChildrenExists, &Clicked, &MouseWasDown);
 
-	pNode->m_pData->Decorate(Rect);
+	pNode->Decorate(Rect);
 
 	if(Res)
 	{
@@ -312,10 +314,10 @@ void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<CN
 				else if(Res == 2)
 				{
 					// Only select that node to not confuse the user
-					// ClearSelection();
-					// SelectTreeNode(pNode);
+					ClearSelection();
+					SelectTreeNode(pNode);
 
-					Ui()->DoPopupMenu(pNode->m_pData.get(), Ui()->MouseX(), Ui()->MouseY(), 120, pNode->m_pData.get(), ITreeNode::RenderPopup);
+					Ui()->DoPopupMenu(pNode.get(), Ui()->MouseX(), Ui()->MouseY(), 120, pNode.get(), ITreeNode::RenderPopup);
 				}
 			}
 		}
@@ -461,14 +463,14 @@ void CLayersView::Group(const std::vector<CTreeNodePath> &vOriginalPaths, const 
 	for(const auto &Path : vPaths)
 	{
 		const auto pNodeParent = m_TreeNav[Path.Parent()];
-		const auto pObjectParent = pNodeParent->m_pData->Object();
+		const auto pObjectParent = pNodeParent->Object();
 
 		const unsigned Index = Path.Index();
 		const auto pNode = pNodeParent->m_vpChildren[Index];
 		SetParent(pNode, pFolder, pFolder->m_vpChildren.size());
 	}
 
-	const auto pTargetParent = m_TreeNav[TargetPath.Parent()]->m_pData->Object();
+	const auto pTargetParent = m_TreeNav[TargetPath.Parent()]->Object();
 	TargetIndex = minimum((size_t)TargetIndex, pTargetParent->m_vpChildren.size());
 	pTargetParent->m_vpChildren.insert(pTargetParent->m_vpChildren.begin() + TargetIndex, pFolder);
 
@@ -478,6 +480,11 @@ void CLayersView::Group(const std::vector<CTreeNodePath> &vOriginalPaths, const 
 	// Update selection
 	ClearSelection();
 	SelectTreeNode(m_TreeNav[TargetPath.Parent() / TargetIndex]);
+}
+
+void CLayersView::Rebuild()
+{
+	BuildTree();
 }
 
 bool CLayersView::CanHandleInput() const
@@ -500,9 +507,9 @@ void CLayersView::BuildTree()
 	const auto vGroupNodes = Query(CNodeTypeQuery(ITreeNode::TYPE_LAYER_GROUP));
 	if(!vGroupNodes.empty())
 	{
-		std::unordered_map<const void *, std::shared_ptr<CNode>> GroupNodesMap{};
+		std::unordered_map<const void *, std::shared_ptr<CLayerGroupNode>> GroupNodesMap{};
 		std::transform(vGroupNodes.begin(), vGroupNodes.end(), std::inserter(GroupNodesMap, GroupNodesMap.end()), [](const auto &pNode) {
-			return std::make_pair(pNode->m_pData->Id(), pNode);
+			return std::make_pair(pNode->Id(), std::static_pointer_cast<CLayerGroupNode>(pNode));
 		});
 		auto &vpGroups = Editor()->m_Map.m_vpGroups;
 		std::sort(vpGroups.begin(), vpGroups.end(), [&](const auto &a, const auto &b) {
@@ -513,7 +520,7 @@ void CLayersView::BuildTree()
 		{
 			const auto &pGroup = vpGroups.at(i);
 			const auto &pNode = GroupNodesMap.at(pGroup.get());
-			const auto &pGroupObj = std::static_pointer_cast<CLayerGroupObject>(pNode->m_pData->Object());
+			const auto &pGroupObj = std::static_pointer_cast<CLayerGroupObject>(pNode->Object());
 
 			char aBuf[64];
 			pNode->m_Path.ToString(aBuf);
@@ -521,15 +528,23 @@ void CLayersView::BuildTree()
 			printf("%s: #%d %s (%d -> %d)\n", aBuf, (int)i, pGroup->m_aName, pGroupObj->m_GroupIndex, (int)i);
 
 			pGroupObj->m_GroupIndex = i;
-			// TODO: remove all complexity, use only 1 layer of nodes :)
+			pNode->m_GroupIndex = i;
+
+			for(auto &pChild : pNode->m_vpChildren)
+			{
+				if(pChild->Type() == ITreeNode::TYPE_LAYER || pChild->Type() == ITreeNode::TYPE_ENTITIES_LAYER)
+				{
+					std::static_pointer_cast<CLayerNode>(pChild)->m_GroupIndex = i;
+				}
+			}
 		}
 	}
 }
 
-void CLayersView::BuildTreeNodeChildren(const std::shared_ptr<CNode> &pNode, const std::vector<std::shared_ptr<IEditorMapObject>> &vpObject)
+void CLayersView::BuildTreeNodeChildren(const std::shared_ptr<ITreeNode> &pNode, const std::vector<std::shared_ptr<IEditorMapObject>> &vpObject)
 {
 	// Update selection
-	static const auto &&UpdateSelection = [&](const std::shared_ptr<CNode> &pTargetNode) {
+	static const auto &&UpdateSelection = [&](const std::shared_ptr<ITreeNode> &pTargetNode) {
 		const auto SelectedNodeIt = m_SelectedNodes.find(pTargetNode);
 		if(SelectedNodeIt != m_SelectedNodes.end())
 		{
@@ -544,37 +559,28 @@ void CLayersView::BuildTreeNodeChildren(const std::shared_ptr<CNode> &pNode, con
 	for(int i = 0; i < (int)vpObject.size(); i++)
 	{
 		auto &pObject = vpObject.at(i);
-		auto pTreeNode = pObject->ToTreeNode(pObject);
+		const auto pTreeNode = pObject->ToTreeNode(pObject);
 		pTreeNode->m_pLayers = this;
 		pTreeNode->m_pEditor = Editor();
+		pNode->AddChild(pTreeNode);
 
-		if(!pTreeNode->IsLeaf())
+		if(pTreeNode->Type() == ITreeNode::TYPE_LAYER_GROUP)
 		{
-			auto &pChild = pNode->AddChild(pTreeNode->Type(), pTreeNode);
-			pChild->m_pNodeParent = pNode;
+			const std::shared_ptr<CLayerGroupObject> pLayerGroup = std::static_pointer_cast<CLayerGroupObject>(pObject);
 
-			if(pTreeNode->Type() == ITreeNode::TYPE_LAYER_GROUP)
+			auto &vpLayers = Editor()->m_Map.m_vpGroups[pLayerGroup->m_GroupIndex]->m_vpLayers;
+			for(int k = 0; k < (int)vpLayers.size(); k++)
 			{
-				// Update selection
-				UpdateSelection(pChild);
-
-				std::shared_ptr<CLayerGroupObject> pLayerGroup = std::static_pointer_cast<CLayerGroupObject>(pObject);
-
-				auto &vpLayers = Editor()->m_Map.m_vpGroups[pLayerGroup->m_GroupIndex]->m_vpLayers;
-				for(int k = 0; k < (int)vpLayers.size(); k++)
-				{
-					auto &pLayer = vpLayers.at(k);
-					auto pLayerNode = std::make_shared<CLayerNode>(pLayerGroup->m_GroupIndex, k, pLayer);
-					pLayerNode->m_pLayers = this;
-					pLayerNode->m_pEditor = Editor();
-					const auto &pLayerTreeNode = pChild->AddChild(pLayer->IsEntitiesLayer() ? ITreeNode::TYPE_ENTITIES_LAYER : ITreeNode::TYPE_LAYER, pLayerNode);
-					pLayerTreeNode->m_pNodeParent = pChild;
-				}
+				auto &pLayer = vpLayers.at(k);
+				auto pLayerNode = std::make_shared<CLayerNode>(pLayerGroup->m_GroupIndex, k, pLayer, pLayer->IsEntitiesLayer() ? ITreeNode::TYPE_ENTITIES_LAYER : ITreeNode::TYPE_LAYER);
+				pLayerNode->m_pLayers = this;
+				pLayerNode->m_pEditor = Editor();
+				pTreeNode->AddChild(pLayerNode);
 			}
-			else
-			{
-				BuildTreeNodeChildren(pChild, pObject->m_vpChildren);
-			}
+		}
+		else if(!pObject->m_vpChildren.empty())
+		{
+			BuildTreeNodeChildren(pTreeNode, pObject->m_vpChildren);
 		}
 	}
 }
@@ -582,10 +588,10 @@ void CLayersView::BuildTreeNodeChildren(const std::shared_ptr<CNode> &pNode, con
 void CLayersView::ApplyTreeChanges(const CTreeChanges &Changes)
 {
 	auto &To = Changes.To();
-	CTreeNodePath ToParent = To.Parent();
+	const CTreeNodePath ToParent = To.Parent();
 	int Position = To.Index();
 
-	std::shared_ptr<CNode> pToNode = m_TreeNav[ToParent];
+	const std::shared_ptr<ITreeNode> pToNode = m_TreeNav[ToParent];
 
 	std::vector<std::shared_ptr<ITreeNode>> vpSubTree;
 	for(auto Iterator = Changes.From().rbegin(); Iterator != Changes.From().rend(); ++Iterator)
@@ -597,39 +603,33 @@ void CLayersView::ApplyTreeChanges(const CTreeChanges &Changes)
 		if(ParentPath == ToParent && Path.Index() < Position)
 			Position--;
 
-		const std::shared_ptr<CNode> pFromNodeParent = m_TreeNav[ParentPath];
-		const std::shared_ptr<CNode> pFromNode = pFromNodeParent->m_vpChildren[Path.Index()];
+		const std::shared_ptr<ITreeNode> pFromNodeParent = m_TreeNav[ParentPath];
+		const std::shared_ptr<ITreeNode> pFromNode = pFromNodeParent->m_vpChildren[Path.Index()];
 
-		vpSubTree.push_back(pFromNode->m_pData);
-		if(!pFromNodeParent->m_pData->IsLeaf())
-		{
-			std::static_pointer_cast<ITreeParentNode>(pFromNodeParent->m_pData)->RemoveChild({Path.Index()}, pFromNode->m_pData);
-		}
+		vpSubTree.push_back(pFromNode);
+		pFromNodeParent->OnChildRemoved(Path.Index(), pFromNode);
 	}
 
-	if(!pToNode->m_pData->IsLeaf())
+	const std::shared_ptr<ITreeNode> pNode = std::static_pointer_cast<ITreeNode>(pToNode);
+	for(size_t Offset = 0; Offset < vpSubTree.size(); Offset++)
 	{
-		const std::shared_ptr<ITreeParentNode> pNode = std::static_pointer_cast<ITreeParentNode>(pToNode->m_pData);
-		for(size_t Offset = 0; Offset < vpSubTree.size(); Offset++)
-		{
-			auto Path = ToParent / (Position + Offset);
-			auto ChildIt = (vpSubTree.rbegin() + Offset);
-			pNode->AddChild({Path.Index()}, *ChildIt);
-		}
+		auto Path = ToParent / (Position + Offset);
+		auto ChildIt = (vpSubTree.rbegin() + Offset);
+		pNode->OnChildAdded(Path.Index(), *ChildIt);
 	}
 
 	// Update tree
 	BuildTree();
 }
 
-void CLayersView::SelectTreeNode(const std::shared_ptr<CNode> &pNode)
+void CLayersView::SelectTreeNode(const std::shared_ptr<ITreeNode> &pNode)
 {
 	if(m_SelectedNodes.count(pNode) || m_Selecting.count(pNode))
 		return;
 
 	m_Selecting.insert(pNode);
 
-	switch(pNode->m_pData->OnSelect())
+	switch(pNode->OnSelect())
 	{
 	case ENodeSelectResult::ALLOW:
 		break;
@@ -648,15 +648,15 @@ void CLayersView::SelectTreeNode(const std::shared_ptr<CNode> &pNode)
 	m_LastSelectedNodePath = pNode->m_Path;
 }
 
-void CLayersView::SetParent(const std::shared_ptr<CNode> &pNode, const std::shared_ptr<IEditorMapObject> &pParent, const int TargetPosition)
+void CLayersView::SetParent(const std::shared_ptr<ITreeNode> &pNode, const std::shared_ptr<IEditorMapObject> &pParent, const int TargetPosition)
 {
 	const auto pCurrentParent = pNode->m_pNodeParent;
-	if(pCurrentParent->m_pData->IsLeaf())
+	if(pCurrentParent->IsLeaf())
 		return;
 
 	// Remove the node from the current node's parent
-	const auto pObjectParent = pCurrentParent->m_pData->Object();
-	const auto NodeIt = std::find(pObjectParent->m_vpChildren.begin(), pObjectParent->m_vpChildren.end(), pNode->m_pData->Object());
+	const auto pObjectParent = pCurrentParent->Object();
+	const auto NodeIt = std::find(pObjectParent->m_vpChildren.begin(), pObjectParent->m_vpChildren.end(), pNode->Object());
 
 	if(NodeIt != pObjectParent->m_vpChildren.end())
 	{
@@ -664,14 +664,14 @@ void CLayersView::SetParent(const std::shared_ptr<CNode> &pNode, const std::shar
 
 		// Add the node to the new parent
 		dbg_assert(TargetPosition >= 0 && TargetPosition <= (int)pParent->m_vpChildren.size(), "Invalid target position");
-		pParent->m_vpChildren.insert(pParent->m_vpChildren.begin() + TargetPosition, pNode->m_pData->Object());
+		pParent->m_vpChildren.insert(pParent->m_vpChildren.begin() + TargetPosition, pNode->Object());
 	}
 }
 
-std::vector<std::shared_ptr<CLayersView::CNode>> CLayersView::FindIf(const std::shared_ptr<CNode> &pRoot,
-	const std::function<bool(const std::shared_ptr<CNode> &)> &fnPredicate)
+std::vector<std::shared_ptr<ITreeNode>> CLayersView::FindIf(const std::shared_ptr<ITreeNode> &pRoot,
+	const std::function<bool(const std::shared_ptr<ITreeNode> &)> &fnPredicate)
 {
-	std::vector<std::shared_ptr<CNode>> vpNodes{};
+	std::vector<std::shared_ptr<ITreeNode>> vpNodes{};
 
 	if(fnPredicate(pRoot))
 		vpNodes.push_back(pRoot);

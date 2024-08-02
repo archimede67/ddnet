@@ -20,6 +20,7 @@ CLayerGroup::CLayerGroup()
 	m_ClipY = 0;
 	m_ClipW = 0;
 	m_ClipH = 0;
+	m_Observable = CObservable();
 }
 
 CLayerGroup::~CLayerGroup()
@@ -109,6 +110,7 @@ void CLayerGroup::AddLayer(const std::shared_ptr<CLayer> &pLayer)
 {
 	m_pMap->OnModify();
 	m_vpLayers.push_back(pLayer);
+	m_Observable.Notify();
 }
 
 void CLayerGroup::DeleteLayer(int Index)
@@ -117,6 +119,7 @@ void CLayerGroup::DeleteLayer(int Index)
 		return;
 	m_vpLayers.erase(m_vpLayers.begin() + Index);
 	m_pMap->OnModify();
+	m_Observable.Notify();
 }
 
 void CLayerGroup::DuplicateLayer(int Index)
@@ -128,6 +131,7 @@ void CLayerGroup::DuplicateLayer(int Index)
 	m_vpLayers.insert(m_vpLayers.begin() + Index + 1, pDup);
 
 	m_pMap->OnModify();
+	m_Observable.Notify();
 }
 
 void CLayerGroup::GetSize(float *pWidth, float *pHeight) const
@@ -153,5 +157,6 @@ int CLayerGroup::SwapLayers(int Index0, int Index1)
 		return Index0;
 	m_pMap->OnModify();
 	std::swap(m_vpLayers[Index0], m_vpLayers[Index1]);
+	m_Observable.Notify();
 	return Index1;
 }
