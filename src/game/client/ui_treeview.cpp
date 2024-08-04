@@ -231,7 +231,7 @@ CTreeViewItem CTreeView::DoNode(const void *pId, bool Selected, int Type, const 
 	Context()->m_ItemIndex++;
 
 	if(m_CurrentPath == m_HighlightPath)
-		Item.m_IsTargetParent = true;
+		Item.m_IsDropTarget = true;
 
 	Item.m_Path = m_CurrentPath;
 	m_CurrentPath++;

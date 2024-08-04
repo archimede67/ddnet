@@ -1885,7 +1885,6 @@ set_src(BASE GLOB_RECURSE src/base
   system.cpp
   system.h
   tl/threading.h
-  traits.h
   tuple.h
   types.h
   unicode/confusables.cpp

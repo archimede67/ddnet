@@ -53,14 +53,16 @@ public:
 
 	CUi::EPopupMenuFunctionResult Popup(CUIRect View, int &Height) override;
 	std::shared_ptr<IEditorMapObject> Object() override;
+	CDropTargetInfo DropTargetInfo() override;
 
-	int m_GroupIndex;
+	void SetGroupIndex(int Index);
 
 protected:
 	void OnChildAdded(const size_t &Index, const std::shared_ptr<ITreeNode> &pChild) override;
 	void OnChildRemoved(const size_t &Index, const std::shared_ptr<ITreeNode> &pChild) override;
 
 private:
+	int m_GroupIndex;
 	std::shared_ptr<CLayerGroupObject> m_pGroupObject;
 	std::shared_ptr<CLayerGroup> m_pGroup;
 	char m_aName[32];
@@ -81,6 +83,7 @@ public:
 
 	const std::shared_ptr<CEditorParentGroup> &Folder() { return m_pFolder; }
 	std::shared_ptr<IEditorMapObject> Object() override;
+	CDropTargetInfo DropTargetInfo() override;
 
 private:
 	std::shared_ptr<CEditorParentGroup> m_pFolder;

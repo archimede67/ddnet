@@ -11,7 +11,7 @@
 struct CTreeViewItem
 {
 	CUIRect m_Rect; // The rect of the element in the tree
-	bool m_IsTargetParent; // Whether this item is a drag target parent
+	bool m_IsDropTarget; // Whether this item is a drop target
 	CTreeNodePath m_Path; // The path to this node/item
 };
 
@@ -33,6 +33,17 @@ public:
 		CDropTargetInfo Info;
 		Info.m_IsDropTarget = true;
 		Info.m_vAcceptTypes = vTypes;
+		Info.m_vExcludeTypes.clear();
+		return Info;
+	}
+
+	// Creates a drop target excluding specific types
+	static CDropTargetInfo Exclude(const std::unordered_set<int> &vExcludedTypes)
+	{
+		CDropTargetInfo Info;
+		Info.m_IsDropTarget = true;
+		Info.m_vAcceptTypes.clear();
+		Info.m_vExcludeTypes = vExcludedTypes;
 		return Info;
 	}
 
@@ -42,14 +53,18 @@ public:
 		CDropTargetInfo Info;
 		Info.m_IsDropTarget = true;
 		Info.m_vAcceptTypes.clear();
+		Info.m_vExcludeTypes.clear();
 		return Info;
 	}
 
 public:
 	// Checks if a specific type is accepted in this drop target
-	bool IsAccepting(int Type) const
+	bool IsAccepting(const int Type) const
 	{
-		return m_IsDropTarget && (m_vAcceptTypes.empty() || m_vAcceptTypes.find(Type) != m_vAcceptTypes.end());
+		const bool IsAccepted = (m_vAcceptTypes.empty() || m_vAcceptTypes.find(Type) != m_vAcceptTypes.end());
+		const bool IsExcluded = (m_vExcludeTypes.find(Type) != m_vExcludeTypes.end());
+
+		return m_IsDropTarget && IsAccepted && !IsExcluded;
 	}
 
 private:
@@ -61,6 +76,7 @@ private:
 private:
 	bool m_IsDropTarget; // Indicates if this is a drop target that is accepting something
 	std::unordered_set<int> m_vAcceptTypes; // Stores the accepted types
+	std::unordered_set<int> m_vExcludeTypes; // Stores the excluded types
 
 	friend class CTreeView;
 };

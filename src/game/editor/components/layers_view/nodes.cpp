@@ -74,6 +74,28 @@ std::shared_ptr<IEditorMapObject> CLayerGroupNode::Object()
 	return std::static_pointer_cast<IEditorMapObject>(m_pGroupObject);
 }
 
+CDropTargetInfo CLayerGroupNode::DropTargetInfo()
+{
+	if(Group() == Editor()->m_Map.m_pGameGroup)
+		return CDropTargetInfo::Accept({TYPE_LAYER, TYPE_ENTITIES_LAYER});
+	else // Do not accept entities layers on non game groups
+		return CDropTargetInfo::Accept({TYPE_LAYER});
+}
+
+void CLayerGroupNode::SetGroupIndex(int Index)
+{
+	m_GroupIndex = Index;
+	m_pGroupObject->m_GroupIndex = Index;
+
+	for(auto &pChild : m_vpChildren)
+	{
+		if(pChild->Type() == TYPE_LAYER || pChild->Type() == TYPE_ENTITIES_LAYER)
+		{
+			std::static_pointer_cast<CLayerNode>(pChild)->m_GroupIndex = Index;
+		}
+	}
+}
+
 void CLayerGroupNode::OnChildAdded(const size_t &Index, const std::shared_ptr<ITreeNode> &pChild)
 {
 	if(pChild->Type() == TYPE_LAYER || pChild->Type() == TYPE_ENTITIES_LAYER)
@@ -170,4 +192,9 @@ const char *CEditorFolderNode::Name() { return m_pFolder->m_aName; }
 std::shared_ptr<IEditorMapObject> CEditorFolderNode::Object()
 {
 	return std::static_pointer_cast<IEditorMapObject>(Folder());
+}
+
+CDropTargetInfo CEditorFolderNode::DropTargetInfo()
+{
+	return CDropTargetInfo::Accept({TYPE_FOLDER, TYPE_LAYER_GROUP});
 }

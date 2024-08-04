@@ -112,7 +112,7 @@ struct CNodeTypeQuery
 	explicit CNodeTypeQuery(const int Type) :
 		m_Type(Type) {}
 
-	bool operator()(const CTreeNodePath &Path, const std::shared_ptr<ITreeNode> &pNode) const
+	bool operator()(const std::shared_ptr<ITreeNode> &pNode) const
 	{
 		return pNode->Type() == m_Type;
 	}

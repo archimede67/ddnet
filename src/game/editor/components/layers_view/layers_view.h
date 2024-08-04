@@ -249,7 +249,7 @@ private:
 	std::unordered_map<CNodeQueryHash, std::vector<CTreeNodeInfo>, CNodeQueryHash::Hasher> m_SelectionQueryCache;
 
 public:
-	// Select node(s) based on a node reference
+	// Select node(s) based on a query
 	template<typename Query>
 	void Select(const Query &SearchQuery)
 	{
@@ -258,7 +258,7 @@ public:
 			SelectTreeNode(pNode);
 	}
 
-	// Deselect node(s) based on a node reference
+	// Deselect node(s) based on a query
 	template<typename Query>
 	void Deselect(const Query &SearchQuery)
 	{
@@ -273,7 +273,8 @@ public:
 	template<typename Query>
 	std::vector<std::shared_ptr<ITreeNode>> Query(const Query &SearchQuery)
 	{
-		return FindIf(m_pTreeRoot, [SearchQuery](const auto &pNode) { return SearchQuery(pNode->m_Path, pNode); });
+		printf("Query: %s\n", typeid(Query).name());
+		return FindIf(m_pTreeRoot, [SearchQuery](const auto &pNode) { return SearchQuery(pNode); });
 	}
 
 	template<typename Query, std::enable_if_t<QueryTraits::IsHashed<Query>::value, bool> = true>
@@ -287,7 +288,7 @@ public:
 			Entry = {};
 			for(auto &Selected : m_SelectedNodes)
 			{
-				if(SearchQuery(Selected.m_pNode->m_pData))
+				if(SearchQuery(Selected.m_pNode))
 					Entry.push_back(Selected);
 			}
 			return Entry;
@@ -326,24 +327,7 @@ private:
 	void SelectTreeNode(const std::shared_ptr<ITreeNode> &pNode);
 	static void SetParent(const std::shared_ptr<ITreeNode> &pNode, const std::shared_ptr<IEditorMapObject> &pParent, int TargetPosition);
 
-	template<typename Ref>
-	static std::shared_ptr<ITreeNode> Find(const std::shared_ptr<ITreeNode> &pRoot, const Ref &NodeRef)
-	{
-		if(NodeRef(pRoot))
-			return pRoot;
-
-		for(auto &pChild : pRoot->m_vpChildren)
-		{
-			if(const auto pFound = Find(pChild, NodeRef))
-				return pFound;
-		}
-
-		return nullptr;
-	}
 	static std::vector<std::shared_ptr<ITreeNode>> FindIf(const std::shared_ptr<ITreeNode> &pRoot, const std::function<bool(const std::shared_ptr<ITreeNode> &)> &fnPredicate);
-
-private:
-	static constexpr float ROW_HEIGHT = 12.0f;
 };
 
 #endif

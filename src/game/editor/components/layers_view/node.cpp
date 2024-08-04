@@ -18,6 +18,11 @@ void ITreeNode::Clear()
 	m_vpChildren.clear();
 }
 
+CDropTargetInfo ITreeNode::DropTargetInfo()
+{
+	return CDropTargetInfo::None();
+}
+
 void ITreeNode::AddChild(const std::shared_ptr<ITreeNode> &pNode)
 {
 	pNode->m_pNodeParent = shared_from_this();

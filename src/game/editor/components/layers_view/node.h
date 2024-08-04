@@ -4,6 +4,7 @@
 #include <game/client/ui.h>
 
 #include <game/client/tree_path.h>
+#include <game/client/ui_treeview.h>
 #include <memory>
 
 struct IEditorMapObject;
@@ -51,6 +52,7 @@ public:
 
 	bool IsLeaf() const { return m_vpChildren.empty(); }
 	virtual void Decorate(CUIRect View) {}
+	virtual CDropTargetInfo DropTargetInfo();
 
 	EType Type() const { return m_Type; }
 	virtual const char *Name() = 0;

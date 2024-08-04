@@ -44,10 +44,15 @@ void CLayersView::Render(CUIRect LayersBox)
 	LayersBox.HSplitBottom(20.0f, &LayersBox, &ButtonsBar);
 
 	static int s_NewGroupBtn = 0;
-	if(Editor()->DoButton_Editor(&s_NewGroupBtn, "New group", 0, &ButtonsBar, 0, ""))
+	if(Editor()->DoButton_Editor(&s_NewGroupBtn, "New group", 0, &ButtonsBar, 0, "Adds a new group"))
 	{
 		Map.NewGroup();
+		const int NewGroupIndex = Map.m_vpGroups.size() - 1;
+		Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionGroup>(Editor(), NewGroupIndex, false));
+
 		Rebuild();
+		ClearSelection();
+		Select(CLayerGroupNodeQuery(NewGroupIndex));
 	}
 
 	{
@@ -146,22 +151,6 @@ void CLayersView::Render(CUIRect LayersBox)
 		}
 		m_ScrollToSelectionNext = true;
 	}
-
-	CUIRect AddGroupButton;
-	LayersBox.HSplitTop(ROW_HEIGHT + 1.0f, &AddGroupButton, &LayersBox);
-	// if(m_ScrollRegion.AddRect(AddGroupButton))
-	//{
-	//	AddGroupButton.HSplitTop(ROW_HEIGHT, &AddGroupButton, 0);
-	//	static int s_AddGroupButton = 0;
-	//	if(Editor()->DoButton_Editor(&s_AddGroupButton, "Add group", 0, &AddGroupButton, IGraphics::CORNER_R, "Adds a new group"))
-	//	{
-	//		Map.NewGroup();
-	//		//SelectedGroup = Map.m_vpGroups.size() - 1;
-	//		//Editor()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionGroup>(Editor(), SelectedGroup, false));
-	//	}
-	// }
-
-	// m_ScrollRegion.End();
 }
 
 void CLayersView::ClearSelection()
@@ -225,30 +214,18 @@ void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<IT
 	bool *pCollapse = pNode->Collapse();
 	bool *pVisible = pNode->Visible();
 
-	CDropTargetInfo DropTargetInfo = CDropTargetInfo::None();
-	if(pNode->m_Type == ITreeNode::TYPE_FOLDER)
-		DropTargetInfo = CDropTargetInfo::Accept({ITreeNode::TYPE_FOLDER, ITreeNode::TYPE_LAYER_GROUP});
-	else if(pNode->m_Type == ITreeNode::TYPE_LAYER_GROUP)
-	{
-		std::shared_ptr<CLayerGroupNode> pGroupNode = std::static_pointer_cast<CLayerGroupNode>(pNode);
-		if(pGroupNode->Group() == Editor()->m_Map.m_pGameGroup)
-			DropTargetInfo = CDropTargetInfo::Accept({ITreeNode::TYPE_LAYER, ITreeNode::TYPE_ENTITIES_LAYER});
-		else // Do not accept entities layers on non game groups
-			DropTargetInfo = CDropTargetInfo::Accept({ITreeNode::TYPE_LAYER});
-	}
+	auto Item = m_TreeView.DoNode(pNode.get(), IsSelected, pNode->m_Type, pNode->DropTargetInfo());
 
-	auto Item = m_TreeView.DoNode(pNode.get(), IsSelected, pNode->m_Type, DropTargetInfo);
-
-	CUIRect Rect = Item.m_Rect;
+	const CUIRect Rect = Item.m_Rect;
 
 	// Shift is used to add multiple nodes to the selection, starting from the last selected node to the clicked node
 	const bool SelectMultipleAdditiveModifier = Editor()->Input()->ShiftIsPressed();
-	// Ctrl is used to add a single node to the selection
+	// Ctrl is used to add/remove a single node to the selection
 	const bool ToggleSelectionModifier = Editor()->Input()->ModifierIsPressed();
 
 	const bool AnyModifier = SelectMultipleAdditiveModifier || ToggleSelectionModifier;
 
-	if(Item.m_IsTargetParent)
+	if(Item.m_IsDropTarget)
 	{
 		// Draw highlighted background
 		Item.m_Rect.Draw(ColorRGBA(0.6f, 0.1f, 0.9f, 0.6f), IGraphics::CORNER_ALL, 3.0f);
@@ -314,7 +291,7 @@ void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<IT
 				else if(Res == 2)
 				{
 					// Only select that node to not confuse the user
-					ClearSelection();
+					// ClearSelection();
 					SelectTreeNode(pNode);
 
 					Ui()->DoPopupMenu(pNode.get(), Ui()->MouseX(), Ui()->MouseY(), 120, pNode.get(), ITreeNode::RenderPopup);
@@ -441,7 +418,7 @@ void CLayersView::GroupSelection()
 	std::vector<CTreeNodePath> vSelectedPaths{};
 	std::transform(m_SelectedNodes.begin(), m_SelectedNodes.end(), std::back_inserter(vSelectedPaths), [](const auto &NodeInfo) { return NodeInfo.m_pNode->m_Path; });
 
-	CTreeNodePath TargetPath = std::min_element(m_SelectedNodes.begin(), m_SelectedNodes.end(), [](const auto &a, const auto &b) { return a.m_SelectionIndex < b.m_SelectionIndex; })->m_pNode->m_Path;
+	const CTreeNodePath TargetPath = std::min_element(m_SelectedNodes.begin(), m_SelectedNodes.end(), [](const auto &a, const auto &b) { return a.m_SelectionIndex < b.m_SelectionIndex; })->m_pNode->m_Path;
 	Group(vSelectedPaths, TargetPath);
 }
 
@@ -504,6 +481,7 @@ void CLayersView::BuildTree()
 	printf("BuildTree() took %.12fs (%" PRId64 "ms)\n", Duration.count(), std::chrono::duration_cast<std::chrono::milliseconds>(Duration).count());
 
 	// Sort groups
+	printf("Sorting groups........\n");
 	const auto vGroupNodes = Query(CNodeTypeQuery(ITreeNode::TYPE_LAYER_GROUP));
 	if(!vGroupNodes.empty())
 	{
@@ -520,25 +498,11 @@ void CLayersView::BuildTree()
 		{
 			const auto &pGroup = vpGroups.at(i);
 			const auto &pNode = GroupNodesMap.at(pGroup.get());
-			const auto &pGroupObj = std::static_pointer_cast<CLayerGroupObject>(pNode->Object());
 
-			char aBuf[64];
-			pNode->m_Path.ToString(aBuf);
-
-			printf("%s: #%d %s (%d -> %d)\n", aBuf, (int)i, pGroup->m_aName, pGroupObj->m_GroupIndex, (int)i);
-
-			pGroupObj->m_GroupIndex = i;
-			pNode->m_GroupIndex = i;
-
-			for(auto &pChild : pNode->m_vpChildren)
-			{
-				if(pChild->Type() == ITreeNode::TYPE_LAYER || pChild->Type() == ITreeNode::TYPE_ENTITIES_LAYER)
-				{
-					std::static_pointer_cast<CLayerNode>(pChild)->m_GroupIndex = i;
-				}
-			}
+			pNode->SetGroupIndex(i);
 		}
 	}
+	printf("Done. Sorted %d groups\n", (int)vGroupNodes.size());
 }
 
 void CLayersView::BuildTreeNodeChildren(const std::shared_ptr<ITreeNode> &pNode, const std::vector<std::shared_ptr<IEditorMapObject>> &vpObject)
@@ -671,6 +635,10 @@ void CLayersView::SetParent(const std::shared_ptr<ITreeNode> &pNode, const std::
 std::vector<std::shared_ptr<ITreeNode>> CLayersView::FindIf(const std::shared_ptr<ITreeNode> &pRoot,
 	const std::function<bool(const std::shared_ptr<ITreeNode> &)> &fnPredicate)
 {
+	char aBuf[64];
+	pRoot->m_Path.ToString(aBuf);
+	printf("FindIf: %s (%d)\n", aBuf, pRoot->Type());
+
 	std::vector<std::shared_ptr<ITreeNode>> vpNodes{};
 
 	if(fnPredicate(pRoot))
