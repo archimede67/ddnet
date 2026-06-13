@@ -27,7 +27,6 @@ public:
 	{
 		m_Type = LAYERTYPE_INVALID;
 		str_copy(m_aName, "(invalid)");
-		m_Visible = true;
 		m_Readonly = false;
 		m_Flags = 0;
 		m_pEditor = pEditor;
@@ -39,7 +38,6 @@ public:
 		m_Flags = Other.m_Flags;
 		m_pEditor = Other.m_pEditor;
 		m_Type = Other.m_Type;
-		m_Visible = true;
 		m_Readonly = false;
 	}
 
@@ -80,7 +78,6 @@ public:
 	int m_Flags;
 
 	bool m_Readonly;
-	bool m_Visible;
 };
 
 #endif

@@ -1,10 +1,11 @@
 ﻿#ifndef GAME_EDITOR_COMPONENTS_LAYERS_VIEW_NODE_H
 #define GAME_EDITOR_COMPONENTS_LAYERS_VIEW_NODE_H
 
-#include <game/client/ui.h>
-
 #include <game/client/tree_path.h>
+#include <game/client/ui.h>
 #include <game/client/ui_treeview.h>
+#include <game/mapitems.h>
+
 #include <memory>
 
 struct IEditorMapObject;
@@ -15,6 +16,13 @@ enum class ENodeSelectResult
 	ALLOW,
 	OVERRIDE,
 	OVERRIDE_TYPE,
+};
+
+struct ITreeNodeState
+{
+public:
+	bool m_Visible;
+	bool m_Collapse;
 };
 
 class ITreeNode : SPopupMenuId, public std::enable_shared_from_this<ITreeNode>
@@ -34,7 +42,7 @@ public:
 
 public:
 	explicit ITreeNode(const EType Type) :
-		m_Type(Type), m_pLayers(nullptr), m_pEditor(nullptr)
+		m_Type(Type), m_pLayers(nullptr), m_pEditor(nullptr), m_State()
 	{
 	}
 
@@ -42,8 +50,6 @@ public:
 	void Clear();
 	ITreeNode(const ITreeNode &Other) = default;
 
-	virtual bool *Collapse() = 0;
-	virtual bool *Visible() = 0;
 	virtual const void *Id() = 0;
 
 	virtual std::shared_ptr<IEditorMapObject> Object() { return nullptr; }
@@ -82,6 +88,7 @@ private:
 	CLayersView *m_pLayers;
 	CEditor *m_pEditor;
 	CTreeNodePath m_Path; // Path to the node
+	ITreeNodeState m_State;
 };
 
 #endif

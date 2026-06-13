@@ -2,7 +2,6 @@
 
 #include <game/editor/components/layers_view/queries.h>
 #include <game/editor/editor.h>
-
 #include <game/editor/mapitems/image.h>
 #include <game/editor/mapitems/layer_group.h>
 #include <game/editor/mapitems/sound.h>
@@ -26,9 +25,6 @@ CLayerGroupNode::CLayerGroupNode(const int Index, const std::shared_ptr<CLayerGr
 	ITreeNode(TYPE_LAYER_GROUP), m_GroupIndex(Index), m_pGroupObject(pGroupObject), m_pGroup(pGroup), m_aName{}
 {
 }
-
-bool *CLayerGroupNode::Visible() { return &Group()->m_Visible; }
-bool *CLayerGroupNode::Collapse() { return &Group()->m_Collapse; }
 
 const char *CLayerGroupNode::Name()
 {
@@ -121,9 +117,6 @@ void CLayerGroupNode::OnChildRemoved(const size_t &Index, const std::shared_ptr<
 	}
 }
 
-bool *CLayerNode::Visible() { return &m_pLayer->m_Visible; }
-bool *CLayerNode::Collapse() { return nullptr; }
-
 const char *CLayerNode::Name()
 {
 	if(m_pLayer->m_aName[0])
@@ -185,8 +178,6 @@ CUi::EPopupMenuFunctionResult CLayerNode::Popup(const CUIRect View, int &Height)
 
 // -----------------------------------
 
-bool *CEditorFolderNode::Visible() { return &m_pFolder->m_Visible; }
-bool *CEditorFolderNode::Collapse() { return &m_pFolder->m_Collapse; }
 const char *CEditorFolderNode::Name() { return m_pFolder->m_aName; }
 
 std::shared_ptr<IEditorMapObject> CEditorFolderNode::Object()

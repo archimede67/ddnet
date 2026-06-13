@@ -32,9 +32,6 @@ public:
 	char m_aName[12];
 	bool m_GameGroup;
 
-	bool m_Visible;
-	bool m_Collapse;
-
 	CLayerGroup();
 	~CLayerGroup();
 

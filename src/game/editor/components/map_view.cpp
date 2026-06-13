@@ -118,16 +118,16 @@ void CMapView::RenderMap()
 	// }
 
 	// render the game, tele, speedup, front, tune and switch above everything else
-	int GameGroupIndex = std::find(Map.m_vpGroups.begin(), Map.m_vpGroups.end(), Map.m_pGameGroup) - Map.m_vpGroups.begin();
-	if(ResolveVisibility(GameGroupIndex))
-	{
-		Map.m_pGameGroup->MapScreen();
-		for(auto &pLayer : Map.m_pGameGroup->m_vpLayers)
-		{
-			if(pLayer->m_Visible && pLayer->IsEntitiesLayer())
-				pLayer->Render();
-		}
-	}
+	// int GameGroupIndex = std::find(Map.m_vpGroups.begin(), Map.m_vpGroups.end(), Map.m_pGameGroup) - Map.m_vpGroups.begin();
+	// if(ResolveVisibility(GameGroupIndex))
+	//{
+	//	Map.m_pGameGroup->MapScreen();
+	//	for(auto &pLayer : Map.m_pGameGroup->m_vpLayers)
+	//	{
+	//		if(pLayer->m_Visible && pLayer->IsEntitiesLayer())
+	//			pLayer->Render();
+	//	}
+	//}
 
 	std::shared_ptr<CLayerTiles> pSelectedTilesLayer = std::static_pointer_cast<CLayerTiles>(Editor()->GetSelectedLayerType(0, LAYERTYPE_TILES));
 	if(Editor()->m_ShowTileInfo != CEditor::SHOW_TILE_OFF && pSelectedTilesLayer && pSelectedTilesLayer->m_Visible && m_Zoom.GetValue() <= 300.0f)
@@ -241,36 +241,4 @@ vec2 CMapView::GetEditorOffset() const
 float CMapView::GetWorldZoom() const
 {
 	return m_WorldZoom;
-}
-
-bool CMapView::ResolveVisibility(int GroupIndex)
-{
-	CEditorMap &Map = Editor()->m_Map;
-
-	// If group is not visible, then simply return false
-	if(!Map.m_vpGroups[GroupIndex]->m_Visible)
-		return false;
-
-	// Otherwise, we need to check for parent groups
-
-	// First find the corresponding group info
-	// int GroupInfoIndex = Map.GroupInfoIndex(CEditorGroupInfo::TYPE_LAYER_GROUP, GroupIndex);
-	// int Parent = Map.m_vGroupInfos[GroupInfoIndex].m_ParentIndex;
-
-	//// Traverse the parents from bottom to up
-	// while(Parent != CEditorGroupInfo::PARENT_NONE)
-	//{
-	//	CEditorGroupInfo &Info = Map.m_vGroupInfos.at(Parent);
-	//	if(Info.m_Type != CEditorGroupInfo::TYPE_PARENT_GROUP)
-	//		continue;
-
-	//	// If we find a parent that shouldn't be visible, then return false
-	//	if(!Map.m_vpGroupParents[Info.m_GroupIndex]->m_Visible)
-	//		return false;
-
-	//	Parent = Info.m_ParentIndex;
-	//}
-
-	// If all parents are visible, it means the group is visible
-	return true;
 }

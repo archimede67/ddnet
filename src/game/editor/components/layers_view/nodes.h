@@ -21,8 +21,6 @@ public:
 
 	std::shared_ptr<IEditorMapObject> Object() override;
 
-	bool *Visible() override { return nullptr; }
-	bool *Collapse() override { return nullptr; }
 	const void *Id() override { return m_pMap; }
 	const char *Name() override { return "Root"; }
 
@@ -40,8 +38,6 @@ class CLayerGroupNode final : public ITreeNode
 public:
 	CLayerGroupNode(int Index, const std::shared_ptr<CLayerGroupObject> &pGroupObject, const std::shared_ptr<CLayerGroup> &pGroup);
 
-	bool *Visible() override;
-	bool *Collapse() override;
 	const void *Id() override { return m_pGroup.get(); }
 	const char *Name() override;
 
@@ -76,8 +72,6 @@ public:
 	CEditorFolderNode(const std::shared_ptr<CEditorParentGroup> &pFolder) :
 		ITreeNode(TYPE_FOLDER), m_pFolder(pFolder) {}
 
-	bool *Visible() override;
-	bool *Collapse() override;
 	const void *Id() override { return m_pFolder.get(); }
 	const char *Name() override;
 
@@ -96,8 +90,6 @@ public:
 	CLayerNode(const int GroupIndex, const int Index, const std::shared_ptr<CLayer> &pLayer, const EType Type = TYPE_LAYER) :
 		ITreeNode(Type), m_GroupIndex(GroupIndex), m_Index(Index), m_pLayer(pLayer) {}
 
-	bool *Visible() override;
-	bool *Collapse() override;
 	const void *Id() override { return m_pLayer.get(); }
 	const char *Name() override;
 

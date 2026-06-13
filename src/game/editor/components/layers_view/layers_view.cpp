@@ -211,8 +211,8 @@ void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<IT
 	const bool IsSelected = m_SelectedNodes.find(pNode) != m_SelectedNodes.end();
 	const bool Dragging = m_TreeView.Dragging();
 
-	bool *pCollapse = pNode->Collapse();
-	bool *pVisible = pNode->Visible();
+	bool &Collapse = pNode->m_State.m_Collapse;
+	bool &Visible = pNode->m_State.m_Visible;
 
 	auto Item = m_TreeView.DoNode(pNode.get(), IsSelected, pNode->m_Type, pNode->DropTargetInfo());
 
@@ -231,13 +231,13 @@ void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<IT
 		Item.m_Rect.Draw(ColorRGBA(0.6f, 0.1f, 0.9f, 0.6f), IGraphics::CORNER_ALL, 3.0f);
 	}
 
-	const bool ChildrenExists = (!pNode->m_vpChildren.empty() || pNode->m_Type != 1) && pCollapse;
+	const bool ChildrenExists = (!pNode->m_vpChildren.empty() || pNode->m_Type != 1);
 	if(ChildrenExists)
 	{
 		CUIRect ColBtn;
 		Item.m_Rect.VSplitLeft(14.0f, &ColBtn, &Item.m_Rect);
-		if(Editor()->DoButton_FontIcon(pCollapse, *pCollapse ? "+" : "-", *pCollapse, &ColBtn, 0, nullptr, IGraphics::CORNER_L, 8.0f))
-			*pCollapse = !*pCollapse;
+		if(Editor()->DoButton_FontIcon(&Collapse, Collapse ? "+" : "-", Collapse, &ColBtn, 0, nullptr, IGraphics::CORNER_L, 8.0f))
+			Collapse = !Collapse;
 	}
 
 	bool Clicked;
@@ -300,7 +300,7 @@ void CLayersView::RenderTreeNodeItem(const char *pName, const std::shared_ptr<IT
 		}
 	}
 
-	if(ChildrenExists && !*pCollapse)
+	if(ChildrenExists && !Collapse)
 	{
 		m_TreeView.PushTree();
 		for(unsigned int k = 0; k < (unsigned int)pNode->m_vpChildren.size(); k++)
