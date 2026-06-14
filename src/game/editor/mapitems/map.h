@@ -196,6 +196,7 @@ public:
 	std::shared_ptr<CLayer> SelectedLayerType(int Index, int Type) const;
 	void SelectLayer(int LayerIndex, int GroupIndex = -1);
 	void AddSelectedLayer(int LayerIndex);
+	void RemoveSelectedLayer(int LayerIndex);
 	void SelectNextLayer();
 	void SelectPreviousLayer();
 	void SelectGameLayer();

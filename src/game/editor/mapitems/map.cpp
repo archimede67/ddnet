@@ -338,6 +338,12 @@ void CEditorMap::AddSelectedLayer(int LayerIndex)
 	m_QuadKnifeState.Reset();
 }
 
+void CEditorMap::RemoveSelectedLayer(int LayerIndex)
+{
+	m_vSelectedLayers.erase(std::remove(m_vSelectedLayers.begin(), m_vSelectedLayers.end(), LayerIndex));
+	m_QuadKnifeState.Reset();
+}
+
 void CEditorMap::SelectNextLayer()
 {
 	int CurrentLayer = 0;

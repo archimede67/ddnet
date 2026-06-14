@@ -129,6 +129,33 @@ int CEditor::DoButton_FontIcon(const void *pId, const char *pText, int Checked, 
 	return DoButtonLogic(pId, Checked, pRect, Flags, pToolTip);
 }
 
+int CEditor::DoButton_TreeNode(const void *pId, const char *pText, int Checked, const CUIRect *pRect, int Flags, const char *pToolTip, int Corners, float FontSize, int Align)
+{
+	pRect->Draw(GetButtonColor(pId, Checked), Corners, 3.0f);
+
+	CUIRect Rect;
+	pRect->VMargin(((Align & TEXTALIGN_MASK_HORIZONTAL) == TEXTALIGN_CENTER) ? 1.0f : 5.0f, &Rect);
+
+	SLabelProperties Props;
+	Props.m_MaxWidth = Rect.w;
+	Props.m_EllipsisAtEnd = true;
+	Ui()->DoLabel(&Rect, pText, FontSize, Align, Props);
+
+	return DoButtonLogic(pId, Checked, pRect, Flags, pToolTip);
+}
+
+void CEditor::DoLabel_Editor(const char *pText, const CUIRect *pRect, float FontSize, int Align, const ColorRGBA &Color)
+{
+	CUIRect Rect;
+	pRect->VMargin(((Align & TEXTALIGN_MASK_HORIZONTAL) == TEXTALIGN_CENTER) ? 1.0f : 5.0f, &Rect);
+
+	SLabelProperties Props;
+	Props.m_MaxWidth = Rect.w;
+	Props.m_EllipsisAtEnd = true;
+	Props.SetColor(Color);
+	Ui()->DoLabel(&Rect, pText, FontSize, Align, Props);
+}
+
 int CEditor::DoButton_MenuItem(const void *pId, const char *pText, int Checked, const CUIRect *pRect, int Flags, const char *pToolTip)
 {
 	if((Ui()->HotItem() == pId && Checked == 0) || Checked > 0)

@@ -2642,6 +2642,8 @@ if(CLIENT)
     auto_map.h
     component.cpp
     component.h
+	components/editor_tree_view.cpp
+	components/editor_tree_view.h
     editor.cpp
     editor.h
     editor_action.h
@@ -2706,6 +2708,10 @@ if(CLIENT)
     mapitems/map_io.cpp
     mapitems/sound.cpp
     mapitems/sound.h
+	nodes/editor_tree_node.cpp
+	nodes/editor_tree_node.h
+	nodes/editor_tree_nodes.cpp
+	nodes/editor_tree_nodes.h
     popups.cpp
     prompt.cpp
     prompt.h

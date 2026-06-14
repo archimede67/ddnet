@@ -498,6 +498,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupGroup(void *pContext, CUIRect View, 
 			pEditor->Map()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionGroup>(pEditor->Map(), pEditor->Map()->m_SelectedGroup, true));
 			pEditor->Map()->DeleteGroup(pEditor->Map()->m_SelectedGroup);
 			pEditor->Map()->m_SelectedGroup = maximum(0, pEditor->Map()->m_SelectedGroup - 1);
+			pEditor->TreeView()->Rebuild();
 			return CUi::POPUP_CLOSE_CURRENT;
 		}
 	}
@@ -695,6 +696,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupGroup(void *pContext, CUIRect View, 
 	if(Prop == EGroupProp::ORDER)
 	{
 		pEditor->Map()->m_SelectedGroup = pEditor->Map()->MoveGroup(pEditor->Map()->m_SelectedGroup, NewVal);
+		pEditor->TreeView()->Rebuild();
 	}
 
 	// these can not be changed on the game group

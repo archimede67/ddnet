@@ -52,6 +52,7 @@ void CEditor::AddGroup()
 	Map()->NewGroup();
 	Map()->m_SelectedGroup = Map()->m_vpGroups.size() - 1;
 	Map()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionGroup>(Map(), Map()->m_SelectedGroup, false));
+	TreeView()->Rebuild();
 }
 
 void CEditor::AddSoundLayer()
@@ -62,6 +63,7 @@ void CEditor::AddSoundLayer()
 	Map()->SelectLayer(LayerIndex);
 	Map()->m_vpGroups[Map()->m_SelectedGroup]->m_Collapse = false;
 	Map()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(Map(), Map()->m_SelectedGroup, LayerIndex));
+	TreeView()->Rebuild();
 }
 
 void CEditor::AddTileLayer()
@@ -72,6 +74,7 @@ void CEditor::AddTileLayer()
 	Map()->SelectLayer(LayerIndex);
 	Map()->m_vpGroups[Map()->m_SelectedGroup]->m_Collapse = false;
 	Map()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(Map(), Map()->m_SelectedGroup, LayerIndex));
+	TreeView()->Rebuild();
 }
 
 void CEditor::AddQuadsLayer()
@@ -82,6 +85,7 @@ void CEditor::AddQuadsLayer()
 	Map()->SelectLayer(LayerIndex);
 	Map()->m_vpGroups[Map()->m_SelectedGroup]->m_Collapse = false;
 	Map()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(Map(), Map()->m_SelectedGroup, LayerIndex));
+	TreeView()->Rebuild();
 }
 
 void CEditor::AddSwitchLayer()
@@ -93,6 +97,7 @@ void CEditor::AddSwitchLayer()
 	Map()->SelectLayer(LayerIndex);
 	m_pBrush->Clear();
 	Map()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(Map(), Map()->m_SelectedGroup, LayerIndex));
+	TreeView()->Rebuild();
 }
 
 void CEditor::AddFrontLayer()
@@ -104,6 +109,7 @@ void CEditor::AddFrontLayer()
 	Map()->SelectLayer(LayerIndex);
 	m_pBrush->Clear();
 	Map()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(Map(), Map()->m_SelectedGroup, LayerIndex));
+	TreeView()->Rebuild();
 }
 
 void CEditor::AddTuneLayer()
@@ -115,6 +121,7 @@ void CEditor::AddTuneLayer()
 	Map()->SelectLayer(LayerIndex);
 	m_pBrush->Clear();
 	Map()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(Map(), Map()->m_SelectedGroup, LayerIndex));
+	TreeView()->Rebuild();
 }
 
 void CEditor::AddSpeedupLayer()
@@ -126,6 +133,7 @@ void CEditor::AddSpeedupLayer()
 	Map()->SelectLayer(LayerIndex);
 	m_pBrush->Clear();
 	Map()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(Map(), Map()->m_SelectedGroup, LayerIndex));
+	TreeView()->Rebuild();
 }
 
 void CEditor::AddTeleLayer()
@@ -137,6 +145,7 @@ void CEditor::AddTeleLayer()
 	Map()->SelectLayer(LayerIndex);
 	m_pBrush->Clear();
 	Map()->m_EditorHistory.RecordAction(std::make_shared<CEditorActionAddLayer>(Map(), Map()->m_SelectedGroup, LayerIndex));
+	TreeView()->Rebuild();
 }
 
 bool CEditor::IsNonGameTileLayerSelected() const

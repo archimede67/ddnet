@@ -21,6 +21,7 @@
 
 #include <game/client/ui.h>
 #include <game/client/ui_listbox.h>
+#include <game/editor/components/editor_tree_view.h>
 #include <game/editor/enums.h>
 #include <game/editor/file_browser.h>
 #include <game/editor/mapitems/envelope.h>
@@ -126,6 +127,7 @@ class CEditor : public IEditor, public IEnvelopeEval
 	CPrompt m_Prompt;
 	CFontTyper m_FontTyper;
 	CQuadKnife m_QuadKnife;
+	CEditorTreeView m_TreeView;
 
 	bool m_EditorWasUsedBefore = false;
 
@@ -166,6 +168,8 @@ public:
 	const CMapView *MapView() const { return &m_MapView; }
 	CQuadKnife *QuadKnife() { return &m_QuadKnife; }
 	const CQuadKnife *QuadKnife() const { return &m_QuadKnife; }
+	CEditorTreeView *TreeView() { return &m_TreeView; }
+	const CEditorTreeView *TreeView() const { return &m_TreeView; }
 	CLayerSelector *LayerSelector() { return &m_LayerSelector; }
 
 	void FillGameTiles(EGameTileOp FillTile) const;
@@ -498,6 +502,8 @@ public:
 	int DoButton_FontIcon(const void *pId, const char *pText, int Checked, const CUIRect *pRect, int Flags, const char *pToolTip, int Corners, float FontSize = 10.0f);
 	int DoButton_MenuItem(const void *pId, const char *pText, int Checked, const CUIRect *pRect, int Flags = BUTTONFLAG_LEFT, const char *pToolTip = nullptr);
 	int DoButton_DraggableEx(const void *pId, const char *pText, int Checked, const CUIRect *pRect, bool *pClicked, bool *pAbrupted, int Flags, const char *pToolTip = nullptr, int Corners = IGraphics::CORNER_ALL, float FontSize = 10.0f);
+	int DoButton_TreeNode(const void *pId, const char *pText, int Checked, const CUIRect *pRect, int Flags, const char *pToolTip, int Corners, float FontSize = EditorFontSizes::MENU, int Align = TEXTALIGN_MC);
+	void DoLabel_Editor(const char *pText, const CUIRect *pRect, float FontSize = EditorFontSizes::MENU, int Align = TEXTALIGN_MC, const ColorRGBA &Color = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f));
 	bool DoEditBox(CLineInput *pLineInput, const CUIRect *pRect, float FontSize, int Corners = IGraphics::CORNER_ALL, const char *pToolTip = nullptr, const std::vector<STextColorSplit> &vColorSplits = {});
 	bool DoClearableEditBox(CLineInput *pLineInput, const CUIRect *pRect, float FontSize, int Corners = IGraphics::CORNER_ALL, const char *pToolTip = nullptr, const std::vector<STextColorSplit> &vColorSplits = {});
 	SEditResult<int> UiDoValueSelector(const void *pId, CUIRect *pRect, const char *pLabel, int Current, int Min, int Max, int Step, float Scale, const char *pToolTip, bool IsDegree = false, bool IsHex = false, int Corners = IGraphics::CORNER_ALL, const ColorRGBA *pColor = nullptr, bool ShowValue = true);
@@ -695,10 +701,13 @@ public:
 		const SPopupMenuId m_PopupGroupId = {};
 		SLayerPopupContext m_LayerPopupContext;
 
+		bool m_IsInit = false;
+
 		void Reset();
 	};
 	CRenderLayersState m_RenderLayersState;
 	void RenderLayers(CUIRect LayersBox);
+	void RenderLayersV2(CUIRect LayersBox);
 
 	void RenderImagesList(CUIRect Toolbox);
 	void RenderSelectedImage(CUIRect View) const;

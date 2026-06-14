@@ -428,6 +428,8 @@ bool CEditorMap::Save(const char *pFilename, const FErrorHandler &ErrorHandler)
 		free(pPointsBezier);
 	}
 
+	// save node tree
+
 	// finish the data file
 	std::shared_ptr<CDataFileWriterFinishJob> pWriterFinishJob = std::make_shared<CDataFileWriterFinishJob>(m_pEditor->Storage(), pFilename, aFilenameTmp, std::move(Writer));
 	m_pEditor->Engine()->AddJob(pWriterFinishJob);
@@ -1054,6 +1056,8 @@ bool CEditorMap::Load(const char *pFilename, int StorageType, const FErrorHandle
 			}
 		}
 	}
+
+	// load node tree
 
 	str_copy(m_aFilename, pFilename);
 
