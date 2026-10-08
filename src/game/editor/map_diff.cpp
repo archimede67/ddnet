@@ -1,0 +1,624 @@
+#include "map_diff.h"
+
+#include <base/hash.h>
+#include <base/hash_ctxt.h>
+
+#include <algorithm>
+#include <deque>
+#include <map>
+#include <numeric>
+#include <sstream>
+#include <tuple>
+
+namespace MapDiff
+{
+	namespace
+	{
+		struct CCancelled
+		{
+		};
+		class CCheck
+		{
+			const FCancel &m_Cancel;
+			size_t m_Count = 0;
+
+		public:
+			explicit CCheck(const FCancel &Cancel) :
+				m_Cancel(Cancel) {}
+			void Now()
+			{
+				if(m_Cancel && m_Cancel())
+					throw CCancelled();
+			}
+			void Tick()
+			{
+				if((m_Count++ % 1024) == 0)
+					Now();
+			}
+		};
+		class CFingerprint
+		{
+			CCheck &m_Check;
+
+		public:
+			explicit CFingerprint(CCheck &Check) :
+				m_Check(Check) {}
+			uint64_t m_Value = 14695981039346656037ULL;
+			void Add(uint64_t Value)
+			{
+				for(int i = 0; i < 8; ++i)
+				{
+					m_Value = (m_Value ^ (Value & 255)) * 1099511628211ULL;
+					Value >>= 8;
+				}
+			}
+			void Add(const std::string &Value)
+			{
+				Add(Value.size());
+				for(size_t i = 0; i < Value.size(); ++i)
+				{
+					if((i % 65536) == 0)
+						m_Check.Now();
+					m_Value = (m_Value ^ (unsigned char)Value[i]) * 1099511628211ULL;
+				}
+			}
+			void Add(const TProperties &Properties)
+			{
+				for(const auto &Property : Properties)
+				{
+					m_Check.Tick();
+					Add(Property.m_Name);
+					Add(Property.m_Value);
+				}
+			}
+		};
+		template<typename T>
+		bool EqualBytes(const T &A, const T &B, CCheck &Check)
+		{
+			if(A.size() != B.size())
+				return false;
+			for(size_t Offset = 0; Offset < A.size(); Offset += 65536)
+			{
+				Check.Now();
+				const size_t End = std::min(Offset + 65536, A.size());
+				if(!std::equal(A.begin() + Offset, A.begin() + End, B.begin() + Offset))
+					return false;
+			}
+			return true;
+		}
+		bool EqualProperties(const TProperties &A, const TProperties &B, CCheck &Check)
+		{
+			if(A.size() != B.size())
+				return false;
+			for(size_t i = 0; i < A.size(); ++i)
+			{
+				Check.Tick();
+				if(!EqualBytes(A[i].m_Name, B[i].m_Name, Check) || !EqualBytes(A[i].m_Value, B[i].m_Value, Check))
+					return false;
+			}
+			return true;
+		}
+		std::string ContentKey(const CResource &Resource, CCheck &Check)
+		{
+			auto Feed = [&](SHA256_CTX &Context, const auto &Bytes) {
+				for(size_t Offset = 0; Offset < Bytes.size(); Offset += 65536)
+				{
+					Check.Now();
+					sha256_update(&Context, Bytes.data() + Offset, std::min<size_t>(65536, Bytes.size() - Offset));
+				}
+			};
+			SHA256_CTX DataContext, Context;
+			sha256_init(&DataContext);
+			Feed(DataContext, Resource.m_vData);
+			char aDigest[SHA256_MAXSTRSIZE];
+			sha256_str(sha256_finish(&DataContext), aDigest, sizeof(aDigest));
+			sha256_init(&Context);
+			for(const auto &Property : Resource.m_vProperties)
+			{
+				Check.Tick();
+				Feed(Context, std::to_string(Property.m_Name.size()) + ":");
+				Feed(Context, Property.m_Name);
+				Feed(Context, std::to_string(Property.m_Value.size()) + ":");
+				Feed(Context, Property.m_Value);
+			}
+			Feed(Context, std::string(aDigest));
+			Feed(Context, std::string(Resource.m_Missing ? ":missing" : ":present"));
+			sha256_str(sha256_finish(&Context), aDigest, sizeof(aDigest));
+			return aDigest;
+		}
+		std::vector<CPropertyChange> Properties(const TProperties &Before, const TProperties &After, CCheck &Check);
+		uint64_t Fingerprint(const CLayer &Layer, CCheck &Check)
+		{
+			Check.Tick();
+			CFingerprint Hash(Check);
+			Hash.Add((int)Layer.m_Kind);
+			Hash.Add(Layer.m_vProperties);
+			Hash.Add(Layer.m_Width);
+			Hash.Add(Layer.m_Height);
+			for(const auto &Cell : Layer.m_vCells)
+			{
+				Check.Tick();
+				Hash.Add(Cell.m_X);
+				Hash.Add(Cell.m_Y);
+				const auto &T = Cell.m_Tile;
+				Hash.Add(T.m_Index);
+				Hash.Add(T.m_Flags);
+				Hash.Add(T.m_Number);
+				Hash.Add(T.m_Delay);
+				Hash.Add(T.m_Force);
+				Hash.Add(T.m_MaxSpeed);
+				Hash.Add(T.m_Angle);
+			}
+			for(const auto &Object : Layer.m_vObjects)
+			{
+				Check.Tick();
+				Hash.Add(Object.m_vProperties);
+			}
+			return Hash.m_Value;
+		}
+		bool Equal(const CLayer &A, const CLayer &B, CCheck &Check)
+		{
+			Check.Tick();
+			if(A.m_Kind != B.m_Kind || A.m_Width != B.m_Width || A.m_Height != B.m_Height || !EqualProperties(A.m_vProperties, B.m_vProperties, Check) || A.m_vCells.size() != B.m_vCells.size() || A.m_vObjects.size() != B.m_vObjects.size())
+				return false;
+			for(size_t i = 0; i < A.m_vCells.size(); ++i)
+			{
+				Check.Tick();
+				const auto &X = A.m_vCells[i];
+				const auto &Y = B.m_vCells[i];
+				if(X.m_X != Y.m_X || X.m_Y != Y.m_Y || !(X.m_Tile == Y.m_Tile))
+					return false;
+			}
+			for(size_t i = 0; i < A.m_vObjects.size(); ++i)
+			{
+				Check.Tick();
+				if(!EqualProperties(A.m_vObjects[i].m_vProperties, B.m_vObjects[i].m_vProperties, Check))
+					return false;
+			}
+			return true;
+		}
+		struct CMatchItem
+		{
+			std::string m_Role;
+			std::string m_Name;
+			int m_Compatible = 0;
+			uint64_t m_Hash = 0;
+		};
+		using CPair = CObjectChange;
+		// Bounded matching: role, exact content, unique name, then only equal-sized
+		// compatible remaining spans. Duplicate matches are explicitly uncertain.
+		template<typename F>
+		std::vector<CPair> Match(const std::vector<CMatchItem> &A, const std::vector<CMatchItem> &B, F Exact, CCheck &Check, bool Ordered = true)
+		{
+			std::vector<int> vA(A.size(), -1), vB(B.size(), -1);
+			std::vector<bool> vAmbiguous(A.size());
+			auto Pair = [&](int i, int j, bool Ambiguous) {
+				vA[i] = j;
+				vB[j] = i;
+				vAmbiguous[i] = Ambiguous;
+			};
+			for(int Pass = 0; Pass < 3; ++Pass)
+			{
+				using TKey = std::tuple<int, std::string, uint64_t>;
+				std::map<TKey, std::deque<int>> aBuckets[2];
+				for(int Side = 0; Side < 2; ++Side)
+				{
+					const auto &Items = Side == 0 ? A : B;
+					const auto &Matches = Side == 0 ? vA : vB;
+					for(size_t i = 0; i < Items.size(); ++i)
+					{
+						Check.Tick();
+						if(Matches[i] != -1)
+							continue;
+						const auto &Item = Items[i];
+						const std::string &Name = Pass == 0 ? Item.m_Role : Item.m_Name;
+						if(Pass != 1 && Name.empty())
+							continue;
+						aBuckets[Side][{Item.m_Compatible, Pass == 1 ? "" : Name, Pass == 1 ? Item.m_Hash : 0}].push_back(i);
+					}
+				}
+				for(auto &[Key, Indices] : aBuckets[0])
+				{
+					Check.Tick();
+					auto It = aBuckets[1].find(Key);
+					if(It == aBuckets[1].end())
+						continue;
+					auto &Other = It->second;
+					bool Ambiguous = Indices.size() != 1 || Other.size() != 1;
+					if(Pass != 1 && Ambiguous)
+						continue;
+					if(Pass == 1 && Ambiguous)
+					{
+						// Exact duplicates can still have distinct names. Prefer those
+						// names inside the content bucket, otherwise a table reorder
+						// becomes a spurious pair of renames.
+						std::map<std::string, std::vector<int>> aNamed[2];
+						for(int i : Indices)
+						{
+							Check.Tick();
+							if(!A[i].m_Name.empty())
+								aNamed[0][A[i].m_Name].push_back(i);
+						}
+						for(int j : Other)
+						{
+							Check.Tick();
+							if(!B[j].m_Name.empty())
+								aNamed[1][B[j].m_Name].push_back(j);
+						}
+						for(const auto &[Name, Left] : aNamed[0])
+						{
+							Check.Tick();
+							auto Right = aNamed[1].find(Name);
+							if(Left.size() == 1 && Right != aNamed[1].end() && Right->second.size() == 1 && Exact(Left[0], Right->second[0]))
+								Pair(Left[0], Right->second[0], false);
+						}
+						Indices.erase(std::remove_if(Indices.begin(), Indices.end(), [&](int i) { Check.Tick(); return vA[i] != -1; }), Indices.end());
+						Other.erase(std::remove_if(Other.begin(), Other.end(), [&](int j) { Check.Tick(); return vB[j] != -1; }), Other.end());
+					}
+					while(!Indices.empty() && !Other.empty())
+					{
+						Check.Tick();
+						int i = Indices.front(), j = Other.front();
+						Indices.pop_front();
+						Other.pop_front();
+						if(Pass != 1 || Exact(i, j))
+							Pair(i, j, Ambiguous || (Pass == 1 && (A[i].m_Name.empty() || B[j].m_Name.empty())));
+					}
+				}
+			}
+			// Monotone exact/name anchors delimit ordered spans. Crossed anchors are
+			// already matched as moves, and are deliberately not used for guesses.
+			int StartA = 0, StartB = 0;
+			auto AlignSpan = [&](int EndA, int EndB) {
+				std::vector<int> vLeft, vRight;
+				for(int i = StartA; i < EndA; ++i)
+				{
+					Check.Tick();
+					if(vA[i] == -1)
+						vLeft.push_back(i);
+				}
+				for(int j = StartB; j < EndB; ++j)
+				{
+					Check.Tick();
+					if(vB[j] == -1)
+						vRight.push_back(j);
+				}
+				if(vLeft.size() != vRight.size())
+					return;
+				for(size_t k = 0; k < vLeft.size(); ++k)
+				{
+					Check.Tick();
+					int i = vLeft[k], j = vRight[k];
+					if(A[i].m_Compatible == B[j].m_Compatible)
+						Pair(i, j, true);
+				}
+			};
+			for(int i = 0; i < (int)A.size(); ++i)
+			{
+				Check.Tick();
+				if(vA[i] >= StartB)
+				{
+					AlignSpan(i, vA[i]);
+					StartA = i + 1;
+					StartB = vA[i] + 1;
+				}
+			}
+			AlignSpan(A.size(), B.size());
+			std::vector<CPair> vPairs;
+			std::vector<int> vSuffixMin(A.size() + 1, B.size());
+			for(int i = (int)A.size() - 1; i >= 0; --i)
+			{
+				Check.Tick();
+				vSuffixMin[i] = vA[i] < 0 ? vSuffixMin[i + 1] : std::min(vSuffixMin[i + 1], vA[i]);
+			}
+			int PrefixMax = -1;
+			for(int i = 0; i < (int)A.size(); ++i)
+			{
+				Check.Tick();
+				const int j = vA[i];
+				bool Reordered = Ordered && j >= 0 && (j < PrefixMax || j > vSuffixMin[i + 1]);
+				vPairs.push_back({i, j, vAmbiguous[i], Reordered});
+				PrefixMax = std::max(PrefixMax, j);
+			}
+			for(int j = 0; j < (int)B.size(); ++j)
+			{
+				Check.Tick();
+				if(vB[j] < 0)
+					vPairs.push_back({-1, j, false, false});
+			}
+			return vPairs;
+		}
+		void AddName(CEntry &Entry, const std::string &Before, const std::string &After)
+		{
+			if(Before != After)
+				Entry.m_vProperties.push_back({"Name", Before, After});
+			Entry.m_Name = !After.empty() ? After : !Before.empty() ? Before :
+										  "(unnamed)";
+		}
+		void CompareCells(CEntry &Entry, const CLayer &Before, const CLayer &After, CCheck &Check)
+		{
+			size_t a = 0, b = 0;
+			while(a < Before.m_vCells.size() || b < After.m_vCells.size())
+			{
+				Check.Tick();
+				const CCell *pA = a < Before.m_vCells.size() ? &Before.m_vCells[a] : nullptr;
+				const CCell *pB = b < After.m_vCells.size() ? &After.m_vCells[b] : nullptr;
+				if(pA && pB && pA->m_X == pB->m_X && pA->m_Y == pB->m_Y)
+				{
+					if(!(pA->m_Tile == pB->m_Tile))
+						Entry.m_vTiles.push_back({pA->m_X, pA->m_Y, pA->m_Tile, pB->m_Tile});
+					++a;
+					++b;
+				}
+				else if(pA && (!pB || std::tie(pA->m_Y, pA->m_X) < std::tie(pB->m_Y, pB->m_X)))
+				{
+					Entry.m_vTiles.push_back({pA->m_X, pA->m_Y, pA->m_Tile, {}});
+					++a;
+				}
+				else
+				{
+					Entry.m_vTiles.push_back({pB->m_X, pB->m_Y, {}, pB->m_Tile});
+					++b;
+				}
+			}
+		}
+		void CompareObjects(CEntry &Entry, const CLayer &Before, const CLayer &After, CCheck &Check)
+		{
+			std::vector<CMatchItem> aItems[2];
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				for(const auto &Object : (Side == 0 ? Before : After).m_vObjects)
+				{
+					Check.Tick();
+					CFingerprint Hash(Check);
+					Hash.Add(Object.m_vProperties);
+					aItems[Side].push_back({"", "", 0, Hash.m_Value});
+				}
+			}
+			for(const auto &Pair : Match(aItems[0], aItems[1], [&](int a, int b) { return EqualProperties(Before.m_vObjects[a].m_vProperties, After.m_vObjects[b].m_vProperties, Check); }, Check))
+				if(Pair.m_Before < 0 || Pair.m_After < 0 || Pair.m_Reordered || !EqualProperties(Before.m_vObjects[Pair.m_Before].m_vProperties, After.m_vObjects[Pair.m_After].m_vProperties, Check))
+					Entry.m_vObjects.push_back(Pair);
+		}
+		void CompareResources(CResult &Result, const std::vector<CResource> &Before, const std::vector<CResource> &After, EEntryKind Kind, CCheck &Check)
+		{
+			std::vector<CMatchItem> aItems[2];
+			for(int Side = 0; Side < 2; ++Side)
+				for(const auto &Resource : Side == 0 ? Before : After)
+				{
+					Check.Tick();
+					CFingerprint Hash(Check);
+					Hash.Add(Resource.m_ContentKey.empty() ? ContentKey(Resource, Check) : Resource.m_ContentKey);
+					aItems[Side].push_back({"", Resource.m_Name, 0, Hash.m_Value});
+				}
+			const auto vPairs = Match(aItems[0], aItems[1], [&](int a, int b) { return EqualProperties(Before[a].m_vProperties, After[b].m_vProperties, Check) && EqualBytes(Before[a].m_vData, After[b].m_vData, Check) && !Before[a].m_Missing && !After[b].m_Missing; }, Check, false);
+			const CResource Empty;
+			for(const auto &Pair : vPairs)
+			{
+				Check.Tick();
+				const auto &A = Pair.m_Before >= 0 ? Before[Pair.m_Before] : Empty;
+				const auto &B = Pair.m_After >= 0 ? After[Pair.m_After] : Empty;
+				CEntry Entry;
+				Entry.m_Kind = Kind;
+				Entry.m_Before = Pair.m_Before;
+				Entry.m_After = Pair.m_After;
+				Entry.m_Ambiguous = Pair.m_Ambiguous;
+				Entry.m_vProperties = Properties(A.m_vProperties, B.m_vProperties, Check);
+				AddName(Entry, A.m_Name, B.m_Name);
+				if(!EqualBytes(A.m_vData, B.m_vData, Check))
+				{
+					Entry.m_vProperties.push_back({"Content bytes", std::to_string(A.m_vData.size()), std::to_string(B.m_vData.size())});
+					Entry.m_vProperties.push_back({"Content SHA-256", A.m_ContentKey.empty() ? ContentKey(A, Check) : A.m_ContentKey, B.m_ContentKey.empty() ? ContentKey(B, Check) : B.m_ContentKey});
+				}
+				if(A.m_Missing)
+					Entry.m_vIssues.push_back("Before: missing resource content; equality cannot be established.");
+				if(B.m_Missing)
+					Entry.m_vIssues.push_back("After: missing resource content; equality cannot be established.");
+				Result.m_vEntries.push_back(std::move(Entry));
+			}
+		}
+	}
+
+	bool CTile::operator==(const CTile &T) const
+	{
+		return m_Index == T.m_Index && m_Flags == T.m_Flags && m_Number == T.m_Number && m_Delay == T.m_Delay && m_Force == T.m_Force && m_MaxSpeed == T.m_MaxSpeed && m_Angle == T.m_Angle;
+	}
+	bool CEntry::Changed() const
+	{
+		return m_Before < 0 || m_After < 0 || m_Reordered || !m_vProperties.empty() || !m_vTiles.empty() || !m_vObjects.empty() || !m_vIssues.empty();
+	}
+	size_t CEntry::ChangeCount() const
+	{
+		return m_vProperties.size() + m_vTiles.size() + m_vObjects.size() + m_vIssues.size() + (m_Reordered ? 1 : 0) + (m_Before < 0 || m_After < 0 ? 1 : 0);
+	}
+	const char *CEntry::Status() const
+	{
+		return m_Before < 0 ? "+ Added" : m_After < 0 ? "- Deleted" :
+					  Changed()           ? "-/+ Changed" :
+								"= Unchanged";
+	}
+	size_t CResult::ChangeCount() const
+	{
+		size_t Count = 0;
+		for(const auto &Entry : m_vEntries)
+			Count += Entry.ChangeCount();
+		return Count;
+	}
+	namespace
+	{
+		std::vector<CPropertyChange> Properties(const TProperties &Before, const TProperties &After, CCheck &Check)
+		{
+			std::vector<CPropertyChange> Result;
+			std::map<std::string, const std::string *> aValues[2];
+			for(const auto &A : Before)
+			{
+				Check.Tick();
+				aValues[0].emplace(A.m_Name, &A.m_Value);
+			}
+			for(const auto &B : After)
+			{
+				Check.Tick();
+				aValues[1].emplace(B.m_Name, &B.m_Value);
+			}
+			for(const auto &A : Before)
+			{
+				Check.Tick();
+				auto It = aValues[1].find(A.m_Name);
+				if(It == aValues[1].end() || !EqualBytes(A.m_Value, *It->second, Check))
+					Result.push_back({A.m_Name, A.m_Value, It == aValues[1].end() ? "(absent)" : *It->second});
+			}
+			for(const auto &B : After)
+			{
+				Check.Tick();
+				if(aValues[0].find(B.m_Name) == aValues[0].end())
+					Result.push_back({B.m_Name, "(absent)", B.m_Value});
+			}
+			return Result;
+		}
+	}
+	std::vector<CPropertyChange> CompareProperties(const TProperties &Before, const TProperties &After)
+	{
+		const FCancel Cancel;
+		CCheck Check(Cancel);
+		return Properties(Before, After, Check);
+	}
+	std::string ResourceContentKey(const CResource &Resource)
+	{
+		const FCancel Cancel;
+		CCheck Check(Cancel);
+		return ContentKey(Resource, Check);
+	}
+	CResult Compare(const CSnapshot &Before, const CSnapshot &After, const FCancel &Cancel)
+	{
+		CResult Result;
+		CCheck Check(Cancel);
+		try
+		{
+			Check.Tick();
+			CEntry Info;
+			Info.m_Name = "Map metadata";
+			Info.m_Before = Info.m_After = 0;
+			Info.m_vProperties = Properties(Before.m_vInfo, After.m_vInfo, Check);
+			Result.m_vEntries.push_back(std::move(Info));
+			CEntry Settings;
+			Settings.m_Kind = EEntryKind::SETTINGS;
+			Settings.m_Name = "Ordered server settings";
+			Settings.m_Before = Settings.m_After = 0;
+			// Settings are an ordered program: retain every duplicate and position.
+			for(size_t i = 0; i < std::max(Before.m_vSettings.size(), After.m_vSettings.size()); ++i)
+			{
+				Check.Tick();
+				std::string A = i < Before.m_vSettings.size() ? Before.m_vSettings[i] : "(absent)";
+				std::string B = i < After.m_vSettings.size() ? After.m_vSettings[i] : "(absent)";
+				if(i >= Before.m_vSettings.size() || i >= After.m_vSettings.size() || A != B)
+					Settings.m_vProperties.push_back({"Command " + std::to_string(i + 1), A, B});
+			}
+			Result.m_vEntries.push_back(std::move(Settings));
+			CompareResources(Result, Before.m_vImages, After.m_vImages, EEntryKind::IMAGE, Check);
+			CompareResources(Result, Before.m_vSounds, After.m_vSounds, EEntryKind::SOUND, Check);
+			CompareResources(Result, Before.m_vEnvelopes, After.m_vEnvelopes, EEntryKind::ENVELOPE, Check);
+			std::vector<CMatchItem> aGroups[2];
+			std::vector<std::vector<CMatchItem>> aLayers[2];
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				for(const auto &Group : (Side == 0 ? Before : After).m_vGroups)
+				{
+					Check.Tick();
+					CFingerprint Hash(Check);
+					Hash.Add(Group.m_vProperties);
+					std::vector<CMatchItem> vLayers;
+					for(const auto &Layer : Group.m_vLayers)
+					{
+						uint64_t Content = Fingerprint(Layer, Check);
+						Hash.Add(Content);
+						vLayers.push_back({Layer.m_Kind >= ELayerKind::GAME && Layer.m_Kind <= ELayerKind::TUNE ? LayerKindName(Layer.m_Kind) : "", Layer.m_Name, (int)Layer.m_Kind, Content});
+					}
+					aLayers[Side].push_back(std::move(vLayers));
+					aGroups[Side].push_back({Group.m_Game ? "Game" : "", Group.m_Name, 0, Hash.m_Value});
+				}
+			}
+			auto GroupEqual = [&](int a, int b) {
+				const auto &A = Before.m_vGroups[a];
+				const auto &B = After.m_vGroups[b];
+				if(!EqualProperties(A.m_vProperties, B.m_vProperties, Check) || A.m_vLayers.size() != B.m_vLayers.size())
+					return false;
+				for(size_t i = 0; i < A.m_vLayers.size(); ++i)
+					if(!Equal(A.m_vLayers[i], B.m_vLayers[i], Check))
+						return false;
+				return true;
+			};
+			const CGroup EmptyGroup;
+			const CLayer EmptyLayer;
+			const std::vector<CMatchItem> EmptyItems;
+			for(const auto &GroupPair : Match(aGroups[0], aGroups[1], GroupEqual, Check))
+			{
+				Check.Tick();
+				const auto &A = GroupPair.m_Before < 0 ? EmptyGroup : Before.m_vGroups[GroupPair.m_Before];
+				const auto &B = GroupPair.m_After < 0 ? EmptyGroup : After.m_vGroups[GroupPair.m_After];
+				CEntry GroupEntry;
+				GroupEntry.m_Kind = EEntryKind::GROUP;
+				GroupEntry.m_Before = GroupEntry.m_BeforeGroup = GroupPair.m_Before;
+				GroupEntry.m_After = GroupEntry.m_AfterGroup = GroupPair.m_After;
+				GroupEntry.m_Ambiguous = GroupPair.m_Ambiguous;
+				GroupEntry.m_Reordered = GroupPair.m_Reordered;
+				GroupEntry.m_vProperties = Properties(A.m_vProperties, B.m_vProperties, Check);
+				AddName(GroupEntry, A.m_Name, B.m_Name);
+				const int Parent = Result.m_vEntries.size();
+				Result.m_vEntries.push_back(std::move(GroupEntry));
+				const auto &ItemsA = GroupPair.m_Before < 0 ? EmptyItems : aLayers[0][GroupPair.m_Before];
+				const auto &ItemsB = GroupPair.m_After < 0 ? EmptyItems : aLayers[1][GroupPair.m_After];
+				for(const auto &LayerPair : Match(ItemsA, ItemsB, [&](int a, int b) { return Equal(A.m_vLayers[a], B.m_vLayers[b], Check); }, Check))
+				{
+					const auto &LA = LayerPair.m_Before < 0 ? EmptyLayer : A.m_vLayers[LayerPair.m_Before];
+					const auto &LB = LayerPair.m_After < 0 ? EmptyLayer : B.m_vLayers[LayerPair.m_After];
+					CEntry Entry;
+					Entry.m_Kind = EEntryKind::LAYER;
+					Entry.m_Parent = Parent;
+					Entry.m_BeforeGroup = GroupPair.m_Before;
+					Entry.m_AfterGroup = GroupPair.m_After;
+					Entry.m_Before = LayerPair.m_Before;
+					Entry.m_After = LayerPair.m_After;
+					Entry.m_Ambiguous = LayerPair.m_Ambiguous;
+					Entry.m_Reordered = LayerPair.m_Reordered;
+					Entry.m_vProperties = Properties(LA.m_vProperties, LB.m_vProperties, Check);
+					AddName(Entry, LA.m_Name, LB.m_Name);
+					if(LA.m_Width != LB.m_Width)
+						Entry.m_vProperties.push_back({"Width (tiles)", std::to_string(LA.m_Width), std::to_string(LB.m_Width)});
+					if(LA.m_Height != LB.m_Height)
+						Entry.m_vProperties.push_back({"Height (tiles)", std::to_string(LA.m_Height), std::to_string(LB.m_Height)});
+					for(const auto &Issue : LA.m_vIssues)
+						Entry.m_vIssues.push_back("Before: " + Issue);
+					for(const auto &Issue : LB.m_vIssues)
+						Entry.m_vIssues.push_back("After: " + Issue);
+					CompareCells(Entry, LA, LB, Check);
+					CompareObjects(Entry, LA, LB, Check);
+					Result.m_vEntries.push_back(std::move(Entry));
+				}
+			}
+		}
+		catch(const CCancelled &)
+		{
+			Result.m_vEntries.clear();
+			Result.m_Cancelled = true;
+		}
+		return Result;
+	}
+	const char *LayerKindName(ELayerKind Kind)
+	{
+		static const char *s_apNames[] = {"Tiles", "Game", "Front", "Tele", "Speedup", "Switch", "Tune", "Quads", "Sounds", "Unknown"};
+		return s_apNames[(int)Kind];
+	}
+	std::string TileDescription(const CTile &T, ELayerKind Kind)
+	{
+		std::ostringstream Text;
+		Text << "index/type=" << (int)T.m_Index;
+		if(Kind == ELayerKind::TILES || Kind == ELayerKind::GAME || Kind == ELayerKind::FRONT || Kind == ELayerKind::SWITCH)
+			Text << ", flags=" << (int)T.m_Flags;
+		if(Kind == ELayerKind::TELE || Kind == ELayerKind::SWITCH || Kind == ELayerKind::TUNE)
+			Text << ", number=" << (int)T.m_Number;
+		if(Kind == ELayerKind::SWITCH)
+			Text << ", delay=" << (int)T.m_Delay;
+		if(Kind == ELayerKind::SPEEDUP)
+			Text << ", force=" << (int)T.m_Force << ", max speed=" << (int)T.m_MaxSpeed << ", angle=" << T.m_Angle;
+		return Text.str();
+	}
+}

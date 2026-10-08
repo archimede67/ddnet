@@ -9,6 +9,7 @@
 #include "editor_ui.h"
 #include "font_typer.h"
 #include "layer_selector.h"
+#include "map_compare.h"
 #include "map_view.h"
 #include "quad_art.h"
 
@@ -106,6 +107,8 @@ enum
 
 class CEditor : public IEditor
 {
+	friend class CMapCompare;
+	CMapCompare m_MapCompare;
 	class IInput *m_pInput = nullptr;
 	class IClient *m_pClient = nullptr;
 	class IConfigManager *m_pConfigManager = nullptr;
@@ -184,6 +187,7 @@ public:
 	void MapDetails();
 	void TestMapLocally();
 	void GotoPosition();
+	void CompareMaps() { m_MapCompare.OpenSelector(*this); }
 #define REGISTER_QUICK_ACTION(name, text, callback, disabled, active, button_color, description) CQuickAction m_QuickAction##name;
 #include <game/editor/quick_actions.h>
 #undef REGISTER_QUICK_ACTION
@@ -489,6 +493,7 @@ public:
 
 	private:
 		const char m_CloseButtonId = 0;
+		const char m_CompareButtonId = 0;
 		const char m_CopyNameButtonId = 0;
 		const char m_CopyPathButtonId = 0;
 		const char m_ShowFileButtonId = 0;

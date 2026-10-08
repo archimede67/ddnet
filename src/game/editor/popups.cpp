@@ -121,6 +121,13 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuTools(void *pContext, CUIRect Vi
 
 	CUIRect Slot;
 	View.HSplitTop(12.0f, &Slot, &View);
+	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionCompareMaps, "Compare maps", pEditor->m_QuickActionCompareMaps.Disabled() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionCompareMaps.Description()))
+	{
+		pEditor->CompareMaps();
+		return CUi::POPUP_CLOSE_CURRENT;
+	}
+	View.HSplitTop(2.0f, nullptr, &View);
+	View.HSplitTop(12.0f, &Slot, &View);
 	static int s_RemoveUnusedEnvelopesButton = 0;
 	static CUi::SConfirmPopupContext s_ConfirmPopupContext;
 	if(pEditor->DoButton_MenuItem(&s_RemoveUnusedEnvelopesButton, "Remove unused envelopes", 0, &Slot, BUTTONFLAG_LEFT, "Remove all unused envelopes from the map."))
@@ -460,6 +467,15 @@ CUi::EPopupMenuFunctionResult CEditor::CPopupMapTab::Render(void *pContext, CUIR
 	if(pEditor->DoButton_MenuItem(&pPopupMapTab->m_CloseButtonId, "Close", Saving ? -1 : 0, &Slot, BUTTONFLAG_LEFT, "Close this map."))
 	{
 		pEditor->CloseMap(SelectedMapIndex, true);
+		return CUi::POPUP_CLOSE_CURRENT;
+	}
+
+	View.HSplitTop(2.0f, nullptr, &View);
+	View.HSplitTop(12.0f, &Slot, &View);
+	const bool CanCompare = pEditor->Map() != pSelectedMap.get();
+	if(pEditor->DoButton_MenuItem(&pPopupMapTab->m_CompareButtonId, "Compare with active map", CanCompare ? 0 : -1, &Slot, BUTTONFLAG_LEFT, "Before: active map. After: this map. Compare current unsaved contents."))
+	{
+		pEditor->m_MapCompare.Open(*pEditor, pEditor->Map(), pSelectedMap.get());
 		return CUi::POPUP_CLOSE_CURRENT;
 	}
 

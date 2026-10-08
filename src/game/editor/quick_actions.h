@@ -9,6 +9,15 @@
 #define DEFAULT_BTN []() -> int { return -1; }
 
 REGISTER_QUICK_ACTION(
+	CompareMaps,
+	"Compare maps",
+	[&]() { CompareMaps(); },
+	[&]() -> bool { return m_vpMaps.size() < 2; },
+	ALWAYS_FALSE,
+	DEFAULT_BTN,
+	"Inspect current contents of two open maps in a read-only comparison.")
+
+REGISTER_QUICK_ACTION(
 	ShowHelp,
 	"Show help",
 	[&]() { ShowHelp(); },

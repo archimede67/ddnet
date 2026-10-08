@@ -121,6 +121,7 @@ option(INFORM_UPDATE "Inform about available updates" ON)
 option(VIDEORECORDER "Enable video recording support via FFmpeg" ON)
 option(UPNP "Enable UPnP support" OFF)
 option(ANTIBOT "Enable support for a dynamic anticheat library (not provided, see src/antibot for interface if you want to implement your own)" OFF)
+option(MAP_COMPARE_NATIVE_TEST "Build the instrumented native map-comparison test client (requires a graphics session)" OFF)
 option(HEADLESS_CLIENT "Build the client without graphics" OFF)
 option(CLIENT "Compile client" ON)
 option(SERVER "Compile server" ON)
@@ -2831,6 +2832,12 @@ if(CLIENT)
     font_typer.h
     layer_selector.cpp
     layer_selector.h
+    map_compare.cpp
+    map_compare.h
+    map_diff.cpp
+    map_diff.h
+    map_diff_snapshot.cpp
+    map_diff_snapshot.h
     map_grid.cpp
     map_grid.h
     map_object.cpp
@@ -3021,6 +3028,29 @@ if(CLIENT)
       PROPERTY OUTPUT_NAME ${CLIENT_EXECUTABLE}
   )
   target_link_libraries(game-client ${LIBS_CLIENT})
+
+  if(MAP_COMPARE_NATIVE_TEST)
+    if(HEADLESS_CLIENT OR TARGET_OS STREQUAL "android" OR TARGET_OS STREQUAL "ios" OR TARGET_OS STREQUAL "emscripten")
+      message(FATAL_ERROR "MAP_COMPARE_NATIVE_TEST requires a desktop graphics client")
+    endif()
+    # Test access and the replacement factory exist only in this opt-in build.
+    set_source_files_properties(src/game/editor/editor.cpp PROPERTIES COMPILE_DEFINITIONS "CreateEditor=CreateUninstrumentedEditor")
+    target_sources(game-client PRIVATE src/test/native/map_compare.cpp)
+    set_target_properties(game-client PROPERTIES OUTPUT_NAME DDNet-map-compare-test)
+    add_custom_target(run_map_compare_native
+      COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/test/native/run_map_compare.py
+        $<TARGET_FILE:game-client> ${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR}/map-compare-native
+      DEPENDS game-client
+      USES_TERMINAL
+    )
+    enable_testing()
+    add_test(NAME MapCompare.Native
+      COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/test/native/run_map_compare.py
+        $<TARGET_FILE:game-client> ${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR}/map-compare-native
+    )
+    set_tests_properties(MapCompare.Native PROPERTIES TIMEOUT 630 RUN_SERIAL TRUE)
+  endif()
+
 
   if(TARGET_OS STREQUAL "ios")
     set(IOS_INFO_PLIST "${PROJECT_BINARY_DIR}/ios-Info.plist")
@@ -3465,6 +3495,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     json_test.cpp
     jsonwriter_test.cpp
     linereader_test.cpp
+    map_diff_test.cpp
     mapbugs_test.cpp
     mapitems_test.cpp
     math_test.cpp
@@ -3511,6 +3542,8 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     src/engine/client/sqlite.cpp
     src/game/client/components/censor.cpp
     src/game/client/components/censor.h
+    src/game/editor/map_diff.cpp
+    src/game/editor/map_diff.h
     # tidy-alphabetical-end
   )
 
