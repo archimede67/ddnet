@@ -39,6 +39,13 @@ class CMapCompare
 	std::vector<std::future<MapDiff::CResult>> m_vRetiredWork;
 	struct CRenderCache;
 	std::unique_ptr<CRenderCache> m_pRenderCache;
+	struct CObjectViewCache;
+	std::unique_ptr<CObjectViewCache> m_pObjectViewCache;
+	CScrollRegion m_Settings;
+	bool m_ScrollToSetting = false;
+	bool m_FitAfterSettings = false;
+	int m_EnvelopeChannels = 15;
+	char m_aChannelIds[2][4]{};
 	MapDiff::CResult m_Result;
 	std::string m_Message;
 	bool m_ByGroup = false;
@@ -99,6 +106,8 @@ class CMapCompare
 	void RevealLayerSelection();
 	void RenderLayerTree(CEditor &Editor, CUIRect View);
 	void Select(int Entry);
+	void SelectDetail(int Detail);
+	bool MapView() const;
 	void RebuildDetails();
 	bool IsDifference(const CDetail &Detail) const;
 	std::vector<MapDiff::CPropertyChange> DetailValues(const CDetail &Detail) const;
@@ -107,6 +116,8 @@ class CMapCompare
 	void RenderSelector(CEditor &Editor, CUIRect View);
 	void RenderPane(CEditor &Editor, CUIRect Pane, int Side);
 	void RenderInspector(CEditor &Editor, CUIRect View);
+	void RenderSettings(CEditor &Editor, CUIRect View);
+	void RenderEnvelope(CEditor &Editor, CUIRect Pane, int Side);
 
 public:
 	CMapCompare();

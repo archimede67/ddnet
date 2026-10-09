@@ -11,11 +11,13 @@
 #include <engine/textrender.h>
 
 #include <game/client/lineinput.h>
+#include <game/editor/mapitems/envelope.h>
 #include <game/editor/mapitems/image.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <tuple>
 #include <unordered_map>
@@ -299,6 +301,22 @@ struct CMapCompare::CRenderCache
 	}
 };
 
+struct CMapCompare::CObjectViewCache
+{
+	float m_SettingsWidth = -1;
+	std::vector<float> m_vSettingOffsets;
+	std::vector<int> m_vPropertyRows;
+	bool m_EnvelopeReady = false;
+	float m_MinTime = 0, m_MaxTime = 1, m_MinValue = 0, m_MaxValue = 1;
+	struct CEnvelopePlot
+	{
+		std::vector<vec2> m_avCurves[4];
+		std::vector<int> m_vMarkers;
+		std::vector<bool> m_vChanged;
+	};
+	CEnvelopePlot m_aPlots[2];
+};
+
 CMapCompare::CMapCompare() = default;
 
 CMapCompare::~CMapCompare()
@@ -316,6 +334,10 @@ void CMapCompare::CancelWork()
 void CMapCompare::ReleaseBuffers()
 {
 	m_pRenderCache.reset();
+	m_pObjectViewCache.reset();
+	m_Settings.Reset();
+	m_ScrollToSetting = false;
+	m_FitAfterSettings = false;
 	m_pData.reset();
 	m_Result = {};
 	std::vector<CDetail>().swap(m_vDetails);
@@ -380,6 +402,7 @@ void CMapCompare::Open(CEditor &Editor, const CEditorMap *pBefore, const CEditor
 	m_Context = CONTEXT_OFF;
 	m_UnchangedExpanded = false;
 	m_ShowLayers = false;
+	m_LayerTreeActive = true;
 	m_Panning = false;
 	Editor.Ui()->SetActiveItem(nullptr);
 	if(CLineInput::GetActiveInput())
@@ -442,7 +465,7 @@ void CMapCompare::OnInput(CEditor &Editor, const IInput::CEvent &Event)
 				return;
 			}
 			vec2 Mouse(Editor.Ui()->MouseX(), Editor.Ui()->MouseY());
-			if(m_aPanes[0].Inside(Mouse) || m_aPanes[1].Inside(Mouse))
+			if(MapView() && (m_aPanes[0].Inside(Mouse) || m_aPanes[1].Inside(Mouse)))
 			{
 				if(Event.m_Key == KEY_MOUSE_WHEEL_UP)
 					m_Zoom = std::max(MIN_ZOOM, m_Zoom / 1.2f);
@@ -466,6 +489,9 @@ void CMapCompare::Start(CEditor &Editor)
 	if(m_pData)
 		m_pData->m_Cancel = true;
 	m_pRenderCache.reset();
+	m_pObjectViewCache.reset();
+	m_Settings.Reset();
+	m_EnvelopeChannels = 15;
 	m_pData = std::make_shared<CData>();
 	// Capture is a const read on the UI thread; only owned values cross to the
 	// worker. Autosave and source disposal can therefore never race a capture.
@@ -621,6 +647,17 @@ void CMapCompare::RevealLayerSelection()
 }
 void CMapCompare::Select(int Entry)
 {
+	// Leaving the full-height settings view changes the available map height.
+	// Fit once more after layout, using the new map pane dimensions.
+	m_FitAfterSettings = m_SelectedEntry >= 0 && m_Result.m_vEntries[m_SelectedEntry].m_Kind == MapDiff::EEntryKind::SETTINGS && Entry >= 0 &&
+			     (m_Result.m_vEntries[Entry].m_Kind == MapDiff::EEntryKind::LAYER || m_Result.m_vEntries[Entry].m_Kind == MapDiff::EEntryKind::GROUP);
+	if(m_SelectedEntry != Entry)
+	{
+		m_pObjectViewCache.reset();
+		m_Settings.Reset();
+		m_ScrollToSetting = true;
+	}
+	m_Panning = false;
 	m_SelectedEntry = m_FocusEntry = Entry;
 	m_SelectedDetail = -1;
 	m_Details.Reset();
@@ -628,6 +665,23 @@ void CMapCompare::Select(int Entry)
 	m_ValueRowsEntry = m_ValueRowsDetail = -2;
 	RebuildDetails();
 	FitSelection();
+}
+bool CMapCompare::MapView() const
+{
+	return m_SelectedEntry >= 0 && (m_Result.m_vEntries[m_SelectedEntry].m_Kind == MapDiff::EEntryKind::LAYER || m_Result.m_vEntries[m_SelectedEntry].m_Kind == MapDiff::EEntryKind::GROUP);
+}
+void CMapCompare::SelectDetail(int Detail)
+{
+	if(Detail < 0 || Detail >= (int)m_vDetails.size())
+		return;
+	m_SelectedDetail = Detail;
+	m_FocusEntry = m_vDetails[Detail].m_Entry;
+	m_Values.Reset();
+	m_Details.ScrollToSelected();
+	m_Navigator.ScrollToSelected();
+	m_ScrollToSetting = true;
+	FitSelection();
+	RevealLayerSelection();
 }
 void CMapCompare::RebuildDetails()
 {
@@ -704,13 +758,7 @@ void CMapCompare::Navigate(int Direction)
 		for(int Detail = Start; Detail >= 0 && Detail < (int)m_vDetails.size(); Detail += Direction)
 			if(IsDifference(m_vDetails[Detail]))
 			{
-				m_SelectedDetail = Detail;
-				m_FocusEntry = m_vDetails[Detail].m_Entry;
-				m_Details.ScrollToSelected();
-				m_Navigator.ScrollToSelected();
-				m_Values.Reset();
-				FitSelection();
-				RevealLayerSelection();
+				SelectDetail(Detail);
 				return true;
 			}
 		return false;
@@ -902,12 +950,8 @@ void CMapCompare::RenderInspector(CEditor &Editor, CUIRect View)
 		}
 	}
 	int Selected = m_Details.DoEnd();
-	if(Selected != m_SelectedDetail && Selected >= 0)
-	{
-		m_SelectedDetail = Selected;
-		m_FocusEntry = m_vDetails[Selected].m_Entry;
-		m_Values.Reset();
-	}
+	if(Selected >= 0 && (Selected != m_SelectedDetail || m_Details.WasItemSelected()))
+		SelectDetail(Selected);
 	if(m_ValueRowsEntry != m_SelectedEntry || m_ValueRowsDetail != m_SelectedDetail)
 	{
 		m_ValueRowsEntry = m_SelectedEntry;
@@ -982,6 +1026,326 @@ void CMapCompare::RenderInspector(CEditor &Editor, CUIRect View)
 		Editor.TextRender()->TextColor(ColorRGBA(1, 1, 1, 1));
 	}
 	m_Values.End();
+}
+
+void CMapCompare::RenderSettings(CEditor &Editor, CUIRect View)
+{
+	const auto &Entry = m_Result.m_vEntries[m_SelectedEntry];
+	if(!m_pObjectViewCache)
+		m_pObjectViewCache = std::make_unique<CObjectViewCache>();
+	auto &Cache = *m_pObjectViewCache;
+	View.Draw(ColorRGBA(0.08f, 0.09f, 0.11f, 1), IGraphics::CORNER_NONE, 0);
+	CUIRect Notice;
+	View.HSplitTop(20, &Notice, &View);
+	Label(Editor, Notice, Entry.m_SettingsConservative ? "Large unmatched span: aligned by position. Equal prefix/suffix preserved." : "Ordered commands / shared scroll / click a changed row / P and N reveal differences", 10);
+	if(Entry.m_vSettings.empty())
+	{
+		Label(Editor, View, "No server settings on either side.");
+		return;
+	}
+	if(Editor.Ui()->MouseButtonClicked(0) && View.Inside(vec2(Editor.Ui()->MouseX(), Editor.Ui()->MouseY())))
+		m_LayerTreeActive = false;
+	const CUIRect Clip = View;
+	CScrollRegionParams Params;
+	Params.m_ScrollUnit = 45;
+	Params.m_ForceShowScrollbar = true;
+	m_Settings.Begin(&View, &Params);
+	const float ColumnWidth = std::max(1.0f, (View.w - 8) / 2 - 43);
+	const bool Remeasured = Cache.m_SettingsWidth != ColumnWidth;
+	if(Remeasured)
+	{
+		Cache.m_SettingsWidth = ColumnWidth;
+		Cache.m_vSettingOffsets.assign(1, 0);
+		Cache.m_vPropertyRows.assign(Entry.m_vProperties.size(), -1);
+		for(int RowIndex = 0; RowIndex < (int)Entry.m_vSettings.size(); ++RowIndex)
+		{
+			const auto &Row = Entry.m_vSettings[RowIndex];
+			float Height = 15;
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				const int Line = Side == 0 ? Row.m_Before : Row.m_After;
+				if(Line < 0)
+					continue;
+				CTextCursor Cursor;
+				Cursor.m_FontSize = 10;
+				Cursor.m_LineWidth = ColumnWidth;
+				Cursor.m_Flags = 0;
+				Editor.TextRender()->TextEx(&Cursor, m_pData->m_aSnapshots[Side].m_vSettings[Line].c_str());
+				Height = std::max(Height, Cursor.Height() + 8);
+			}
+			Cache.m_vSettingOffsets.push_back(Cache.m_vSettingOffsets.back() + Height);
+			if(Row.m_Property >= 0)
+				Cache.m_vPropertyRows[Row.m_Property] = RowIndex;
+		}
+	}
+	const int Property = m_SelectedDetail >= 0 && m_vDetails[m_SelectedDetail].m_Kind == 0 ? m_vDetails[m_SelectedDetail].m_Index : -1;
+	const int SelectedRow = Property >= 0 ? Cache.m_vPropertyRows[Property] : -1;
+	auto RectForRow = [&](int Index) { return CUIRect{View.x, View.y + Cache.m_vSettingOffsets[Index], View.w, Cache.m_vSettingOffsets[Index + 1] - Cache.m_vSettingOffsets[Index]}; };
+	if(m_ScrollToSetting && SelectedRow >= 0)
+		m_Settings.AddRect(RectForRow(SelectedRow), true);
+	m_ScrollToSetting = false;
+	// Register total height once and binary-search the first visible row.
+	m_Settings.AddRect({View.x, View.y, View.w, Cache.m_vSettingOffsets.back()});
+	const int Start = std::max(0, (int)(std::upper_bound(Cache.m_vSettingOffsets.begin(), Cache.m_vSettingOffsets.end(), Clip.y - View.y) - Cache.m_vSettingOffsets.begin()) - 1);
+	for(int i = Start; i < (int)Entry.m_vSettings.size(); ++i)
+	{
+		CUIRect Row = RectForRow(i);
+		if(Row.y >= Clip.y + Clip.h)
+			break;
+		const auto &Setting = Entry.m_vSettings[i];
+		const bool Changed = Setting.m_Property >= 0;
+		if(i == SelectedRow)
+			Row.Draw(ColorRGBA(1, 1, 1, 0.12f), IGraphics::CORNER_NONE, 0);
+		if(Changed && Editor.Ui()->DoButtonLogic(&Setting, 0, &Row, BUTTONFLAG_LEFT))
+		{
+			m_LayerTreeActive = false;
+			SelectDetail(Setting.m_Property);
+		}
+		CUIRect aSides[2];
+		Row.VSplitMid(&aSides[0], &aSides[1], 8);
+		for(int Side = 0; Side < 2; ++Side)
+		{
+			const int Line = Side == 0 ? Setting.m_Before : Setting.m_After;
+			CUIRect Number, Text;
+			aSides[Side].Margin(4, &Text);
+			Text.VSplitLeft(35, &Number, &Text);
+			Number.h = 12; // Source line numbers align with the first wrapped line.
+			const ColorRGBA Color = Changed ? (Side == 0 ? REMOVE_COLOR : ADD_COLOR) : ColorRGBA(0.76f, 0.78f, 0.8f, 1);
+			Label(Editor, Number, Line < 0 ? "-" : std::to_string(Line + 1), 9, Color);
+			Editor.TextRender()->TextColor(Line < 0 ? ColorRGBA(0.5f, 0.5f, 0.5f, 1) : Color);
+			Editor.TextRender()->Text(Text.x, Text.y, 10, Line < 0 ? "[no line]" : m_pData->m_aSnapshots[Side].m_vSettings[Line].c_str(), ColumnWidth);
+			Editor.TextRender()->TextColor(ColorRGBA(1, 1, 1, 1));
+		}
+	}
+	m_Settings.End();
+	if(Remeasured && !m_Settings.ContentOverflows())
+		m_Settings.Reset();
+	if(!m_LayerTreeActive)
+	{
+		if(Editor.Ui()->ConsumeHotkey(CUi::HOTKEY_DOWN))
+			Navigate(1);
+		else if(Editor.Ui()->ConsumeHotkey(CUi::HOTKEY_UP))
+			Navigate(-1);
+	}
+}
+
+void CMapCompare::RenderEnvelope(CEditor &Editor, CUIRect Pane, int Side)
+{
+	const auto &Entry = m_Result.m_vEntries[m_SelectedEntry];
+	const CEnvelope *apEnvelopes[2]{};
+	for(int S = 0; S < 2; ++S)
+	{
+		const int Index = S == 0 ? Entry.m_Before : Entry.m_After;
+		if(Index >= 0 && Index < (int)m_apSources[S]->m_vpEnvelopes.size())
+			apEnvelopes[S] = m_apSources[S]->m_vpEnvelopes[Index].get();
+	}
+	if(!m_pObjectViewCache)
+		m_pObjectViewCache = std::make_unique<CObjectViewCache>();
+	auto &Cache = *m_pObjectViewCache;
+	if(!Cache.m_EnvelopeReady)
+	{
+		Cache.m_EnvelopeReady = true;
+		Cache.m_MinValue = std::numeric_limits<float>::max();
+		Cache.m_MaxValue = std::numeric_limits<float>::lowest();
+		Cache.m_MaxTime = 0;
+		for(int S = 0; S < 2; ++S)
+		{
+			const auto *pEnv = apEnvelopes[S];
+			if(!pEnv || pEnv->m_vPoints.empty())
+				continue;
+			auto &Plot = Cache.m_aPlots[S];
+			Plot.m_vChanged.assign(pEnv->m_vPoints.size(), Entry.m_Before < 0 || Entry.m_After < 0);
+			for(const auto &Property : Entry.m_vProperties)
+			{
+				int Index;
+				if(std::sscanf(Property.m_Name.c_str(), "Point %d:", &Index) == 1 && Index >= 0 && Index < (int)Plot.m_vChanged.size())
+					Plot.m_vChanged[Index] = true;
+			}
+			for(int i = 0; i < (int)pEnv->m_vPoints.size(); ++i)
+			{
+				const auto &Point = pEnv->m_vPoints[i];
+				Cache.m_MinTime = std::min(Cache.m_MinTime, Point.m_Time.AsSeconds());
+				Cache.m_MaxTime = std::max(Cache.m_MaxTime, Point.m_Time.AsSeconds());
+				for(int c = 0; c < pEnv->GetChannels(); ++c)
+				{
+					auto Include = [&](float Value) {
+						Cache.m_MinValue = std::min(Cache.m_MinValue, Value);
+						Cache.m_MaxValue = std::max(Cache.m_MaxValue, Value);
+					};
+					const float Value = fx2f(Point.m_aValues[c]);
+					Include(Value);
+					if(i + 1 < (int)pEnv->m_vPoints.size() && Point.m_Curvetype == CURVETYPE_BEZIER)
+						Include(Value + fx2f(Point.m_Bezier.m_aOutTangentDeltaY[c]));
+					if(i > 0 && pEnv->m_vPoints[i - 1].m_Curvetype == CURVETYPE_BEZIER)
+						Include(Value + fx2f(Point.m_Bezier.m_aInTangentDeltaY[c]));
+				}
+				if(Plot.m_vChanged[i] && Plot.m_vMarkers.size() < 256)
+					Plot.m_vMarkers.push_back(i);
+			}
+			const int Count = pEnv->m_vPoints.size();
+			for(int i = 0; i < std::min(Count, 256); ++i)
+				Plot.m_vMarkers.push_back(Count <= 256 ? i : (int)((int64_t)i * (Count - 1) / 255));
+			std::sort(Plot.m_vMarkers.begin(), Plot.m_vMarkers.end());
+			Plot.m_vMarkers.erase(std::unique(Plot.m_vMarkers.begin(), Plot.m_vMarkers.end()), Plot.m_vMarkers.end());
+			const float Start = pEnv->m_vPoints.front().m_Time.AsSeconds(), End = pEnv->EndTime();
+			const int Steps = Count > 1 && End > Start ? 1024 : 0;
+			for(int i = 0; i <= Steps; ++i)
+			{
+				const float Time = Steps ? Start + (End - Start) * i / Steps : Start;
+				ColorRGBA Value(0, 0, 0, 0);
+				// Eval wraps at EndTime. The graph ends at the actual final value.
+				if(i == Steps || Time >= End)
+					for(int c = 0; c < pEnv->GetChannels(); ++c)
+						Value[c] = fx2f(pEnv->m_vPoints.back().m_aValues[c]);
+				else
+					pEnv->Eval(std::min(Time, std::nextafter(End, 0.0f)), Value, pEnv->GetChannels());
+				for(int c = 0; c < pEnv->GetChannels(); ++c)
+					if(std::isfinite(Value[c]))
+						Plot.m_avCurves[c].emplace_back(Time, Value[c]);
+			}
+		}
+		if(Cache.m_MinValue > Cache.m_MaxValue)
+		{
+			Cache.m_MinValue = 0;
+			Cache.m_MaxValue = 1;
+		}
+		const float Pad = std::max({0.05f, (Cache.m_MaxValue - Cache.m_MinValue) * 0.08f,
+			std::max(std::abs(Cache.m_MinValue), std::abs(Cache.m_MaxValue)) * std::numeric_limits<float>::epsilon()});
+		Cache.m_MinValue = std::min(Cache.m_MinValue - Pad, std::nextafter(Cache.m_MinValue, -std::numeric_limits<float>::infinity()));
+		Cache.m_MaxValue = std::max(Cache.m_MaxValue + Pad, std::nextafter(Cache.m_MaxValue, std::numeric_limits<float>::infinity()));
+		Cache.m_MaxTime = std::max(Cache.m_MaxTime, Cache.m_MinTime + 0.001f);
+	}
+	Pane.Draw(ColorRGBA(0.08f, 0.09f, 0.11f, 1), IGraphics::CORNER_NONE, 0);
+	Pane.Margin(6, &Pane);
+	CUIRect Title, Legend;
+	Pane.HSplitTop(19, &Title, &Pane);
+	Pane.HSplitTop(19, &Legend, &Pane);
+	const auto *pEnv = apEnvelopes[Side];
+	const char *pType = !pEnv ? "Absent envelope" : pEnv->GetChannels() == 4 ? "Color" :
+						pEnv->GetChannels() == 3         ? "Position" :
+										   "Sound";
+	Label(Editor, Title, std::string(pType) + (pEnv ? " / " + std::to_string(pEnv->m_vPoints.size()) + " points" : "") + (Entry.m_Ambiguous ? " / ambiguous pairing" : ""), 10);
+	const ColorRGBA aColors[] = {ColorRGBA(1, 0.2f, 0.2f, 1), ColorRGBA(0.2f, 1, 0.2f, 1), ColorRGBA(0.2f, 0.2f, 1, 1), ColorRGBA(1, 1, 0.2f, 1)};
+	const char *aNames[] = {"R", "G", "B", "A"};
+	if(pEnv)
+	{
+		if(pEnv->GetChannels() == 3)
+		{
+			aNames[0] = "X";
+			aNames[1] = "Y";
+			aNames[2] = "Rot";
+		}
+		else if(pEnv->GetChannels() == 1)
+			aNames[0] = "Volume";
+		for(int c = 0; c < pEnv->GetChannels(); ++c)
+		{
+			CUIRect Button;
+			Legend.VSplitLeft(std::min(54.0f, Pane.w / pEnv->GetChannels()), &Button, &Legend);
+			Button.VMargin(2, &Button);
+			if(Editor.DoButton_Env(&m_aChannelIds[Side][c], aNames[c], (m_EnvelopeChannels & (1 << c)) != 0, &Button, "Toggle this channel in both plots.", aColors[c], IGraphics::CORNER_ALL))
+				m_EnvelopeChannels ^= 1 << c;
+			Editor.TextRender()->TextColor(ColorRGBA(1, 1, 1, 1));
+		}
+	}
+	CUIRect Footer, Axis;
+	Pane.HSplitBottom(20, &Pane, &Footer);
+	Pane.VSplitLeft(45, &Axis, &Pane);
+	Pane.Margin(4, &Pane);
+	auto Position = [&](vec2 Point) { return vec2(Pane.x + (Point.x - Cache.m_MinTime) / (Cache.m_MaxTime - Cache.m_MinTime) * Pane.w, Pane.y + Pane.h - (Point.y - Cache.m_MinValue) / (Cache.m_MaxValue - Cache.m_MinValue) * Pane.h); };
+	auto *pGraphics = Editor.Graphics();
+	pGraphics->TextureClear();
+	pGraphics->LinesBegin();
+	pGraphics->SetColor(1, 1, 1, 0.15f);
+	for(int Tick = 0; Tick <= 4; ++Tick)
+	{
+		const float Y = Pane.y + Pane.h * Tick / 4;
+		const float X = Pane.x + Pane.w * Tick / 4;
+		const IGraphics::CLineItem aLines[] = {{Pane.x, Y, Pane.x + Pane.w, Y}, {X, Pane.y, X, Pane.y + Pane.h}};
+		pGraphics->LinesDraw(aLines, 2);
+	}
+	pGraphics->LinesEnd();
+	for(int Tick = 0; Tick <= 4; ++Tick)
+	{
+		char aText[48];
+		str_format(aText, sizeof(aText), "%.3g", Cache.m_MaxValue - (Cache.m_MaxValue - Cache.m_MinValue) * Tick / 4);
+		Label(Editor, {Axis.x, Pane.y + Pane.h * Tick / 4 - 5, Axis.w, 10}, aText, 9);
+	}
+	char aTime[96];
+	str_format(aTime, sizeof(aTime), "Sampled preview / %.3g to %.3g s", Cache.m_MinTime, Cache.m_MaxTime);
+	Label(Editor, Footer, aTime, 9);
+	if(!pEnv || pEnv->m_vPoints.empty())
+	{
+		Label(Editor, Pane, pEnv ? "Empty envelope (no points)" : "No envelope on this side.", 11);
+		return;
+	}
+	if(!(m_EnvelopeChannels & ((1 << pEnv->GetChannels()) - 1)))
+	{
+		Label(Editor, Pane, "No channels visible", 10);
+		return;
+	}
+	int SelectedPoint = -1;
+	if(m_SelectedDetail >= 0 && m_vDetails[m_SelectedDetail].m_Kind == 0)
+		std::sscanf(Entry.m_vProperties[m_vDetails[m_SelectedDetail].m_Index].m_Name.c_str(), "Point %d:", &SelectedPoint);
+	const auto &Plot = Cache.m_aPlots[Side];
+	Editor.Ui()->ClipEnable(&Pane);
+	pGraphics->LinesBegin();
+	for(int c = 0; c < pEnv->GetChannels(); ++c)
+	{
+		if(!(m_EnvelopeChannels & (1 << c)))
+			continue;
+		pGraphics->SetColor(aColors[c]);
+		const auto &Curve = Plot.m_avCurves[c];
+		for(size_t i = 1; i < Curve.size(); ++i)
+		{
+			const vec2 A = Position(Curve[i - 1]), B = Position(Curve[i]);
+			const IGraphics::CLineItem Line(A.x, A.y, B.x, B.y);
+			pGraphics->LinesDraw(&Line, 1);
+		}
+	}
+	pGraphics->LinesEnd();
+	int HitPoint = -1;
+	float HitDistance = 5.0f;
+	const vec2 Mouse(Editor.Ui()->MouseX(), Editor.Ui()->MouseY());
+	auto DrawPoint = [&](int Index) {
+		const auto &Point = pEnv->m_vPoints[Index];
+		for(int c = 0; c < pEnv->GetChannels(); ++c)
+		{
+			if(!(m_EnvelopeChannels & (1 << c)))
+				continue;
+			const vec2 P = Position(vec2(Point.m_Time.AsSeconds(), fx2f(Point.m_aValues[c])));
+			const bool Selected = Index == SelectedPoint;
+			const float Size = Selected ? 7 : Plot.m_vChanged[Index] ? 5 :
+										   3;
+			CUIRect Dot{P.x - Size / 2, P.y - Size / 2, Size, Size};
+			Dot.Draw(Selected ? ColorRGBA(1, 1, 1, 1) : Plot.m_vChanged[Index] ? (Side == 0 ? REMOVE_COLOR : ADD_COLOR) :
+											     aColors[c],
+				IGraphics::CORNER_NONE, 0);
+			const float Distance = distance(Mouse, P);
+			if(Plot.m_vChanged[Index] && Editor.Ui()->MouseButtonClicked(0) && Pane.Inside(Mouse) && Distance < HitDistance)
+			{
+				HitPoint = Index;
+				HitDistance = Distance;
+			}
+		}
+	};
+	for(int Index : Plot.m_vMarkers)
+		if(Index != SelectedPoint)
+			DrawPoint(Index);
+	if(SelectedPoint >= 0 && SelectedPoint < (int)pEnv->m_vPoints.size())
+		DrawPoint(SelectedPoint);
+	Editor.Ui()->ClipDisable();
+	if(HitPoint >= 0)
+	{
+		const std::string Prefix = "Point " + std::to_string(HitPoint) + ":";
+		for(int d = 0; d < (int)m_vDetails.size(); ++d)
+			if(m_vDetails[d].m_Kind == 0 && Entry.m_vProperties[m_vDetails[d].m_Index].m_Name.compare(0, Prefix.size(), Prefix) == 0)
+			{
+				SelectDetail(d);
+				m_LayerTreeActive = false;
+				m_Details.SetActive(true);
+				break;
+			}
+	}
 }
 
 void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
@@ -1284,8 +1648,11 @@ void CMapCompare::RenderLayerTree(CEditor &Editor, CUIRect View)
 	}
 	View.Draw(ColorRGBA(0, 0, 0, 0.15f), IGraphics::CORNER_ALL, 5);
 	CScrollRegionParams Params;
-	Params.m_ScrollUnit = 36 * 3;
+	Params.m_ScrollUnit = 12 * 5;
+	Params.m_ScrollbarThickness = 10;
+	Params.m_ScrollbarMargin = 3;
 	m_LayerTree.Begin(&View, &Params);
+	bool HadGroup = false;
 	for(int i = 0; i < (int)m_Result.m_vEntries.size(); ++i)
 	{
 		const auto &Entry = m_Result.m_vEntries[i];
@@ -1294,63 +1661,85 @@ void CMapCompare::RenderLayerTree(CEditor &Editor, CUIRect View)
 			continue;
 		if(Entry.m_Parent >= 0 && !m_vLayerStates[Entry.m_Parent].m_Expanded)
 			continue;
+		if(Group)
+		{
+			if(HadGroup)
+				View.HSplitTop(5, nullptr, &View);
+			HadGroup = true;
+		}
 		auto &State = m_vLayerStates[i];
-		CUIRect Row;
-		View.HSplitTop(36, &Row, &View);
+		CUIRect Row, Space;
+		View.HSplitTop(12, &Row, &View);
+		View.HSplitTop(2, &Space, &View);
+		m_LayerTree.AddRect(Space);
 		const bool Focused = i == m_FocusEntry;
 		if(!m_LayerTree.AddRect(Row, m_ScrollToLayer && Focused))
 			continue;
-		Row.Margin(2, &Row);
-		CUIRect Fold, Eye, Name, Status;
-		Row.VSplitLeft(18, &Fold, &Row);
-		if(Group)
+		if(!Group)
+			Row.VSplitLeft(12, nullptr, &Row);
+		CUIRect Eye, Badge;
+		Row.VSplitLeft(15, &Eye, &Row);
+		const bool ParentHidden = Entry.m_Parent >= 0 && !m_vLayerStates[Entry.m_Parent].m_Visible;
+		const int EyeClick = Editor.DoButton_FontIcon(&State.m_Visible, LayerVisible(i) ? FontIcon::EYE : FontIcon::EYE_SLASH, ParentHidden ? -1 : Group && !State.m_Expanded ? 1 :
+																							0,
+			&Eye, BUTTONFLAG_LEFT | BUTTONFLAG_RIGHT,
+			ParentHidden ? "Hidden by its group. Show the group first; this layer's choice is preserved." : "Left click: toggle comparison visibility. Right click: solo this item; repeat to restore peers.", IGraphics::CORNER_L, 8);
+		if(EyeClick && !ParentHidden)
 		{
-			Fold.HMargin(6, &Fold);
-			if(Editor.DoButton_FontIcon(&State.m_Expanded, State.m_Expanded ? FontIcon::CHEVRON_DOWN : FontIcon::CHEVRON_RIGHT, 0, &Fold, BUTTONFLAG_LEFT, "Expand or collapse the group's layers.", IGraphics::CORNER_ALL, 8))
+			if(EyeClick == 1)
+				State.m_Visible = !State.m_Visible;
+			else
+			{
+				bool HadVisiblePeer = false;
+				for(int Peer = 0; Peer < (int)m_Result.m_vEntries.size(); ++Peer)
+					if(Peer != i && m_Result.m_vEntries[Peer].m_Kind == Entry.m_Kind && m_Result.m_vEntries[Peer].m_Parent == Entry.m_Parent)
+					{
+						HadVisiblePeer |= m_vLayerStates[Peer].m_Visible;
+						m_vLayerStates[Peer].m_Visible = false;
+					}
+				State.m_Visible = true;
+				if(!HadVisiblePeer)
+					for(int Peer = 0; Peer < (int)m_Result.m_vEntries.size(); ++Peer)
+						if(m_Result.m_vEntries[Peer].m_Kind == Entry.m_Kind && m_Result.m_vEntries[Peer].m_Parent == Entry.m_Parent)
+							m_vLayerStates[Peer].m_Visible = true;
+			}
+		}
+		const bool Added = Entry.m_Before < 0, Removed = Entry.m_After < 0, Changed = State.m_Changes > 0;
+		std::string Description = Added ? "Added / After only" : Removed ? "Removed / Before only" :
+								 Changed         ? "Changed / " + std::to_string(State.m_Changes) + " changes" :
+										   "Unchanged";
+		if(Entry.m_Ambiguous)
+			Description += ". Ambiguous pairing; historical identity is unknown";
+		if(!LayerVisible(i))
+			Description += ParentHidden ? ". Group hidden" : ". Hidden";
+		if(Group)
+			Description += State.m_Expanded ? ". Double click to fold" : ". Double click to expand";
+		const auto *pLayer = Group ? nullptr : Layer(m_pData->m_aSnapshots[Added ? 1 : 0], Entry, Added ? 1 : 0);
+		const bool Gameplay = pLayer && pLayer->m_Kind >= MapDiff::ELayerKind::GAME && pLayer->m_Kind <= MapDiff::ELayerKind::TUNE;
+		const std::string Title = (Group ? "#" + std::to_string(Added ? Entry.m_After : Entry.m_Before) + " " : "") + (Entry.m_Name.empty() ? "(unnamed)" : Entry.m_Name);
+		Row.VSplitRight(Entry.m_Ambiguous ? 23 : 13, &Row, &Badge);
+		if(Editor.DoButton_Ex(&Entry, Title.c_str(), (Focused ? 1 : 0) + (Gameplay ? 6 : 0), &Row, BUTTONFLAG_LEFT, Description.c_str(), IGraphics::CORNER_R, 10, TEXTALIGN_ML))
+		{
+			if(m_SelectedEntry != i || m_ByGroup != Group)
+			{
+				m_ByGroup = Group;
+				Select(i);
+				RebuildNavigator(true);
+			}
+			if(Group && Editor.Ui()->DoDoubleClickLogic(&Entry))
 			{
 				State.m_Expanded = !State.m_Expanded;
 				FoldChanged = true;
 			}
 		}
-		else
-			Row.VSplitLeft(10, nullptr, &Row);
-		Row.VSplitRight(22, &Row, &Eye);
-		Eye.HMargin(6, &Eye);
-		const bool ParentHidden = Entry.m_Parent >= 0 && !m_vLayerStates[Entry.m_Parent].m_Visible;
-		if(Editor.DoButton_FontIcon(&State.m_Visible, LayerVisible(i) ? FontIcon::EYE : FontIcon::EYE_SLASH, ParentHidden ? -1 : 0, &Eye, BUTTONFLAG_LEFT,
-			   ParentHidden ? "Hidden by its group. Show the group first; this layer's visibility choice is preserved." : Group ? "Show or hide this group in both panes, preserving each layer's visibility choice." :
-																	      "Show or hide this layer in both comparison panes.",
-			   IGraphics::CORNER_ALL, 8) &&
-			!ParentHidden)
-			State.m_Visible = !State.m_Visible;
-		if(Focused || Editor.Ui()->MouseHovered(&Row))
-			Row.Draw(ColorRGBA(1, 1, 1, Focused ? 0.25f : 0.12f), IGraphics::CORNER_ALL, 3);
-		if(Editor.Ui()->DoButtonLogic(&Entry, 0, &Row, BUTTONFLAG_LEFT))
-		{
-			m_ByGroup = Group;
-			Select(i);
-			RebuildNavigator(true);
-		}
-		const bool Added = Entry.m_Before < 0, Removed = Entry.m_After < 0;
-		const bool Changed = State.m_Changes > 0;
-		ColorRGBA Color = Added ? ADD_COLOR : Removed ? REMOVE_COLOR :
-					      Changed         ? CHANGE_COLOR :
-								ColorRGBA(0.75f, 0.75f, 0.75f, 1);
-		if(!LayerVisible(i))
-			Color.a = 0.5f;
-		Row.VMargin(3, &Row);
-		Row.HSplitTop(16, &Name, &Status);
-		const std::string Title = std::string(Added ? "+ " : Removed ? "- " :
-							     Changed         ? "~ " :
-									       "= ") +
-					  (Entry.m_Name.empty() ? "(unnamed)" : Entry.m_Name) + (Entry.m_Ambiguous ? " [?]" : "");
-		Label(Editor, Name, Title, 10, Color);
-		std::string Description = Added ? "Added / After only" : Removed ? "Removed / Before only" :
-								 Changed         ? "Changed / " + std::to_string(State.m_Changes) + " changes" :
-										   "Unchanged";
-		if(!LayerVisible(i))
-			Description += ParentHidden ? " / group hidden" : " / hidden";
-		Label(Editor, Status, Description, 8, Color);
+		const ColorRGBA Color = Added ? ADD_COLOR : Removed ? REMOVE_COLOR :
+						    Changed         ? CHANGE_COLOR :
+								      ColorRGBA(0.65f, 0.65f, 0.65f, 1);
+		Label(Editor, Badge, std::string(Added ? "+" : Removed ? "-" :
+						       Changed         ? "~" :
+									 "=") +
+					     (Entry.m_Ambiguous ? " ?" : ""),
+			9, Color);
 	}
 	m_LayerTree.End();
 	// The generic region retains its old animation position when content fits.
@@ -1362,6 +1751,7 @@ void CMapCompare::RenderLayerTree(CEditor &Editor, CUIRect View)
 
 void CMapCompare::Render(CEditor &Editor)
 {
+	Editor.m_aTooltip[0] = 0;
 	Editor.Graphics()->Clear(0.08f, 0.08f, 0.1f);
 	Editor.Ui()->MapScreen();
 	CUIRect View = *Editor.Ui()->Screen();
@@ -1449,11 +1839,14 @@ void CMapCompare::Render(CEditor &Editor)
 		m_LayerTreeActive = true;
 	}
 	Summary.VMargin(4, &Summary);
-	Label(Editor, Summary, m_Result.ChangeCount() == 0 ? "No differences in map content. Enable context to inspect matching layers." : std::to_string(m_Result.ChangeCount()) + " changes. - red: Before   + green: After   [?]: ambiguous pairing. Drag a canvas to pan; wheel to zoom.", 11);
-	CUIRect Navigator, Inspector;
+	Label(Editor, Summary, m_Result.ChangeCount() == 0 ? "No differences in map content. Enable context to inspect matching layers." : std::to_string(m_Result.ChangeCount()) + " changes. - red: Before   + green: After   [?]: ambiguous pairing." + (MapView() ? " Drag a canvas to pan; wheel to zoom." : ""), 11);
+	CUIRect Navigator, Inspector{};
 	View.VSplitLeft(std::min(225.0f, View.w * 0.25f), &Navigator, &View);
 	View.VMargin(4, &View);
-	View.HSplitBottom(std::clamp(View.h * 0.36f, 130.0f, 235.0f), &View, &Inspector);
+	const CUIRect ContentView = View;
+	const bool SettingsView = m_SelectedEntry >= 0 && m_Result.m_vEntries[m_SelectedEntry].m_Kind == MapDiff::EEntryKind::SETTINGS;
+	if(!SettingsView)
+		View.HSplitBottom(std::clamp(View.h * 0.36f, 130.0f, 235.0f), &View, &Inspector);
 	CUIRect aColumns[2];
 	View.VSplitMid(&aColumns[0], &aColumns[1], 8);
 	for(int Side = 0; Side < 2; ++Side)
@@ -1465,7 +1858,9 @@ void CMapCompare::Render(CEditor &Editor)
 		Label(Editor, Path, m_apSources[Side]->m_aFilename[0] ? m_apSources[Side]->m_aFilename : "No saved path", 10);
 	}
 	vec2 Mouse(Editor.Ui()->MouseX(), Editor.Ui()->MouseY());
-	if(!m_Panning && (m_aPanes[0].Inside(Mouse) || m_aPanes[1].Inside(Mouse)) && (Editor.Ui()->MouseButtonClicked(0) || Editor.Ui()->MouseButtonClicked(2)))
+	if(!MapView())
+		m_Panning = false;
+	if(MapView() && !m_Panning && (m_aPanes[0].Inside(Mouse) || m_aPanes[1].Inside(Mouse)) && (Editor.Ui()->MouseButtonClicked(0) || Editor.Ui()->MouseButtonClicked(2)))
 	{
 		m_Panning = true;
 		m_LastMouse = Mouse;
@@ -1495,6 +1890,7 @@ void CMapCompare::Render(CEditor &Editor)
 		RenderLayerTree(Editor, Navigator);
 	else
 	{
+		m_Navigator.SetActive(m_LayerTreeActive);
 		int NavSelected = -1;
 		for(int i = 0; i < (int)m_vNavigator.size(); ++i)
 			if(m_SelectedEntry >= 0 && m_vNavigator[i] == m_SelectedEntry)
@@ -1563,7 +1959,43 @@ void CMapCompare::Render(CEditor &Editor)
 		else if(NewSelected >= 0 && NewSelected != NavSelected)
 			Select(m_vNavigator[NewSelected]);
 	}
-	RenderPane(Editor, m_aPanes[0], 0);
-	RenderPane(Editor, m_aPanes[1], 1);
-	RenderInspector(Editor, Inspector);
+	const bool NowSettingsView = m_SelectedEntry >= 0 && m_Result.m_vEntries[m_SelectedEntry].m_Kind == MapDiff::EEntryKind::SETTINGS;
+	if(SettingsView != NowSettingsView)
+	{
+		// A navigator click can change view kind during this frame.
+		View = ContentView;
+		Inspector = {};
+		if(!NowSettingsView)
+			View.HSplitBottom(std::clamp(View.h * 0.36f, 130.0f, 235.0f), &View, &Inspector);
+		for(auto &Pane : m_aPanes)
+			Pane.h = View.h - 46;
+	}
+	if(m_FitAfterSettings)
+	{
+		FitSelection();
+		m_FitAfterSettings = false;
+	}
+	if(NowSettingsView)
+		RenderSettings(Editor, {m_aPanes[0].x, m_aPanes[0].y, m_aPanes[1].x + m_aPanes[1].w - m_aPanes[0].x, m_aPanes[0].h});
+	else
+	{
+		if(m_SelectedEntry >= 0 && m_Result.m_vEntries[m_SelectedEntry].m_Kind == MapDiff::EEntryKind::ENVELOPE)
+		{
+			RenderEnvelope(Editor, m_aPanes[0], 0);
+			RenderEnvelope(Editor, m_aPanes[1], 1);
+		}
+		else
+		{
+			RenderPane(Editor, m_aPanes[0], 0);
+			RenderPane(Editor, m_aPanes[1], 1);
+		}
+		if(Inspector.h > 0)
+			RenderInspector(Editor, Inspector);
+	}
+	if(Editor.m_aTooltip[0])
+	{
+		const CUIRect Tip{12, Editor.Ui()->Screen()->h - 21, Editor.Ui()->Screen()->w - 24, 17};
+		Tip.Draw(ColorRGBA(0.05f, 0.05f, 0.06f, 0.95f), IGraphics::CORNER_ALL, 3);
+		Label(Editor, Tip, Editor.m_aTooltip, 9);
+	}
 }

@@ -9,6 +9,7 @@
 #include <engine/keys.h>
 #include <engine/shared/config.h>
 #include <engine/storage.h>
+#include <engine/textrender.h>
 
 #include <game/editor/editor.h>
 #include <game/editor/map_diff_snapshot.h>
@@ -28,6 +29,7 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <tuple>
 
 // Explicit instantiation permits test-only access without modifying product headers.
@@ -51,6 +53,7 @@ ACCESSOR(TContext, CMapCompare, m_Context, int)
 ACCESSOR(TUnchangedExpanded, CMapCompare, m_UnchangedExpanded, bool)
 ACCESSOR(TShowLayers, CMapCompare, m_ShowLayers, bool)
 ACCESSOR(TLayerTree, CMapCompare, m_LayerTree, CScrollRegion)
+ACCESSOR(TTreeActive, CMapCompare, m_LayerTreeActive, bool)
 ACCESSOR(TNavList, CMapCompare, m_Navigator, CListBox)
 ACCESSOR(TListScroll, CListBox, m_ScrollRegion, CScrollRegion)
 ACCESSOR(TScrollPos, CScrollRegion, m_ScrollPos, float)
@@ -66,6 +69,9 @@ ACCESSOR(TCenter, CMapCompare, m_Center, vec2)
 ACCESSOR(TOrigin, CMapCompare, m_ParallaxOrigin, vec2)
 ACCESSOR(TZoom, CMapCompare, m_Zoom, float)
 ACCESSOR(TValues, CMapCompare, m_Values, CScrollRegion)
+ACCESSOR(TSettings, CMapCompare, m_Settings, CScrollRegion)
+ACCESSOR(TDetails, CMapCompare, m_Details, CListBox)
+ACCESSOR(TEnvelopeChannels, CMapCompare, m_EnvelopeChannels, int)
 ACCESSOR(TContentSize, CScrollRegion, m_ContentSize, float)
 ACCESSOR(TValueRows, CMapCompare, m_vValueRows, std::vector<MapDiff::CPropertyChange>)
 ACCESSOR(TCommandBuffer, CGraphics_Threaded, m_pCommandBuffer, CCommandBuffer *)
@@ -107,6 +113,12 @@ struct TSelect
 	friend Type Access(TSelect);
 };
 template struct CAccess<TSelect, &CMapCompare::Select>;
+struct TSelectDetail
+{
+	using Type = void (CMapCompare::*)(int);
+	friend Type Access(TSelectDetail);
+};
+template struct CAccess<TSelectDetail, &CMapCompare::SelectDetail>;
 int CompareState(CMapCompare &);
 template<auto Member>
 struct CStateAccess
@@ -218,14 +230,22 @@ class CSmokeEditor : public CEditor
 		E.key.state = Down ? SDL_PRESSED : SDL_RELEASED;
 		SDL_PushEvent(&E);
 	}
-	void Click(std::function<vec2()> Pos)
+	void Click(std::function<vec2()> Pos, int Button = SDL_BUTTON_LEFT)
 	{
 		Do([this, Pos] { const auto P=Pos(); Ui()->OnCursorMove((P.x-Ui()->MouseX())*Graphics()->WindowWidth()/Ui()->Screen()->w, (P.y-Ui()->MouseY())*Graphics()->WindowHeight()/Ui()->Screen()->h); });
 		Delay();
-		Do([this] { Mouse(SDL_BUTTON_LEFT, true); });
+		Do([this, Button] { Mouse(Button, true); });
 		Delay();
-		Do([this] { Mouse(SDL_BUTTON_LEFT, false); });
+		Do([this, Button] { Mouse(Button, false); });
 		Delay();
+	}
+	void DoubleClick(std::function<vec2()> Pos)
+	{
+		// Let any earlier click expire, then issue two complete native clicks.
+		Delay(30);
+		Click(Pos);
+		Click(Pos);
+		Delay(30);
 	}
 	void Screenshot(const std::string &Name)
 	{
@@ -590,7 +610,8 @@ class CSmokeEditor : public CEditor
 		Delay(2);
 		Do([this] { Key(SDLK_n,false); const auto &Nav=Compare().*Access(TNavigator{}); Check(std::find(Nav.begin(),Nav.end(),Compare().*Access(TSelectedEntry{}))!=Nav.end(),"Next remains coherent after context change"); SelectKind(MapDiff::EEntryKind::SETTINGS); Graphics()->Resize(800,600,0); OnWindowResize(); });
 		Delay();
-		Do([this] { const float Height=(Compare().*Access(TValues{})).*Access(TContentSize{}); m_Log << "INSPECTOR content_size=" << Height << std::endl; Check(Height>76,"wrapped inspector value expands scroll extent"); Graphics()->Resize(1280,800,0); OnWindowResize(); Compare().Close(); });
+		Screenshot("comparison-settings-wrapped");
+		Do([this] { const float Height=(Compare().*Access(TSettings{})).*Access(TContentSize{}); m_Log << "INSPECTOR content_size=" << Height << std::endl; Check(Height>40,"wrapped settings value expands scroll extent"); Graphics()->Resize(1280,800,0); OnWindowResize(); Compare().Close(); });
 		Delay();
 		Do([this] { Check(!HasSnapshot(Compare()) && Result().m_vEntries.empty(),"closed viewer releases owned snapshots/results");
    m_vPixelLayers[1]->m_pTiles[180+190*256].m_Index=1; str_copy(m_pAfter->m_MapInfo.m_aAuthor,m_pBefore->m_MapInfo.m_aAuthor); m_pAfter->m_vSettings=m_pBefore->m_vSettings;
@@ -773,19 +794,35 @@ class CSmokeEditor : public CEditor
 		Check(false, std::string("find tree entry ") + pName);
 		return 0;
 	}
+	vec2 DetailPosition(int Index)
+	{
+		const auto &Scroll = (Compare().*Access(TDetails{})).*Access(TListScroll{});
+		const auto &Rect = Scroll.*Access(TScrollRect{});
+		return vec2(Rect.x + Rect.w / 2, Rect.y + (Scroll.*Access(TScrollOffset{})) + Index * 19 + 9);
+	}
 	vec2 TreePosition(const char *pName, int Control = 0) // 0: label, 1: eye, 2: fold
 	{
 		const int EntryIndex = FindEntry(pName);
-		int Row = 0;
-		for(int i = 0; i < EntryIndex; ++i)
+		float Offset = 0;
+		bool HadGroup = false;
+		for(int i = 0; i <= EntryIndex; ++i)
 		{
 			const auto &Entry = Result().m_vEntries[i];
 			if((Entry.m_Kind == MapDiff::EEntryKind::GROUP || Entry.m_Kind == MapDiff::EEntryKind::LAYER) && (Entry.m_Parent < 0 || std::get<1>(LayerState(Compare(), Entry.m_Parent))))
-				++Row;
+			{
+				if(Entry.m_Kind == MapDiff::EEntryKind::GROUP)
+				{
+					if(HadGroup)
+						Offset += 5;
+					HadGroup = true;
+				}
+				if(i < EntryIndex)
+					Offset += 14;
+			}
 		}
 		const auto &Scroll = Compare().*Access(TLayerTree{});
 		const auto &Rect = Scroll.*Access(TScrollRect{});
-		const vec2 Point(Control == 1 ? Rect.x + Rect.w - 13 : Rect.x + (Control == 2 ? 11 : 85), Rect.y + (Scroll.*Access(TScrollOffset{})) + Row * 36 + 18);
+		const vec2 Point(Control == 1 ? Rect.x + (Result().m_vEntries[EntryIndex].m_Kind == MapDiff::EEntryKind::GROUP ? 7 : 19) : Rect.x + 85, Rect.y + (Scroll.*Access(TScrollOffset{})) + Offset + 6);
 		Check(Rect.Inside(Point), std::string("tree control visible ") + pName);
 		return Point;
 	}
@@ -941,11 +978,35 @@ class CSmokeEditor : public CEditor
 		Do([this] { Check(!std::get<0>(LayerState(Compare(), FindEntry("Focus"))), "parent-hidden eye does not lose the child choice"); });
 		Click([this] { return TreePosition("Selected", 1); });
 		Do([this] { ContextPoint(10, ColorRGBA(0.06f, 0.0675f, 0.3325f, 1), "showing a group preserves its hidden child"); });
-		Click([this] { return TreePosition("Selected", 2); });
-		Do([this] { Check(!std::get<1>(LayerState(Compare(), FindEntry("Selected"))) && (Compare().*Access(TCenter{})) == m_SavedCenter, "folding group preserves the inspection camera"); });
-		Click([this] { return TreePosition("Selected", 2); });
+		Click([this] { return TreePosition("Selected"); });
+		Click([this] { return DetailPosition(1); });
+		Do([this] { m_SavedEntry = Compare().*Access(TSelectedDetail{}); Check(SelectedDetail(Compare())[0] != FindEntry("Selected"), "fold fixture inspects a child detail"); });
+		Do([this] {
+			m_SavedCenter = Compare().*Access(TCenter{});
+			const auto Pos = (Compare().*Access(TPanes{}))[0].Center();
+			Ui()->OnCursorMove((Pos.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (Pos.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
+			Mouse(SDL_BUTTON_LEFT, true);
+		});
+		Delay();
+		Do([this] { Ui()->OnCursorMove(80, 45); });
+		Delay();
+		Do([this] { Mouse(SDL_BUTTON_LEFT, false); Check(distance(Compare().*Access(TCenter{}), m_SavedCenter) > 1, "fold fixture pans the group camera"); m_SavedCenter = Compare().*Access(TCenter{}); });
+		Delay();
+		DoubleClick([this] { return TreePosition("Selected"); });
+		Do([this] { Check(!std::get<1>(LayerState(Compare(), FindEntry("Selected"))) && (Compare().*Access(TCenter{})) == m_SavedCenter, "folding group preserves the panned inspection camera"); Check((Compare().*Access(TSelectedDetail{})) == m_SavedEntry, "folding group preserves selected child detail"); });
+		DoubleClick([this] { return TreePosition("Selected"); });
 		Click([] { return vec2(190, 582); });
+		Do([this, Camera] { SelectKind(MapDiff::EEntryKind::LAYER, "Focus"); Camera(); });
+		Delay();
 		Do([this] { ContextPixels(true, false); CheckCachedPane(); CheckSources("layer visibility controls"); });
+		Click([this] { return TreePosition("Focus", 1); }, SDL_BUTTON_RIGHT);
+		Do([this] { Check(std::get<0>(LayerState(Compare(), FindEntry("Focus"))) && !std::get<0>(LayerState(Compare(), FindEntry("Sibling"))), "right-eye solos layer peers"); });
+		Click([this] { return TreePosition("Focus", 1); }, SDL_BUTTON_RIGHT);
+		Do([this] { Check(std::get<0>(LayerState(Compare(), FindEntry("Sibling"))), "repeated right-eye restores layer peers"); });
+		Click([this] { return TreePosition("Selected", 1); }, SDL_BUTTON_RIGHT);
+		Do([this] { Check(!std::get<0>(LayerState(Compare(), Result().m_vEntries[FindEntry("Blue")].m_Parent)), "right-eye solos groups"); });
+		Click([this] { return TreePosition("Selected", 1); }, SDL_BUTTON_RIGHT);
+		Do([this] { Check(std::get<0>(LayerState(Compare(), Result().m_vEntries[FindEntry("Blue")].m_Parent)), "repeated right-eye restores groups"); CheckSources("solo controls"); });
 		Click([this] { return TreePosition("Added quads"); });
 		Do([this] { Check((Compare().*Access(TSelectedEntry{})) == FindEntry("Added quads") && !(Compare().*Access(TGroup{})), "tree selects an added layer for inspection"); });
 		Click([this] { return TreePosition("Removed"); });
@@ -1066,6 +1127,18 @@ class CSmokeEditor : public CEditor
 			Do([this, KeyCode] { Key(KeyCode, false); });
 			Delay(2);
 		};
+		Do([this, Find] { (Compare().*Access(TSelect{}))(Find("A")); });
+		Delay();
+		Click([this] { return DetailPosition(1); });
+		Do([this, Target] { Target("A", 1, 1); Compare().*Access(TCenter{}) = vec2(-5000, -5000); });
+		Click([this] { return DetailPosition(1); });
+		Do([Target] { Target("A", 1, 1); });
+		Press(SDLK_UP);
+		Do([Target] { Target("A", 1, 0); });
+		Do([this, Find] { (Compare().*Access(TSelect{}))(Find("Q")); Compare().*Access(TCenter{}) = vec2(-5000, -5000); });
+		Delay();
+		Click([this] { return DetailPosition(0); });
+		Do([Target] { Target("Q", 2, 0); });
 		Do([this, Find] {
 			Check(Result().ChangeCount() == 16, "navigation fixture includes structural and property differences for the added group");
 			Check((Compare().*Access(TChangedNavigator{})).size() == 5, "layer navigator separates group properties and child changes");
@@ -1131,6 +1204,8 @@ class CSmokeEditor : public CEditor
 		Do([this, Find] { Check((Compare().*Access(TSelectedEntry{})) == Find("Added empty"), "Page Down stops at the last real row before a collapsed header"); (Compare().*Access(TSelect{}))(Find("Navigation")); });
 		Click([] { return vec2(167, 16); });
 		Do([this] { Check((Compare().*Access(TChangedNavigator{})).size() == 2, "group navigator aggregates child changes"); });
+		Click([this] { return DetailPosition(2); });
+		Do([this, Target, Find] { Target("A", 1, 1); (Compare().*Access(TSelect{}))(Find("Navigation")); });
 		for(const auto &[pName, Kind, Index] : {std::tuple{"A", 1, 0}, std::tuple{"A", 1, 1}, std::tuple{"C", 1, 0}, std::tuple{"Q", 2, 0}, std::tuple{"Added empty", 4, 0}})
 		{
 			Press(SDLK_n);
@@ -1160,6 +1235,430 @@ class CSmokeEditor : public CEditor
 		Do([this, Find] {
 			Check(SelectedDetail(Compare()) == std::array{Find("A renamed"), 0, 0}, "group navigation selects a child property");
 			Check(distance(Compare().*Access(TCenter{}), vec2(1008, 1024)) < 0.1f, "child property fit excludes other changed layers in the group");
+			Compare().Close();
+		});
+		Delay();
+	}
+	CUIRect EnvelopeGraph(int Side)
+	{
+		CUIRect Graph = (Compare().*Access(TPanes{}))[Side];
+		Graph.Margin(6, &Graph);
+		Graph.HSplitTop(38, nullptr, &Graph);
+		Graph.HSplitBottom(20, &Graph, nullptr);
+		Graph.VSplitLeft(45, nullptr, &Graph);
+		Graph.Margin(4, &Graph);
+		return Graph;
+	}
+	void CheckGraphPixel(int Side, float TimeFraction, float ValueFraction, ColorRGBA Expected, const char *pMessage)
+	{
+		const CUIRect Graph = EnvelopeGraph(Side);
+		const vec2 Pos(Graph.x + Graph.w * TimeFraction, Graph.y + Graph.h * (1 - ValueFraction));
+		CImageInfo Image;
+		static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Image);
+		bool Found = false;
+		if(Image.m_pData)
+		{
+			const int X = Pos.x / Ui()->Screen()->w * Image.m_Width, Y = Pos.y / Ui()->Screen()->h * Image.m_Height;
+			for(int y = Y - 2; y <= Y + 2; ++y)
+				for(int x = X - 2; x <= X + 2; ++x)
+				{
+					const auto C = Image.PixelColor(x, y);
+					Found |= std::abs(C.r - Expected.r) < 0.18f && std::abs(C.g - Expected.g) < 0.18f && std::abs(C.b - Expected.b) < 0.18f;
+				}
+			Image.Free();
+		}
+		Check(Found, std::string(pMessage) + " side " + std::to_string(Side));
+	}
+	void CheckSettingsText()
+	{
+		// Independent expected rows: insertion of an empty After command keeps
+		// the following command aligned while advancing only its After gutter.
+		const char *aaCommands[4][2] = {{"(absent)", "(absent)"}, {"tune setting 1", "tune changed 1"}, {"[no line]", ""}, {"tune setting 2", "tune setting 2"}};
+		const char *aaNumbers[4][2] = {{"1", "1"}, {"2", "2"}, {"-", "3"}, {"3", "4"}};
+		const auto &Scroll = Compare().*Access(TSettings{});
+		const auto Area = Scroll.*Access(TScrollRect{});
+		CImageInfo Actual;
+		static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Actual);
+		Check(Actual.m_pData != nullptr, "settings text framebuffer available");
+		if(!Actual.m_pData)
+			return;
+		Ui()->MapScreen();
+		for(int Row = 0; Row < 4; ++Row)
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				const float Width = (Area.w - 8) / 2;
+				CUIRect Rect{Area.x + Side * (Width + 8), Area.y + Row * 18, Width, 18};
+				const auto Background = Actual.PixelColor((int)((Rect.x + Rect.w - 2) / Ui()->Screen()->w * Actual.m_Width), (int)((Rect.y + 2) / Ui()->Screen()->h * Actual.m_Height));
+				Rect.Draw(Background, IGraphics::CORNER_NONE, 0);
+				CUIRect Number{Rect.x + 4, Rect.y + 4, 35, 12};
+				const auto Color = Row == 1 || Row == 2 ? Side ? ColorRGBA(0.25f, 1, 0.45f, 1) : ColorRGBA(1, 0.3f, 0.3f, 1) : ColorRGBA(0.76f, 0.78f, 0.8f, 1);
+				SLabelProperties Props;
+				Props.SetColor(Color);
+				Props.m_EllipsisAtEnd = true;
+				Ui()->DoLabel(&Number, aaNumbers[Row][Side], 9, TEXTALIGN_ML, Props);
+				TextRender()->TextColor(Row == 2 && Side == 0 ? ColorRGBA(0.5f, 0.5f, 0.5f, 1) : Color);
+				TextRender()->Text(Rect.x + 39, Rect.y + 4, 10, aaCommands[Row][Side], Width - 43);
+				TextRender()->TextColor(ColorRGBA(1, 1, 1, 1));
+			}
+		CImageInfo Expected;
+		static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Expected);
+		for(int Row = 0; Row < 4; ++Row)
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				const float Width = (Area.w - 8) / 2;
+				const float Left = Area.x + Side * (Width + 8), Top = Area.y + Row * 18;
+				int Differences = 0;
+				for(int y = (int)(Top / Ui()->Screen()->h * Actual.m_Height); y < (Top + 18) / Ui()->Screen()->h * Actual.m_Height; ++y)
+					for(int x = (int)(Left / Ui()->Screen()->w * Actual.m_Width); x < (Left + Width) / Ui()->Screen()->w * Actual.m_Width; ++x)
+					{
+						const auto A = Actual.PixelColor(x, y), B = Expected.PixelColor(x, y);
+						Differences += std::abs(A.r - B.r) > 0.02f || std::abs(A.g - B.g) > 0.02f || std::abs(A.b - B.b) > 0.02f;
+					}
+				Check(Differences == 0, "rendered settings command and gutter row " + std::to_string(Row) + " side " + std::to_string(Side) + " mismatched pixels=" + std::to_string(Differences));
+			}
+		Actual.Free();
+		Expected.Free();
+	}
+	void ObjectViewSteps()
+	{
+		Do([this] {
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				auto pMap = std::make_unique<CEditorMap>(this);
+				str_copy(pMap->m_aDisplayName, Side ? "Object After" : "Object Before");
+				pMap->m_aFilename[0] = 0;
+				pMap->m_MapViewState.m_WorldOffset = vec2(0, 0);
+				for(int i = 0; i < 200; ++i)
+					pMap->m_vSettings.emplace_back(("tune setting " + std::to_string(i)).c_str());
+				pMap->m_vSettings[0] = CEditorMapSetting("(absent)");
+				if(Side)
+				{
+					pMap->m_vSettings[1] = CEditorMapSetting("tune changed 1");
+					pMap->m_vSettings[150] = CEditorMapSetting("tune changed 150");
+					pMap->m_vSettings.insert(pMap->m_vSettings.begin() + 2, CEditorMapSetting(""));
+				}
+				for(const auto &[pName, Channels] : {std::pair{"Color", 4}, std::pair{"Position", 3}, std::pair{"Sound", 1}, std::pair{"Empty", 4}, std::pair{"Type", Side ? 1 : 3}})
+				{
+					auto pEnv = std::make_shared<CEnvelope>(Channels);
+					str_copy(pEnv->m_aName, pName);
+					if(str_comp(pName, "Empty") != 0)
+					{
+						pEnv->AddPoint(CFixedTime(0), {0, 1024, 512, 1024});
+						pEnv->AddPoint(CFixedTime(Side ? 1000 : 500), {Side ? 3072 : 2048, 512, 2048, 1024});
+						if(str_comp(pName, "Position") == 0)
+						{
+							pEnv->m_vPoints[0].m_Curvetype = CURVETYPE_BEZIER;
+							pEnv->m_vPoints[0].m_Bezier.m_aOutTangentDeltaX[0] = CFixedTime(100);
+							pEnv->m_vPoints[0].m_Bezier.m_aOutTangentDeltaY[0] = Side ? 4096 : 8192;
+							pEnv->m_vPoints[1].m_Bezier.m_aInTangentDeltaX[0] = CFixedTime(-100);
+						}
+					}
+					else if(Side)
+						pEnv->AddPoint(CFixedTime(0), {1024, 0, 0, 1024});
+					pMap->m_vpEnvelopes.push_back(pEnv);
+				}
+				for(const char *pName : {"Overlap", "Large", "Dense"})
+				{
+					auto pEnv = std::make_shared<CEnvelope>(1);
+					str_copy(pEnv->m_aName, pName);
+					if(str_comp(pName, "Overlap") == 0)
+					{
+						pEnv->AddPoint(CFixedTime(0), {0, 0, 0, 0});
+						pEnv->AddPoint(CFixedTime(500), {Side ? 2048 : 1024, 0, 0, 0});
+						pEnv->AddPoint(CFixedTime(510), {Side ? 2048 : 1024, 0, 0, 0});
+						pEnv->AddPoint(CFixedTime(1000), {3072, 0, 0, 0});
+					}
+					else if(str_comp(pName, "Large") == 0)
+					{
+						pEnv->AddPoint(CFixedTime(0), {std::numeric_limits<int>::max() - Side, 0, 0, 0});
+						pEnv->AddPoint(CFixedTime(1000), {std::numeric_limits<int>::max() - Side, 0, 0, 0});
+					}
+					else
+					{
+						pEnv->m_vPoints.resize(1025);
+						for(int i = 0; i < 1025; ++i)
+						{
+							auto &Point = pEnv->m_vPoints[i];
+							Point.m_Time = CFixedTime(i);
+							Point.m_Curvetype = CURVETYPE_LINEAR;
+							Point.m_aValues[0] = (Side + (i == 777 ? 1 : 0)) * 1024;
+						}
+					}
+					pMap->m_vpEnvelopes.push_back(pEnv);
+				}
+				if(!Side)
+				{
+					auto pEnv = std::make_shared<CEnvelope>(1);
+					str_copy(pEnv->m_aName, "Removed");
+					pMap->m_vpEnvelopes.push_back(pEnv);
+				}
+				auto pGroup = pMap->NewGroup();
+				auto pQuads = std::make_shared<CLayerQuads>(pMap.get());
+				pQuads->NewQuad(64, 64, 32, 1024);
+				pQuads->m_vQuads[0].m_ColorEnv = 0;
+				pGroup->AddLayer(pQuads);
+				(Side ? m_pAfter : m_pBefore) = pMap.get();
+				Maps().push_back(std::move(pMap));
+			}
+			CaptureSources();
+			Compare().*Access(TGroup{}) = false;
+			Compare().Open(*this, m_pBefore, m_pAfter);
+		});
+		WaitReady();
+		Do([this] { SelectKind(MapDiff::EEntryKind::SETTINGS); m_SavedCenter = Compare().*Access(TCenter{}); Graphics()->Resize(800, 600, 0); OnWindowResize(); });
+		Delay();
+		Screenshot("comparison-settings-800");
+		Do([this] { CheckSettingsText(); });
+		Delay();
+		auto Press = [this](SDL_Keycode K) {
+			Do([this, K] { Key(K, true); });
+			Delay(2);
+			Do([this, K] { Key(K, false); });
+			Delay(2);
+		};
+		Press(SDLK_n);
+		Press(SDLK_n);
+		Delay(20);
+		Do([this] {
+			Check(SelectedDetail(Compare()) == std::array{FindEntry("Ordered server settings"), 0, 2}, "settings N selects aligned changed row");
+			Check(((Compare().*Access(TSettings{})).*Access(TScrollPos{})) > 1000, "settings N reveals distant command");
+			Check((Compare().*Access(TCenter{})) == m_SavedCenter, "settings navigation preserves map camera");
+		});
+		Screenshot("comparison-settings-distant");
+		Press(SDLK_p);
+		Delay(20);
+		Do([this] { Check(((Compare().*Access(TSettings{})).*Access(TScrollPos{})) < 100, "settings P reveals inserted empty command"); });
+		Do([this] {
+			const auto P = (Compare().*Access(TPanes{}))[0].Center();
+			Ui()->OnCursorMove((P.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (P.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
+		});
+		Delay();
+		for(int i = 0; i < 3; ++i)
+		{
+			Do([] { SDL_Event E{}; E.type = SDL_MOUSEWHEEL; E.wheel.y = 1; SDL_PushEvent(&E); });
+			Delay(2);
+		}
+		Delay(30);
+		Do([this] { Check(((Compare().*Access(TSettings{})).*Access(TScrollPos{})) == 0, "changed settings click target is visible after scrolling up"); });
+		Click([this] { const auto &Scroll = Compare().*Access(TSettings{}); const auto Rect = Scroll.*Access(TScrollRect{}); return vec2(Rect.x + 100, Rect.y + (Scroll.*Access(TScrollOffset{})) + 27); });
+		Do([this] { Check((Compare().*Access(TCenter{})) == m_SavedCenter, "settings click preserves map camera"); Check(SelectedDetail(Compare()) == std::array{FindEntry("Ordered server settings"), 0, 0}, "settings click selects a different changed command; actual property=" + std::to_string(SelectedDetail(Compare())[2])); });
+		Press(SDLK_n);
+		Do([this] { Check(SelectedDetail(Compare()) == std::array{FindEntry("Ordered server settings"), 0, 1}, "N after settings click selects the inserted empty command"); });
+		Press(SDLK_p);
+		Do([this] { Check(SelectedDetail(Compare()) == std::array{FindEntry("Ordered server settings"), 0, 0}, "P after settings click returns to the replaced command"); });
+		Click([this] {
+			const auto &Navigator = Compare().*Access(TNavigator{});
+			for(int Row = 0; Row < (int)Navigator.size(); ++Row)
+				if(Navigator[Row] >= 0 && Result().m_vEntries[Navigator[Row]].m_Kind == MapDiff::EEntryKind::LAYER)
+					return vec2(100, 53 + Row * 36 + 18);
+			Check(false, "spatial entry available after settings");
+			return vec2(100, 71);
+		});
+		Do([this] {
+			Check(Result().m_vEntries[Compare().*Access(TSelectedEntry{})].m_Kind == MapDiff::EEntryKind::LAYER, "settings click switches back to the map view");
+			Check((Compare().*Access(TZoom{})) * (Compare().*Access(TPanes{}))[0].h >= 1087, "leaving full-height settings fits the actual map pane height");
+			m_SavedCenter = Compare().*Access(TCenter{});
+		});
+		for(const char *pName : {"Color", "Position", "Sound", "Empty", "Type", "Removed"})
+		{
+			Do([this, pName] { SelectKind(MapDiff::EEntryKind::ENVELOPE, pName); });
+			Delay();
+			Screenshot(std::string("comparison-envelope-") + pName);
+			Do([this] { Check((Compare().*Access(TCenter{})) == m_SavedCenter && std::isfinite(Compare().*Access(TZoom{})), "envelope view preserves finite map camera"); });
+		}
+		Do([this] { SelectKind(MapDiff::EEntryKind::ENVELOPE, "Color"); Compare().*Access(TEnvelopeChannels{}) = 1; });
+		Delay();
+		Do([this] {
+			// Shared axes: value range 0..3 with 8% padding. The shorter
+			// Before envelope must end at 0.5s, never repeat into the empty half.
+			CImageInfo Image;
+			static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Image);
+			Check(Image.m_pData != nullptr, "envelope framebuffer available");
+			if(Image.m_pData)
+			{
+				for(int Side = 0; Side < 2; ++Side)
+				{
+					CUIRect Graph = (Compare().*Access(TPanes{}))[Side];
+					Graph.Margin(6, &Graph);
+					Graph.HSplitTop(38, nullptr, &Graph);
+					Graph.HSplitBottom(20, &Graph, nullptr);
+					Graph.VSplitLeft(45, nullptr, &Graph);
+					Graph.Margin(4, &Graph);
+					bool FoundTerminal = false, FoundRepeated = false;
+					const vec2 Terminal(Graph.x + Graph.w * (Side ? 1 : 0.5f), Graph.y + Graph.h - ((Side ? 3 : 2) + 0.24f) / 3.48f * Graph.h);
+					for(int y = (int)Graph.y; y < Graph.y + Graph.h; ++y)
+						for(int x = (int)Graph.x; x < Graph.x + Graph.w; ++x)
+						{
+							const auto C = Image.PixelColor((int)(x / Ui()->Screen()->w * Image.m_Width), (int)(y / Ui()->Screen()->h * Image.m_Height));
+							const bool Strong = C.r > 0.75f && C.g < 0.5f && C.b < 0.5f;
+							FoundRepeated |= !Side && x > Graph.x + Graph.w * 0.6f && Strong;
+							FoundTerminal |= distance(vec2(x, y), Terminal) < 7 && (Strong || C.g > 0.75f);
+						}
+					Check(FoundTerminal, "envelope graph shows exact non-looping terminal value side " + std::to_string(Side));
+					Check(!FoundRepeated, "shorter envelope has no repetition or extrapolation");
+				}
+				Image.Free();
+			}
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				// Linear samples are away from all point markers, including a
+				// near-terminal sample still 11+ pixels from the endpoint.
+				CheckGraphPixel(Side, Side ? 0.37f : 0.185f, ((Side ? 3 : 2) * 0.37f + 0.24f) / 3.48f, ColorRGBA(1, 0.2f, 0.2f, 1), "linear curve interior independently rendered");
+				CheckGraphPixel(Side, Side ? 0.9f : 0.45f, ((Side ? 3 : 2) * 0.9f + 0.24f) / 3.48f, ColorRGBA(1, 0.2f, 0.2f, 1), "linear curve near-terminal interior independently rendered");
+			}
+			Check((Compare().*Access(TValueRows{})).size() >= 3, "envelope inspector includes exact fields and affected layers");
+		});
+		Do([this] { SelectKind(MapDiff::EEntryKind::ENVELOPE, "Position"); });
+		Delay();
+		Do([this] {
+			// Before Bezier controls are 0,8,2,2; symmetric-time midpoint
+			// is 0.25s and the independently computed cubic value is 4.
+			CheckGraphPixel(0, 0.25f, 4.64f / 9.28f, ColorRGBA(1, 0.2f, 0.2f, 1), "Bezier cubic midpoint independently rendered");
+			CheckGraphPixel(1, 0.5f, 3.64f / 9.28f, ColorRGBA(1, 0.2f, 0.2f, 1), "Bezier cubic midpoint independently rendered");
+			// At cubic parameter 0.85, evaluate the time and value control
+			// polygons independently, staying clear of the endpoint markers.
+			CheckGraphPixel(0, 0.44285f, (2.3375f + 0.64f) / 9.28f, ColorRGBA(1, 0.2f, 0.2f, 1), "Bezier near-terminal interior independently rendered");
+			CheckGraphPixel(1, 0.912475f, (3.04725f + 0.64f) / 9.28f, ColorRGBA(1, 0.2f, 0.2f, 1), "Bezier near-terminal interior independently rendered");
+		});
+		for(int Side = 0; Side < 2; ++Side)
+		{
+			Do([this] { SelectKind(MapDiff::EEntryKind::ENVELOPE, "Overlap"); });
+			Delay();
+			Click([this] {
+				const auto &Rows = Compare().*Access(TNavigator{});
+				const auto It = std::find(Rows.begin(), Rows.end(), FindEntry("Overlap"));
+				return vec2(100, 53 + (It - Rows.begin()) * 36 + 18);
+			});
+			for(int Point : {2, 1})
+			{
+				Click([this, Side, Point] {
+					const auto Graph = EnvelopeGraph(Side);
+					return vec2(Graph.x + Graph.w * (Point == 2 ? 0.51f : 0.5f), Graph.y + Graph.h * (1 - ((Side ? 2 : 1) + 0.24f) / 3.48f));
+				});
+				Do([this, Point] {
+					Check(SelectedDetail(Compare()) == std::array{FindEntry("Overlap"), 0, Point - 1}, "nearest overlapping marker selects exactly one point");
+					const auto &Values = Compare().*Access(TValueRows{});
+					Check(!Values.empty() && Values[0].m_Name == "Point " + std::to_string(Point) + ": Channel 0 value (1/1024)" && Values[0].m_Before == "1024" && Values[0].m_After == "2048", "marker click selects exact inspector values");
+				});
+			}
+			Press(SDLK_DOWN);
+			Do([this] { Check(SelectedDetail(Compare()) == std::array{FindEntry("Overlap"), 0, 1}, "arrow after marker click navigates inspector, not navigator"); });
+			Press(SDLK_UP);
+			Do([this] { Check(SelectedDetail(Compare()) == std::array{FindEntry("Overlap"), 0, 0}, "reverse arrow after marker click stays in inspector"); });
+		}
+		Do([this] { SelectKind(MapDiff::EEntryKind::ENVELOPE, "Large"); });
+		Delay();
+		Screenshot("comparison-envelope-large");
+		Do([this] {
+			for(int Side = 0; Side < 2; ++Side)
+				CheckGraphPixel(Side, 0.37f, 0.5f, ColorRGBA(1, 0.2f, 0.2f, 1), "constant large-value envelope has a finite visible curve");
+			const auto &Values = Compare().*Access(TValueRows{});
+			Check(!Values.empty() && Values[0].m_Before == "2147483647" && Values[0].m_After == "2147483646", "large envelope retains exact fixed-point inspector values");
+		});
+		Do([this] { SelectKind(MapDiff::EEntryKind::ENVELOPE, "Dense"); });
+		Delay();
+		Do([this] {
+			// Point 777 is beyond the first 256 changed points and between
+			// overview samples 775 and 779 in this 1,025-point envelope.
+			(Compare().*Access(TSelectDetail{}))(777);
+		});
+		Delay();
+		Screenshot("comparison-envelope-dense");
+		Do([this] {
+			for(int Side = 0; Side < 2; ++Side)
+				CheckGraphPixel(Side, 777.0f / 1024, ((Side ? 2 : 1) + 0.16f) / 2.32f, ColorRGBA(1, 1, 1, 1), "dense selected point outside overview has a white marker");
+			const auto &Values = Compare().*Access(TValueRows{});
+			Check(!Values.empty() && Values[0].m_Name == "Point 777: Channel 0 value (1/1024)" && Values[0].m_Before == "1024" && Values[0].m_After == "2048", "dense selected point has exact inspector fields");
+		});
+		Do([this] { SelectKind(MapDiff::EEntryKind::ENVELOPE, "Color"); });
+		Delay();
+		Do([this] {
+			Compare().*Access(TZoom{}) = 4;
+			const auto P = (Compare().*Access(TPanes{}))[0].Center();
+			Ui()->OnCursorMove((P.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (P.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
+			SDL_Event E{};
+			E.type = SDL_MOUSEWHEEL;
+			E.wheel.y = -1;
+			SDL_PushEvent(&E);
+			Mouse(SDL_BUTTON_LEFT, true);
+		});
+		Delay();
+		Do([this] { Ui()->OnCursorMove(30, 30); });
+		Delay();
+		Do([this] { Mouse(SDL_BUTTON_LEFT, false); Check((Compare().*Access(TZoom{})) == 4 && (Compare().*Access(TCenter{})) == m_SavedCenter, "resource wheel and drag leave map camera unchanged"); });
+		Delay();
+		Click([this] { const auto P = (Compare().*Access(TPanes{}))[0]; return vec2(P.x + 25, P.y + 34); });
+		Do([this] { Check((Compare().*Access(TEnvelopeChannels{})) == 0, "native envelope channel toggle affects paired graphs"); });
+		Screenshot("comparison-envelope-no-channels");
+		Click([] { return vec2(106, 16); });
+		WaitReady();
+		Do([this] { SelectKind(MapDiff::EEntryKind::ENVELOPE, "Removed"); Check((Compare().*Access(TEnvelopeChannels{})) == 15, "Swap resets envelope channel state"); });
+		Delay();
+		Screenshot("comparison-envelope-added");
+		Do([this] { CheckSources("resource views, channel toggles and Swap"); Compare().*Access(TTreeActive{}) = false; Compare().Close(); });
+		Delay();
+		Do([this] { Compare().Open(*this, m_pBefore, m_pAfter); });
+		WaitReady();
+		Press(SDLK_DOWN);
+		Do([this] { Check(Result().m_vEntries[Compare().*Access(TSelectedEntry{})].m_Name == "Color", "reopen initializes navigator keyboard focus"); });
+		Do([this] { SelectKind(MapDiff::EEntryKind::ENVELOPE, "Color"); });
+		Delay();
+		Do([this] { CheckSources("resource view reopening"); Graphics()->Resize(1280, 800, 0); OnWindowResize(); Compare().Close(); });
+		Delay();
+		Do([this] {
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				auto *pMap = Side ? m_pAfter : m_pBefore;
+				pMap->m_vSettings.clear();
+				for(int i = 0; i < 6; ++i)
+				{
+					const std::string Command = "tune " + std::to_string(i) + " " + (Side ? "after " : "before ") + std::string(210, 'W');
+					pMap->m_vSettings.emplace_back(Command.c_str());
+				}
+			}
+			CaptureSources();
+			Graphics()->Resize(800, 600, 0);
+			OnWindowResize();
+			Compare().Open(*this, m_pBefore, m_pAfter);
+		});
+		WaitReady();
+		Do([this] {
+			SelectKind(MapDiff::EEntryKind::SETTINGS);
+			const auto P = (Compare().*Access(TPanes{}))[0].Center();
+			Ui()->OnCursorMove((P.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (P.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
+		});
+		Delay();
+		for(int i = 0; i < 5; ++i)
+		{
+			Do([] { SDL_Event E{}; E.type = SDL_MOUSEWHEEL; E.wheel.y = -1; SDL_PushEvent(&E); });
+			Delay(2);
+		}
+		Delay(30);
+		Do([this] {
+			const auto &Scroll = Compare().*Access(TSettings{});
+			m_Log << "SETTINGS narrow width=" << (Scroll.*Access(TScrollRect{})).w << " content=" << (Scroll.*Access(TContentSize{})) << " viewport=" << (Scroll.*Access(TScrollRect{})).h << " scroll=" << (Scroll.*Access(TScrollPos{})) << std::endl;
+			Check(Scroll.ContentOverflows() && (Scroll.*Access(TScrollPos{})) > 50, "wrapped settings overflow and scroll at narrow width");
+			m_SavedEntry = Compare().*Access(TSelectedDetail{});
+			Graphics()->Resize(1600, 600, 0);
+			OnWindowResize();
+		});
+		Delay(30);
+		Do([this] {
+			const auto &Scroll = Compare().*Access(TSettings{});
+			m_Log << "SETTINGS wide width=" << (Scroll.*Access(TScrollRect{})).w << " content=" << (Scroll.*Access(TContentSize{})) << " viewport=" << (Scroll.*Access(TScrollRect{})).h << " scroll=" << (Scroll.*Access(TScrollPos{})) << std::endl;
+			Check(!Scroll.ContentOverflows() && (Scroll.*Access(TScrollPos{})) == 0, "settings resize-to-fit clears stored scrolling");
+			Check((Compare().*Access(TSelectedDetail{})) == m_SavedEntry, "settings resize-to-fit preserves selection");
+			Graphics()->Resize(800, 600, 0);
+			OnWindowResize();
+		});
+		Delay(30);
+		Do([this] {
+			const auto &Scroll = Compare().*Access(TSettings{});
+			Check(Scroll.ContentOverflows() && (Scroll.*Access(TScrollPos{})) == 0, "settings resize-back cannot resurrect old scrolling");
+			Check((Compare().*Access(TSelectedDetail{})) == m_SavedEntry, "settings resize-back preserves selection");
+			CheckSources("settings width transitions");
+			Graphics()->Resize(1280, 800, 0);
+			OnWindowResize();
 			Compare().Close();
 		});
 		Delay();
@@ -1236,7 +1735,7 @@ class CSmokeEditor : public CEditor
 		Click([] { return vec2(55, 41); });
 		Do([this] { Check(std::abs((((Compare().*Access(TNavList{})).*Access(TListScroll{})).*Access(TScrollPos{})) - m_SavedScroll) < 0.1f, "sidebar views retain independent scroll positions"); });
 		Click([] { return vec2(170, 41); });
-		Click([this] { return TreePosition("Scroll", 2); });
+		DoubleClick([this] { return TreePosition("Scroll"); });
 		Click([this] { return TreePosition("Scroll"); });
 		Do([this] { Key(SDLK_n, true); });
 		Delay(2);
@@ -1286,10 +1785,10 @@ class CSmokeEditor : public CEditor
 		Do([this] { Check((((Compare().*Access(TNavList{})).*Access(TListScroll{})).*Access(TScrollPos{})) == 0, "section expansion cannot resurrect old scroll position"); });
 		Click([] { return vec2(170, 41); });
 		ScrollOnce();
-		Do([this] { Check(((Compare().*Access(TLayerTree{})).*Access(TScrollPos{})) > 50, "layer tree scrolls before collapse-to-fit"); });
-		Click([this] { return TreePosition("Scroll", 2); });
+		Do([this] { Check(((Compare().*Access(TLayerTree{})).*Access(TScrollPos{})) > 20, "layer tree scrolls before collapse-to-fit"); });
+		DoubleClick([this] { return TreePosition("Scroll"); });
 		Do([this] { Check(((Compare().*Access(TLayerTree{})).*Access(TScrollPos{})) == 0, "tree collapse clamps stored scrolling when content fits"); });
-		Click([this] { return TreePosition("Scroll", 2); });
+		DoubleClick([this] { return TreePosition("Scroll"); });
 		Do([this] { Check(((Compare().*Access(TLayerTree{})).*Access(TScrollPos{})) == 0, "tree expansion cannot resurrect old scroll position"); });
 		Click([this] { return TreePosition("Small"); });
 		auto Press = [this](SDL_Keycode K) {
@@ -1491,6 +1990,7 @@ class CSmokeEditor : public CEditor
 		FullContextSteps();
 		NavigationSteps();
 		SectionScrollSteps();
+		ObjectViewSteps();
 		PerformanceSteps(false);
 		const char *apNames[] = {"coverage", "Tutorial", "Tsunami", "Sunny Side Up"};
 		for(int Fixture = 0; Fixture < 4; ++Fixture)

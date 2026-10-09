@@ -216,6 +216,71 @@ TEST(MapDiff, MetadataAndDuplicateOrderedCommands)
 	EXPECT_EQ(MapDiff::Compare(Before, After).m_vEntries[1].m_vProperties.size(), 1u);
 }
 
+TEST(MapDiff, SettingsAlignmentPreservesLinesAndAbsence)
+{
+	auto Before = Map();
+	Before.m_vSettings = {"prefix", "repeat", "", "repeat", "(absent)", "suffix"};
+	auto After = Before;
+	After.m_vSettings.insert(After.m_vSettings.begin() + 1, "inserted");
+	After.m_vSettings[3] = "replacement";
+	After.m_vSettings.erase(After.m_vSettings.begin() + 5);
+	const auto Result = MapDiff::Compare(Before, After);
+	const auto &Entry = Result.m_vEntries[1];
+	ASSERT_EQ(Entry.m_vSettings.size(), 7u);
+	EXPECT_EQ(Entry.m_vProperties.size(), 3u);
+	EXPECT_FALSE(Entry.m_SettingsConservative);
+	const int aBefore[] = {0, -1, 1, 2, 3, 4, 5};
+	const int aAfter[] = {0, 1, 2, 3, 4, -1, 5};
+	for(int i = 0; i < 7; ++i)
+	{
+		EXPECT_EQ(Entry.m_vSettings[i].m_Before, aBefore[i]);
+		EXPECT_EQ(Entry.m_vSettings[i].m_After, aAfter[i]);
+		EXPECT_EQ(Entry.m_vSettings[i].m_Property >= 0, i == 1 || i == 3 || i == 5);
+	}
+	const auto Reverse = MapDiff::Compare(After, Before);
+	EXPECT_EQ(Reverse.m_vEntries[1].m_vProperties.size(), 3u);
+	Before.m_vSettings = {"", "(absent)"};
+	After.m_vSettings.clear();
+	const auto Removed = MapDiff::Compare(Before, After);
+	ASSERT_EQ(Removed.m_vEntries[1].m_vSettings.size(), 2u);
+	EXPECT_EQ(Removed.m_vEntries[1].m_vSettings[0].m_Before, 0);
+	EXPECT_EQ(Removed.m_vEntries[1].m_vSettings[1].m_After, -1);
+	EXPECT_EQ(Removed.m_vEntries[1].m_vProperties[0].m_Before, "");
+}
+
+TEST(MapDiff, SettingsAlignmentBudgetAndCancellation)
+{
+	auto Before = Map(), After = Map();
+	Before.m_vSettings.assign(4000, "before");
+	After.m_vSettings.assign(4000, "after");
+	Before.m_vSettings.front() = After.m_vSettings.front() = "prefix";
+	Before.m_vSettings.back() = After.m_vSettings.back() = "suffix";
+	const auto Result = MapDiff::Compare(Before, After);
+	const auto &Entry = Result.m_vEntries[1];
+	EXPECT_TRUE(Entry.m_SettingsConservative);
+	EXPECT_EQ(Entry.m_vSettings.size(), 4000u);
+	EXPECT_EQ(Entry.m_vProperties.size(), 3998u);
+	EXPECT_EQ(Entry.m_vSettings.front().m_Property, -1);
+	EXPECT_EQ(Entry.m_vSettings.back().m_Property, -1);
+	int Calls = 0;
+	const auto Cancelled = MapDiff::Compare(Before, After, [&] { return ++Calls == 3; });
+	EXPECT_TRUE(Cancelled.m_Cancelled);
+	EXPECT_TRUE(Cancelled.m_vEntries.empty());
+	Before.m_vSettings.resize(900);
+	After.m_vSettings.resize(900);
+	Calls = 0;
+	const auto CancelledLcs = MapDiff::Compare(Before, After, [&] { return ++Calls == 10; });
+	EXPECT_TRUE(CancelledLcs.m_Cancelled);
+	EXPECT_TRUE(CancelledLcs.m_vEntries.empty());
+	Before.m_vSettings.assign(50000, "context");
+	After = Before;
+	After.m_vSettings.insert(After.m_vSettings.begin() + 25000, "inserted");
+	const auto Large = MapDiff::Compare(Before, After);
+	EXPECT_EQ(Large.m_vEntries[1].m_vSettings.size(), 50001u);
+	EXPECT_EQ(Large.m_vEntries[1].m_vProperties.size(), 1u);
+	EXPECT_EQ(Large.m_vEntries[1].m_vSettings[25000].m_Before, -1);
+}
+
 TEST(MapDiff, GroupAdditionRemovalPropertiesAndOrder)
 {
 	auto Before = Map();

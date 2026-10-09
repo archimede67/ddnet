@@ -36,6 +36,73 @@ namespace MapDiff
 					Now();
 			}
 		};
+		void AlignSettings(CEntry &Entry, const std::vector<std::string> &Before, const std::vector<std::string> &After, CCheck &Check)
+		{
+			auto Row = [&](int A, int B) {
+				Check.Tick();
+				CSettingRow Row{A, B, -1};
+				if(A < 0 || B < 0 || Before[A] != After[B])
+				{
+					Row.m_Property = Entry.m_vProperties.size();
+					Entry.m_vProperties.push_back({"Command " + (A < 0 ? std::string("-") : std::to_string(A + 1)) + " / " + (B < 0 ? std::string("-") : std::to_string(B + 1)), A < 0 ? "(absent)" : Before[A], B < 0 ? "(absent)" : After[B]});
+				}
+				Entry.m_vSettings.push_back(Row);
+			};
+			size_t Prefix = 0, EndA = Before.size(), EndB = After.size();
+			while(Prefix < EndA && Prefix < EndB && Before[Prefix] == After[Prefix])
+			{
+				Row(Prefix, Prefix);
+				++Prefix;
+			}
+			while(EndA > Prefix && EndB > Prefix && Before[EndA - 1] == After[EndB - 1])
+			{
+				Check.Tick();
+				--EndA;
+				--EndB;
+			}
+			auto Span = [&](size_t A, size_t LimitA, size_t B, size_t LimitB) {
+				while(A < LimitA || B < LimitB)
+					Row(A < LimitA ? (int)A++ : -1, B < LimitB ? (int)B++ : -1);
+			};
+			const size_t N = EndA - Prefix, M = EndB - Prefix;
+			// At most 1M cells (4 MiB) and comparisons, regardless of source length.
+			constexpr size_t MaxCells = 1024 * 1024;
+			if(N && M && N + 1 <= MaxCells / (M + 1))
+			{
+				std::vector<unsigned> vLcs((N + 1) * (M + 1));
+				auto Cell = [&](size_t A, size_t B) -> unsigned & { return vLcs[A * (M + 1) + B]; };
+				for(size_t A = N; A-- > 0;)
+					for(size_t B = M; B-- > 0;)
+					{
+						Check.Tick();
+						Cell(A, B) = Before[Prefix + A] == After[Prefix + B] ? 1 + Cell(A + 1, B + 1) : std::max(Cell(A + 1, B), Cell(A, B + 1));
+					}
+				size_t A = 0, B = 0, StartA = 0, StartB = 0;
+				while(A < N && B < M)
+				{
+					Check.Tick();
+					if(Before[Prefix + A] == After[Prefix + B])
+					{
+						Span(Prefix + StartA, Prefix + A, Prefix + StartB, Prefix + B);
+						Row(Prefix + A++, Prefix + B++);
+						StartA = A;
+						StartB = B;
+					}
+					else if(Cell(A + 1, B) >= Cell(A, B + 1))
+						++A;
+					else
+						++B;
+				}
+				Span(Prefix + StartA, EndA, Prefix + StartB, EndB);
+			}
+			else
+			{
+				Entry.m_SettingsConservative = N && M;
+				Span(Prefix, EndA, Prefix, EndB);
+			}
+			while(EndA < Before.size())
+				Row(EndA++, EndB++);
+		}
 		class CFingerprint
 		{
 			CCheck &m_Check;
@@ -503,15 +570,7 @@ namespace MapDiff
 			Settings.m_Kind = EEntryKind::SETTINGS;
 			Settings.m_Name = "Ordered server settings";
 			Settings.m_Before = Settings.m_After = 0;
-			// Settings are an ordered program: retain every duplicate and position.
-			for(size_t i = 0; i < std::max(Before.m_vSettings.size(), After.m_vSettings.size()); ++i)
-			{
-				Check.Tick();
-				std::string A = i < Before.m_vSettings.size() ? Before.m_vSettings[i] : "(absent)";
-				std::string B = i < After.m_vSettings.size() ? After.m_vSettings[i] : "(absent)";
-				if(i >= Before.m_vSettings.size() || i >= After.m_vSettings.size() || A != B)
-					Settings.m_vProperties.push_back({"Command " + std::to_string(i + 1), A, B});
-			}
+			AlignSettings(Settings, Before.m_vSettings, After.m_vSettings, Check);
 			Result.m_vEntries.push_back(std::move(Settings));
 			CompareResources(Result, Before.m_vImages, After.m_vImages, EEntryKind::IMAGE, Check);
 			CompareResources(Result, Before.m_vSounds, After.m_vSounds, EEntryKind::SOUND, Check);

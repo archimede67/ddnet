@@ -128,6 +128,13 @@ namespace MapDiff
 		bool m_Ambiguous = false;
 		bool m_Reordered = false;
 	};
+	struct CSettingRow
+	{
+		// Zero-based source lines; -1 denotes an absent side, never command text.
+		int m_Before = -1;
+		int m_After = -1;
+		int m_Property = -1; // Changed rows refer to their exact property detail.
+	};
 	enum class EEntryKind
 	{
 		INFO,
@@ -150,6 +157,8 @@ namespace MapDiff
 		bool m_Ambiguous = false;
 		bool m_Reordered = false;
 		std::vector<CPropertyChange> m_vProperties;
+		std::vector<CSettingRow> m_vSettings;
+		bool m_SettingsConservative = false;
 		std::vector<CTileChange> m_vTiles;
 		std::vector<CObjectChange> m_vObjects;
 		std::vector<std::string> m_vIssues;
