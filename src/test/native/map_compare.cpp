@@ -59,6 +59,7 @@ ACCESSOR(TValues, CMapCompare, m_Values, CScrollRegion)
 ACCESSOR(TContentSize, CScrollRegion, m_ContentSize, float)
 ACCESSOR(TValueRows, CMapCompare, m_vValueRows, std::vector<MapDiff::CPropertyChange>)
 ACCESSOR(TCommandBuffer, CGraphics_Threaded, m_pCommandBuffer, CCommandBuffer *)
+ACCESSOR(TTileBuffering, CGraphics_Threaded, m_GLTileBufferingEnabled, bool)
 using TPaneArray = CUIRect[2];
 ACCESSOR(TPanes, CMapCompare, m_aPanes, TPaneArray)
 struct TFit
@@ -80,6 +81,13 @@ struct CDataAccess
 	friend bool HasSnapshot(CMapCompare &Obj) { return static_cast<bool>(Obj.*Member); }
 };
 template struct CDataAccess<&CMapCompare::m_pData>;
+bool HasRenderCache(CMapCompare &);
+template<auto Member>
+struct CRenderCacheAccess
+{
+	friend bool HasRenderCache(CMapCompare &Obj) { return static_cast<bool>(Obj.*Member); }
+};
+template struct CRenderCacheAccess<&CMapCompare::m_pRenderCache>;
 
 using TSourceArray = const CEditorMap *[2];
 ACCESSOR(TSources, CMapCompare, m_apSources, TSourceArray)
@@ -590,6 +598,241 @@ class CSmokeEditor : public CEditor
 		(Compare().*Access(TRenderPane{}))(*this, (Compare().*Access(TPanes{}))[0], 0);
 		Check(pBuffer == pGraphics->*Access(TCommandBuffer{}) && pBuffer->m_RenderCallCount - Calls < 20, "visible changed tile markers share bounded render batches");
 	}
+	void CheckCachedPane()
+	{
+		auto *pGraphics = static_cast<CGraphics_Threaded *>(Graphics());
+		CImageInfo Image;
+		pGraphics->ReadFramebuffer(Image);
+		Image.Free();
+		auto *pBuffer = pGraphics->*Access(TCommandBuffer{});
+		(Compare().*Access(TRenderPane{}))(*this, (Compare().*Access(TPanes{}))[0], 0);
+		int Uploads = 0, TileDraws = 0;
+		for(const auto *pCommand = pBuffer->Head(); pCommand; pCommand = pCommand->m_pNext)
+		{
+			Uploads += pCommand->m_Cmd == CCommandBuffer::CMD_CREATE_BUFFER_OBJECT || pCommand->m_Cmd == CCommandBuffer::CMD_RECREATE_BUFFER_OBJECT;
+			TileDraws += pCommand->m_Cmd == CCommandBuffer::CMD_RENDER_TILE_LAYER;
+			if(pCommand->m_Cmd == CCommandBuffer::CMD_RENDER_TILE_LAYER)
+				Check(static_cast<const CCommandBuffer::SCommand_RenderTileLayer *>(pCommand)->m_State.m_Texture >= 0, "packed tile buffer uses a textured pipeline");
+		}
+		Check(pBuffer == pGraphics->*Access(TCommandBuffer{}) && Uploads == 0 && TileDraws >= 3, "full-map steady frame reuses GPU tiles without uploads");
+	}
+	void ContextPixels(bool Context, bool Group)
+	{
+		CImageInfo Image;
+		static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Image);
+		Check(Image.m_pData != nullptr, "full-map context framebuffer available");
+		if(!Image.m_pData)
+			return;
+		auto Over = [](ColorRGBA Base, ColorRGBA Color, float Alpha) { return ColorRGBA(mix(Base.r, Color.r, Alpha), mix(Base.g, Color.g, Alpha), mix(Base.b, Color.b, Alpha), 1); };
+		const ColorRGBA Background(0.08f, 0.09f, 0.11f, 1);
+		for(int Side = 0; Side < 2; ++Side)
+		{
+			const auto Pane = (Compare().*Access(TPanes{}))[Side];
+			auto Sample = [&](int X, ColorRGBA Expected, const char *pWhat) {
+				const vec2 World(X * 32 + 16, 10 * 32 + 16);
+				const vec2 Point = Pane.Center() + (World - (Compare().*Access(TCenter{}))) / (Compare().*Access(TZoom{}));
+				Check(Pane.Inside(Point), std::string(pWhat) + " inside pane");
+				const auto Actual = Image.PixelColor((int)(Point.x / Ui()->Screen()->w * Image.m_Width), (int)(Point.y / Ui()->Screen()->h * Image.m_Height));
+				Check(std::abs(Actual.r - Expected.r) < 0.012f && std::abs(Actual.g - Expected.g) < 0.012f && std::abs(Actual.b - Expected.b) < 0.012f, std::string(pWhat) + " side " + std::to_string(Side));
+			};
+			Sample(8, Context ? Over(Over(Background, ColorRGBA(1, 0, 0, 1), 0.25f), ColorRGBA(0, 0, 1, 1), 0.25f) : Background, "cross-group context preserves source order");
+			Sample(9, Context ? Over(Background, ColorRGBA(0, 0, 1, 1), 0.25f) : Background, "unselected changes remain neutral context");
+			Sample(10, Context ? Over(Over(Background, ColorRGBA(0, 0, 1, 1), 0.25f), ColorRGBA(1, 1, 1, 1), 0.65f) : Background, "selected layer context stays prominent above scenery");
+			Sample(11, Context ? Over(Background, ColorRGBA(1, 1, 1, 1), Group ? 0.65f : 0.25f) : Background, "sibling layer follows layer or group focus");
+			Sample(12, Side ? ColorRGBA(0.25f, 1, 0.45f, 1) : ColorRGBA(1, 0.3f, 0.3f, 1), "selected change remains visible");
+			Sample(14, Context ? Over(Background, ColorRGBA(0, 1, 0, 1), 0.25f) : Background, "background group offset and clipping");
+			Sample(15, Background, "clipped background tile remains hidden");
+			Sample(16, Context ? Over(Background, ColorRGBA(0, 1, 1, 1), 0.25f) : Background, "untextured context uses the matching vertex layout");
+		}
+		Image.Free();
+	}
+	void CheckContextBufferPixels()
+	{
+		auto *pGraphics = static_cast<CGraphics_Threaded *>(Graphics());
+		CImageInfo Buffered, Immediate;
+		pGraphics->ReadFramebuffer(Buffered);
+		pGraphics->*Access(TTileBuffering{}) = false;
+		for(int Side = 0; Side < 2; ++Side)
+			(Compare().*Access(TRenderPane{}))(*this, (Compare().*Access(TPanes{}))[Side], Side);
+		pGraphics->ReadFramebuffer(Immediate);
+		pGraphics->*Access(TTileBuffering{}) = true;
+		Check(Buffered.m_pData && Immediate.m_pData, "buffer comparison framebuffer available");
+		if(Buffered.m_pData && Immediate.m_pData)
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				const auto Pane = (Compare().*Access(TPanes{}))[Side];
+				bool Equal = true;
+				for(int Y = (int)Pane.y + 2; Y < Pane.y + Pane.h - 2; Y += 3)
+					for(int X = (int)Pane.x + 2; X < Pane.x + Pane.w - 2; X += 3)
+					{
+						const int PX = (int)(X / Ui()->Screen()->w * Buffered.m_Width), PY = (int)(Y / Ui()->Screen()->h * Buffered.m_Height);
+						const auto A = Buffered.PixelColor(PX, PY), B = Immediate.PixelColor(PX, PY);
+						Equal &= std::abs(A.r - B.r) < 0.012f && std::abs(A.g - B.g) < 0.012f && std::abs(A.b - B.b) < 0.012f;
+					}
+				Check(Equal, "cached and immediate context match after navigation side " + std::to_string(Side));
+			}
+		Buffered.Free();
+		Immediate.Free();
+	}
+	void CheckParallaxContext()
+	{
+		CImageInfo Image;
+		static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Image);
+		Check(Image.m_pData != nullptr, "parallax framebuffer available");
+		if(!Image.m_pData)
+			return;
+		for(int Side = 0; Side < 2; ++Side)
+			for(int Probe = 0; Probe < 2; ++Probe)
+			{
+				// The source quad is at (12.5, 14.5) tiles. Before has 0%
+				// parallax, After 50%; the reference position is (128, 64).
+				const vec2 World(12 * 32 + 16 - Probe * 64, 14 * 32 + 16);
+				const auto Pane = (Compare().*Access(TPanes{}))[Side];
+				const vec2 Point = Pane.Center() + (World - (Compare().*Access(TCenter{}))) / (Compare().*Access(TZoom{}));
+				Check(Pane.Inside(Point), "parallax probe inside pane");
+				const auto Color = Image.PixelColor((int)(Point.x / Ui()->Screen()->w * Image.m_Width), (int)(Point.y / Ui()->Screen()->h * Image.m_Height));
+				Check(std::abs(Color.r - (Side == Probe ? 0.31f : 0.08f)) < 0.012f && std::abs(Color.g - (Side == Probe ? 0.3175f : 0.09f)) < 0.012f, "background parallax follows source with shared pan/zoom");
+			}
+		Image.Free();
+	}
+	void FullContextSteps()
+	{
+		Do([this] {
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				auto pMap = std::make_unique<CEditorMap>(this);
+				pMap->CreateDefault();
+				pMap->m_vpGroups.clear();
+				pMap->m_pGameGroup = nullptr;
+				pMap->m_MapViewState.m_WorldOffset = vec2(0, 0);
+				auto pImage = WhiteImage(*pMap, "context", false);
+				for(int Y = 0; Y < 16; ++Y)
+					for(int X = 0; X < 16; ++X)
+					{
+						pImage->SetPixelColor(48 + X, Y, ColorRGBA(X < 8 ? 1 : 0, Y < 8 ? 1 : 0, X >= 8 && Y >= 8 ? 1 : 0, 1));
+						pImage->SetPixelColor(64 + X, Y, ColorRGBA(0.3f, X < 8 ? 1 : 0, Y < 8 ? 1 : 0, 1));
+					}
+				pImage->m_Texture = Graphics()->LoadTextureRaw(*pImage, Graphics()->TextureLoadFlags(), "context");
+				auto Add = [&](const std::shared_ptr<CLayerGroup> &pGroup, const char *pName, ColorRGBA Color, std::initializer_list<int> Xs) {
+					auto pTiles = std::make_shared<CLayerTiles>(pMap.get(), 64, 64);
+					str_copy(pTiles->m_aName, pName);
+					pTiles->m_Image = 0;
+					pTiles->m_Color = {int(Color.r * 255), int(Color.g * 255), int(Color.b * 255), 255};
+					for(int X : Xs)
+						pTiles->m_pTiles[X + 10 * 64].m_Index = 1;
+					pGroup->AddLayer(pTiles);
+					return pTiles;
+				};
+				auto pSelected = pMap->NewGroup();
+				str_copy(pSelected->m_aName, "Selected");
+				auto pTiles = Add(pSelected, "Focus", ColorRGBA(1, 1, 1, 1), {10, 12});
+				pTiles->m_pTiles[12 + 10 * 64].m_Index = Side ? 2 : 1;
+				Add(pSelected, "Sibling", ColorRGBA(1, 1, 1, 1), {11});
+				for(int n = 0; n < 3; ++n)
+					Add(pSelected, "Overlap", ColorRGBA(1, 1, 1, 1), {12});
+				Add(pMap->NewGroup(), "Red", ColorRGBA(1, 0, 0, 1), {8});
+				pTiles = Add(pMap->NewGroup(), "Blue", ColorRGBA(0, 0, 1, 1), {8, 9, 10, 12});
+				pTiles->m_pTiles[9 + 10 * 64].m_Index = Side ? 2 : 1;
+				auto pClipped = pMap->NewGroup();
+				pClipped->m_OffsetX = 32;
+				pClipped->m_ParallaxX = pClipped->m_ParallaxY = 0;
+				pClipped->m_UseClipping = 1;
+				pClipped->m_ClipX = 14 * 32;
+				pClipped->m_ClipY = 10 * 32;
+				pClipped->m_ClipW = pClipped->m_ClipH = 32;
+				Add(pClipped, "Clipped", ColorRGBA(0, 1, 0, 1), {15, 16});
+				Add(pMap->NewGroup(), "Untextured", ColorRGBA(0, 1, 1, 1), {16})->m_Image = -1;
+				auto pPattern = Add(pMap->NewGroup(), "Orientations", ColorRGBA(1, 1, 1, 1), {});
+				pPattern->Resize(256, 128);
+				for(int n = 0; n < 8; ++n)
+				{
+					auto &Tile = pPattern->m_pTiles[7 + n + 12 * pPattern->m_Width];
+					Tile.m_Index = n % 2 ? 3 : 4;
+					Tile.m_Flags = (n & 1 ? TILEFLAG_XFLIP : 0) | (n & 2 ? TILEFLAG_YFLIP : 0) | (n & 4 ? TILEFLAG_ROTATE : 0);
+				}
+				// Distant occupied tiles expose cache rebuilds after a large pan.
+				pPattern->m_pTiles[50 + 12 * pPattern->m_Width].m_Index = 3;
+				auto pParallax = pMap->NewGroup();
+				pParallax->m_ParallaxX = Side ? 50 : 0;
+				pParallax->m_ParallaxY = 0;
+				auto pQuads = std::make_shared<CLayerQuads>(pMap.get());
+				pQuads->NewQuad(12 * 32 + 16, 14 * 32 + 16, 32, 32);
+				for(int q = 0; q < 4096; ++q)
+					pQuads->NewQuad(100000 + q * 64, 100000, 32, 32);
+				pParallax->AddLayer(pQuads);
+				(Side ? m_pAfter : m_pBefore) = pMap.get();
+				Maps().push_back(std::move(pMap));
+			}
+			CaptureSources();
+			Compare().*Access(TGroup{}) = false;
+			Compare().Open(*this, m_pBefore, m_pAfter);
+		});
+		WaitReady();
+		auto Camera = [this] { Compare().*Access(TCenter{}) = vec2(12 * 32, 10 * 32 + 16); Compare().*Access(TZoom{}) = 1.0f; };
+		Do([this, Camera] { SelectKind(MapDiff::EEntryKind::LAYER, "Focus"); Camera(); });
+		Delay();
+		Do([this] { ContextPixels(false, false); });
+		Click([] { return vec2(240, 16); });
+		Do([this] { ContextPixels(true, false); CheckCachedPane(); CheckContextBufferPixels(); });
+		Screenshot("full-map-context-layer");
+		Click([] { return vec2(167, 16); });
+		Do(Camera);
+		Delay();
+		Do([this] { ContextPixels(true, true); });
+		Screenshot("full-map-context-group");
+		for(const auto &[Center, Zoom] : {std::pair{vec2(50 * 32, 12 * 32), 20.0f}, std::pair{vec2(50 * 32, 12 * 32), 0.5f}, std::pair{vec2(10000, 10000), 1.0f}, std::pair{vec2(12 * 32, 10 * 32 + 16), 1.0f}})
+		{
+			Do([this, Center, Zoom] { Compare().*Access(TCenter{}) = Center; Compare().*Access(TZoom{}) = Zoom; });
+			Delay();
+			Do([this] { CheckContextBufferPixels(); });
+		}
+		// Exercise the sparse immediate fallback against the same pixel oracle.
+		Do([this] { static_cast<CGraphics_Threaded *>(Graphics())->*Access(TTileBuffering{}) = false; });
+		Delay();
+		Do([this] { ContextPixels(true, true); static_cast<CGraphics_Threaded *>(Graphics())->*Access(TTileBuffering{}) = true; CheckSources("full map context"); Compare().Close(); Check(!HasRenderCache(Compare()), "close releases comparison GPU cache"); });
+		Delay();
+		Do([this] { Compare().Open(*this, m_pBefore, m_pAfter); });
+		WaitReady();
+		Click([] { return vec2(240, 16); });
+		Do([this, Camera] {
+			bool Found = false;
+			for(int i = 0; i < (int)Result().m_vEntries.size(); ++i)
+				if(Result().m_vEntries[i].m_Kind == MapDiff::EEntryKind::GROUP && Result().m_vEntries[i].m_Name == "Selected")
+				{
+					(Compare().*Access(TSelect{}))(i);
+					Found = true;
+				}
+			Check(Found, "select group whose children changed");
+			Camera();
+			Compare().*Access(TOrigin{}) = vec2(128, 64);
+		});
+		Delay();
+		Do([this] { CheckParallaxContext(); Compare().*Access(TCenter{}) += vec2(32, 64); Compare().*Access(TZoom{}) = 2; });
+		Delay();
+		Do([this] { CheckParallaxContext(); });
+		Do([this] { Check(HasRenderCache(Compare()), "reopen creates comparison cache"); Compare().Invalidate("context cache test"); Check(!HasRenderCache(Compare()), "source invalidation releases comparison cache"); Compare().Close(); });
+		Delay();
+	}
+	void MeasureMotion(const std::string &Name)
+	{
+		Do([this] { m_MeasureRender = true; m_SavedCenter = Compare().*Access(TCenter{}); });
+		Delay(1);
+		m_vSteps.push_back([this, Name, Count = 0, Total = 0.0, Maximum = 0.0]() mutable {
+			Total += m_LastRenderMs;
+			Maximum = std::max(Maximum, m_LastRenderMs);
+			if(++Count < 32)
+			{
+				Compare().*Access(TCenter{}) = m_SavedCenter + vec2((Count % 8) * 1500, (Count % 3) * 350);
+				Compare().*Access(TZoom{}) = Count % 2 ? 20.0f : 10.0f;
+				return false;
+			}
+			m_Log << "TIMING motion " << Name << " mean_ms=" << Total / Count << " max_ms=" << Maximum << std::endl;
+			m_MeasureRender = false;
+			Compare().*Access(TCenter{}) = m_SavedCenter;
+			Compare().*Access(TZoom{}) = 20.0f;
+			return true;
+		});
+	}
 	void MeasureFrames(const std::string &Name)
 	{
 		Do([this] { m_MeasureRender = true; });
@@ -670,6 +913,9 @@ class CSmokeEditor : public CEditor
 			Screenshot("performance-layer");
 		Click([] { return vec2(240, 16); });
 		MeasureFrames(LocalMaps ? "local context on" : "dense context on");
+		if(LocalMaps)
+			Screenshot("performance-full-context");
+		MeasureMotion(LocalMaps ? "local full context pan/zoom" : "dense full context pan/zoom");
 		Do([this] {
 			const auto P = (Compare().*Access(TPanes{}))[0].Center();
 			Ui()->OnCursorMove((P.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (P.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
@@ -687,6 +933,7 @@ class CSmokeEditor : public CEditor
 		Click([] { return vec2(167, 16); });
 		Do([this] { Check((Compare().*Access(TZoom{})) <= 20.0f, "large group fit stays at inspection scale"); });
 		MeasureFrames(LocalMaps ? "local group context on" : "dense group context on");
+		MeasureMotion(LocalMaps ? "local group full context pan/zoom" : "dense group full context pan/zoom");
 		Click([] { return vec2(240, 16); });
 		MeasureFrames(LocalMaps ? "local group context off" : "dense group context off");
 		Do([this] { Compare().Close(); });
@@ -728,6 +975,7 @@ class CSmokeEditor : public CEditor
 		}
 		RegressionSteps();
 		FitRegressionSteps();
+		FullContextSteps();
 		PerformanceSteps(false);
 		const char *apNames[] = {"coverage", "Tutorial", "Tsunami", "Sunny Side Up"};
 		for(int Fixture = 0; Fixture < 4; ++Fixture)

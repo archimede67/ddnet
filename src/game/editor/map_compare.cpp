@@ -16,6 +16,8 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <tuple>
+#include <unordered_map>
 
 namespace
 {
@@ -25,6 +27,8 @@ namespace
 	// Match the editor's 2000% limit. Drawing an entire huge map as subpixel
 	// tiles costs millions of submissions without providing useful detail.
 	constexpr float MAX_ZOOM = 20.0f;
+	constexpr float MAP_CONTEXT_ALPHA = 0.25f;
+	constexpr float SELECTED_CONTEXT_ALPHA = 0.65f;
 	class CFixedEnvelopeEval : public IEnvelopeEval
 	{
 		const CEditorMap &m_Map;
@@ -118,6 +122,20 @@ namespace
 		const int MaxY = (int)std::floor(Visible.m_BottomRight.y / 32);
 		MapCompareRender::ForVisibleCells(Cells, MinX, MinY, MaxX, MaxY, Visit);
 	}
+	std::array<vec2, 4> TileUV(const MapDiff::CTile &Tile)
+	{
+		std::array<vec2, 4> UV = {vec2(0, 0), vec2(1, 0), vec2(1, 1), vec2(0, 1)};
+		for(auto &Point : UV)
+		{
+			if(Tile.m_Flags & TILEFLAG_XFLIP)
+				Point.x = 1 - Point.x;
+			if(Tile.m_Flags & TILEFLAG_YFLIP)
+				Point.y = 1 - Point.y;
+		}
+		if(Tile.m_Flags & TILEFLAG_ROTATE)
+			std::rotate(UV.begin(), UV.end() - 1, UV.end());
+		return UV;
+	}
 	// Tile rendering uses canonical sparse cells, so stale skip/opaque flags and
 	// editor render toggles cannot hide current unsaved content.
 	void DrawTiles(CEditor &Editor, const std::vector<MapDiff::CCell> &Cells, const CScreenRect &Visible, ColorRGBA Color)
@@ -134,16 +152,7 @@ namespace
 				return;
 			const auto &T = Cell.m_Tile;
 			const float X = (T.m_Index % 16) / 16.0f, Y = (T.m_Index / 16) / 16.0f;
-			vec2 aUV[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-			for(auto &UV : aUV)
-			{
-				if(T.m_Flags & TILEFLAG_XFLIP)
-					UV.x = 1 - UV.x;
-				if(T.m_Flags & TILEFLAG_YFLIP)
-					UV.y = 1 - UV.y;
-			}
-			if(T.m_Flags & TILEFLAG_ROTATE)
-				std::rotate(std::begin(aUV), std::end(aUV) - 1, std::end(aUV));
+			auto aUV = TileUV(T);
 			if(!Arrays)
 				for(auto &UV : aUV)
 					UV = vec2(X, Y) + vec2(0.0005f, 0.0005f) + UV * (1.0f / 16 - 0.001f);
@@ -181,6 +190,115 @@ namespace
 	}
 }
 
+// Only viewport geometry is uploaded, never an entire large map. A small margin
+// lets linked panning reuse the buffers; uniforms provide each layer's styling.
+struct CMapCompare::CRenderCache
+{
+	struct CTileBuffer
+	{
+		int m_Container = -1;
+		CScreenRect m_Bounds{vec2(0, 0), vec2(0, 0)};
+		unsigned int m_Indices = 0;
+		bool m_Valid = false;
+	};
+	IGraphics *m_pGraphics;
+	std::unordered_map<const MapDiff::CLayer *, CTileBuffer> m_Tiles;
+	struct CObjectBuffer
+	{
+		std::vector<std::array<float, 4>> m_vBounds;
+		std::vector<std::array<float, 4>> m_vBlocks;
+	};
+	std::unordered_map<const MapDiff::CLayer *, CObjectBuffer> m_Objects;
+	explicit CRenderCache(IGraphics *pGraphics) :
+		m_pGraphics(pGraphics) {}
+	~CRenderCache()
+	{
+		for(auto &[pLayer, Buffer] : m_Tiles)
+			m_pGraphics->DeleteBufferContainer(Buffer.m_Container);
+	}
+	template<typename F>
+	void VisibleObjects(const CEditorMap &Map, const CLayer &Source, const MapDiff::CLayer &Layer, const CScreenRect &Visible, F Visit)
+	{
+		constexpr size_t BlockSize = 64;
+		auto [It, Inserted] = m_Objects.try_emplace(&Layer);
+		auto &Buffer = It->second;
+		if(Inserted)
+		{
+			for(size_t i = 0; i < Layer.m_vObjects.size(); ++i)
+			{
+				const auto Bounds = ObjectBounds(Map, Source, i, Layer.m_vObjects[i].m_aBounds);
+				Buffer.m_vBounds.push_back(Bounds);
+				if(i % BlockSize == 0)
+					Buffer.m_vBlocks.push_back(Bounds);
+				else
+				{
+					auto &Block = Buffer.m_vBlocks.back();
+					Block = {std::min(Block[0], Bounds[0]), std::min(Block[1], Bounds[1]), std::max(Block[2], Bounds[2]), std::max(Block[3], Bounds[3])};
+				}
+			}
+		}
+		auto VisibleBounds = [&](const auto &B) { return B[2] >= Visible.m_TopLeft.x && B[3] >= Visible.m_TopLeft.y && B[0] <= Visible.m_BottomRight.x && B[1] <= Visible.m_BottomRight.y; };
+		for(size_t Block = 0; Block < Buffer.m_vBlocks.size(); ++Block)
+			if(VisibleBounds(Buffer.m_vBlocks[Block]))
+				for(size_t i = Block * BlockSize; i < std::min((Block + 1) * BlockSize, Buffer.m_vBounds.size()); ++i)
+					if(VisibleBounds(Buffer.m_vBounds[i]))
+						Visit(i, Buffer.m_vBounds[i]);
+	}
+	void Draw(CEditor &Editor, const MapDiff::CLayer &Layer, const CScreenRect &Visible, ColorRGBA Color, bool Textured)
+	{
+		// Untextured tile pipelines use a different vertex layout on Vulkan.
+		if(!Textured || !m_pGraphics->IsTileBufferingEnabled() || !m_pGraphics->HasTextureArraysSupport())
+		{
+			DrawTiles(Editor, Layer.m_vCells, Visible, Color);
+			return;
+		}
+		if(Layer.m_vCells.empty() || Visible.m_BottomRight.x < 0 || Visible.m_BottomRight.y < 0 || Visible.m_TopLeft.x >= Layer.m_Width * 32.0f || Visible.m_TopLeft.y >= Layer.m_Height * 32.0f)
+			return;
+		auto &Buffer = m_Tiles[&Layer];
+		const vec2 Min(std::max(Visible.m_TopLeft.x, 0.0f), std::max(Visible.m_TopLeft.y, 0.0f));
+		const vec2 Max(std::min(Visible.m_BottomRight.x, Layer.m_Width * 32.0f), std::min(Visible.m_BottomRight.y, Layer.m_Height * 32.0f));
+		constexpr float Margin = 16 * 32;
+		if(!Buffer.m_Valid || Min.x < Buffer.m_Bounds.m_TopLeft.x || Min.y < Buffer.m_Bounds.m_TopLeft.y || Max.x > Buffer.m_Bounds.m_BottomRight.x || Max.y > Buffer.m_Bounds.m_BottomRight.y || Buffer.m_Bounds.Size().x > Max.x - Min.x + 4 * Margin || Buffer.m_Bounds.Size().y > Max.y - Min.y + 4 * Margin)
+		{
+			m_pGraphics->DeleteBufferContainer(Buffer.m_Container);
+			Buffer.m_Bounds = CScreenRect(vec2(std::max(Min.x - Margin, 0.0f), std::max(Min.y - Margin, 0.0f)), vec2(std::min(Max.x + Margin, Layer.m_Width * 32.0f), std::min(Max.y + Margin, Layer.m_Height * 32.0f)));
+			struct CVertex
+			{
+				vec2 m_Pos;
+				ubvec4 m_Tex;
+			};
+			std::vector<CVertex> vVertices;
+			ForVisibleCells(Layer.m_vCells, Buffer.m_Bounds, [&](const auto &Cell) {
+				if(!Cell.m_Tile.m_Index)
+					return;
+				const auto UV = TileUV(Cell.m_Tile);
+				const vec2 Pos(Cell.m_X * 32.0f, Cell.m_Y * 32.0f);
+				const vec2 aCorners[] = {vec2(0, 0), vec2(32, 0), vec2(32, 32), vec2(0, 32)};
+				for(int p = 0; p < 4; ++p)
+					vVertices.push_back({Pos + aCorners[p], ubvec4((unsigned char)UV[p].x, (unsigned char)UV[p].y, Cell.m_Tile.m_Index, 0)});
+			});
+			Buffer.m_Indices = vVertices.size() / 4 * 6;
+			if(!vVertices.empty())
+			{
+				SBufferContainerInfo Info;
+				Info.m_Stride = sizeof(CVertex);
+				Info.m_VertBufferBindingIndex = m_pGraphics->CreateBufferObject(vVertices.size() * sizeof(CVertex), vVertices.data(), 0);
+				Info.m_vAttributes = {{2, GRAPHICS_TYPE_FLOAT, false, nullptr, 0}, {4, GRAPHICS_TYPE_UNSIGNED_BYTE, false, (void *)offsetof(CVertex, m_Tex), 1}};
+				Buffer.m_Container = m_pGraphics->CreateBufferContainer(&Info);
+				m_pGraphics->IndicesNumRequiredNotify(Buffer.m_Indices);
+			}
+			Buffer.m_Valid = true;
+		}
+		if(Buffer.m_Indices)
+		{
+			char *pOffset = nullptr;
+			m_pGraphics->RenderTileLayer(Buffer.m_Container, Color, &pOffset, &Buffer.m_Indices, 1);
+		}
+	}
+};
+
+CMapCompare::CMapCompare() = default;
+
 CMapCompare::~CMapCompare()
 {
 	if(m_pData)
@@ -195,6 +313,7 @@ void CMapCompare::CancelWork()
 }
 void CMapCompare::ReleaseBuffers()
 {
+	m_pRenderCache.reset();
 	m_pData.reset();
 	m_Result = {};
 	std::vector<CDetail>().swap(m_vDetails);
@@ -337,6 +456,7 @@ void CMapCompare::Start(CEditor &Editor)
 	}
 	if(m_pData)
 		m_pData->m_Cancel = true;
+	m_pRenderCache.reset();
 	m_pData = std::make_shared<CData>();
 	// Capture is a const read on the UI thread; only owned values cross to the
 	// worker. Autosave and source disposal can therefore never race a capture.
@@ -818,179 +938,200 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 		return;
 	}
 	CFixedEnvelopeEval Envelope(Map);
+	if(!m_pRenderCache)
+		m_pRenderCache = std::make_unique<CRenderCache>(pGraphics);
+	auto InSelection = [&](int Index) { return Index == m_SelectedEntry || m_Result.m_vEntries[Index].m_Parent == m_SelectedEntry; };
 	std::vector<int> vLayers;
 	for(int i = 0; i < (int)m_Result.m_vEntries.size(); ++i)
 	{
 		const auto &Entry = m_Result.m_vEntries[i];
-		if(Entry.m_Kind == MapDiff::EEntryKind::LAYER && (i == m_SelectedEntry || Entry.m_Parent == m_SelectedEntry))
+		if(Entry.m_Kind == MapDiff::EEntryKind::LAYER && (m_Context || InSelection(i)))
 			vLayers.push_back(i);
 	}
 	std::sort(vLayers.begin(), vLayers.end(), [&](int A, int B) {
-		return Side == 0 ? m_Result.m_vEntries[A].m_Before < m_Result.m_vEntries[B].m_Before : m_Result.m_vEntries[A].m_After < m_Result.m_vEntries[B].m_After;
+		const auto &EA = m_Result.m_vEntries[A];
+		const auto &EB = m_Result.m_vEntries[B];
+		// Context preserves each source's draw order; selected content is drawn
+		// last so foreground scenery cannot hide the changes being inspected.
+		return std::make_tuple(InSelection(A), Side == 0 ? EA.m_BeforeGroup : EA.m_AfterGroup, Side == 0 ? EA.m_Before : EA.m_After) <
+		       std::make_tuple(InSelection(B), Side == 0 ? EB.m_BeforeGroup : EB.m_AfterGroup, Side == 0 ? EB.m_Before : EB.m_After);
 	});
-	for(int i : vLayers)
-	{
-		const auto &Entry = m_Result.m_vEntries[i];
-		const auto *pLayer = Layer(Snapshot, Entry, Side);
-		if(!pLayer)
-			continue;
-		int G = Side == 0 ? Entry.m_BeforeGroup : Entry.m_AfterGroup;
-		int L = Side == 0 ? Entry.m_Before : Entry.m_After;
-		const auto &Group = *Map.m_vpGroups[G];
-		const auto &SourceLayer = *Group.m_vpLayers[L];
-		const vec2 GroupCenter = ProjectionCenter(Group);
-		const vec2 TopLeft = GroupCenter - Pane.Size() * m_Zoom / 2;
-		const vec2 FullTopLeft = TopLeft - Pane.TopLeft() * m_Zoom;
-		CUIRect Clip = Pane;
-		if(Group.m_UseClipping)
+	// Finish all dim context before any diff overlay. In group mode later
+	// unchanged siblings must not cover earlier layers' highlighted changes.
+	for(int Pass = 0; Pass < 2; ++Pass)
+		for(int i : vLayers)
 		{
-			vec2 GameCenter = m_Center;
-			if(Map.m_pGameGroup)
-				GameCenter = ProjectionCenter(*Map.m_pGameGroup);
-			vec2 ClipStart = Pane.Center() + (vec2(Group.m_ClipX, Group.m_ClipY) - GameCenter) / m_Zoom;
-			vec2 ClipEnd = ClipStart + vec2(Group.m_ClipW, Group.m_ClipH) / m_Zoom;
-			float Right = std::min(Pane.x + Pane.w, ClipEnd.x), Bottom = std::min(Pane.y + Pane.h, ClipEnd.y);
-			Clip.x = std::max(Pane.x, ClipStart.x);
-			Clip.y = std::max(Pane.y, ClipStart.y);
-			Clip.w = std::max(0.0f, Right - Clip.x);
-			Clip.h = std::max(0.0f, Bottom - Clip.y);
-		}
-		if(Clip.w <= 0 || Clip.h <= 0)
-			continue;
-		const vec2 VisibleStart = TopLeft + (Clip.TopLeft() - Pane.TopLeft()) * m_Zoom;
-		const CScreenRect Visible(VisibleStart, VisibleStart + Clip.Size() * m_Zoom);
-		Editor.Ui()->ClipEnable(&Clip);
-		pGraphics->MapScreen(CScreenRect(FullTopLeft, FullTopLeft + Editor.Ui()->Screen()->Size() * m_Zoom));
-		pGraphics->BlendNormal();
-		const bool WholeLayer = Entry.m_Before < 0 || Entry.m_After < 0 || Entry.m_Reordered || !Entry.m_vProperties.empty() || Selected.m_Reordered || (Selected.m_Kind == MapDiff::EEntryKind::GROUP && !Selected.m_vProperties.empty());
-		if(SourceLayer.m_Type == LAYERTYPE_TILES)
-		{
-			const auto &Tiles = static_cast<const CLayerTiles &>(SourceLayer);
-			IGraphics::CTextureHandle Texture;
-			switch(pLayer->m_Kind)
+			const auto &Entry = m_Result.m_vEntries[i];
+			const bool Focused = InSelection(i);
+			const bool ContextPass = Pass == 0;
+			if((ContextPass && !m_Context) || (!ContextPass && !Focused))
+				continue;
+			const auto *pLayer = Layer(Snapshot, Entry, Side);
+			if(!pLayer)
+				continue;
+			int G = Side == 0 ? Entry.m_BeforeGroup : Entry.m_AfterGroup;
+			int L = Side == 0 ? Entry.m_Before : Entry.m_After;
+			const auto &Group = *Map.m_vpGroups[G];
+			const auto &SourceLayer = *Group.m_vpLayers[L];
+			const vec2 GroupCenter = ProjectionCenter(Group);
+			const vec2 TopLeft = GroupCenter - Pane.Size() * m_Zoom / 2;
+			const vec2 FullTopLeft = TopLeft - Pane.TopLeft() * m_Zoom;
+			CUIRect Clip = Pane;
+			if(Group.m_UseClipping)
 			{
-			case MapDiff::ELayerKind::GAME: Texture = Editor.GetEntitiesTexture(); break;
-			case MapDiff::ELayerKind::FRONT: Texture = Editor.GetFrontTexture(); break;
-			case MapDiff::ELayerKind::TELE: Texture = Editor.GetTeleTexture(); break;
-			case MapDiff::ELayerKind::SPEEDUP: Texture = Editor.GetSpeedupTexture(); break;
-			case MapDiff::ELayerKind::SWITCH: Texture = Editor.GetSwitchTexture(); break;
-			case MapDiff::ELayerKind::TUNE: Texture = Editor.GetTuneTexture(); break;
-			default:
-				if(Tiles.m_Image >= 0 && Tiles.m_Image < (int)Map.m_vpImages.size())
-					Texture = Map.m_vpImages[Tiles.m_Image]->m_Texture;
-				break;
+				vec2 GameCenter = m_Center;
+				if(Map.m_pGameGroup)
+					GameCenter = ProjectionCenter(*Map.m_pGameGroup);
+				vec2 ClipStart = Pane.Center() + (vec2(Group.m_ClipX, Group.m_ClipY) - GameCenter) / m_Zoom;
+				vec2 ClipEnd = ClipStart + vec2(Group.m_ClipW, Group.m_ClipH) / m_Zoom;
+				float Right = std::min(Pane.x + Pane.w, ClipEnd.x), Bottom = std::min(Pane.y + Pane.h, ClipEnd.y);
+				Clip.x = std::max(Pane.x, ClipStart.x);
+				Clip.y = std::max(Pane.y, ClipStart.y);
+				Clip.w = std::max(0.0f, Right - Clip.x);
+				Clip.h = std::max(0.0f, Bottom - Clip.y);
 			}
-			pGraphics->TextureSet(Texture);
-			ColorRGBA Color(Tiles.m_Color.r / 255.0f, Tiles.m_Color.g / 255.0f, Tiles.m_Color.b / 255.0f, Tiles.m_Color.a / 255.0f);
-			ColorRGBA EnvColor(1, 1, 1, 1);
-			Envelope.EnvelopeEval(Tiles.m_ColorEnvOffset, Tiles.m_ColorEnv, EnvColor, 4);
-			Color = Color.Multiply(EnvColor);
-			if(m_Context || WholeLayer)
-				DrawTiles(Editor, pLayer->m_vCells, Visible, WholeLayer ? Color.Multiply(Highlight) : Color.Multiply(ColorRGBA(1, 1, 1, 0.35f)));
-			std::vector<MapDiff::CCell> vVisibleChanges;
-			ForVisibleCells(Entry.m_vTiles, Visible, [&](const auto &Change) {
-				vVisibleChanges.push_back({Change.m_X, Change.m_Y, Side == 0 ? Change.m_Before : Change.m_After});
-			});
-			if(!WholeLayer)
-				DrawTiles(Editor, vVisibleChanges, Visible, Color.Multiply(Highlight));
-			pGraphics->TextureClear();
-			pGraphics->LinesBegin();
-			pGraphics->SetColor(Highlight);
-			for(const auto &Cell : vVisibleChanges)
-				if(!(Cell.m_Tile == MapDiff::CTile{}))
-					MarkerLines(Editor, Cell.m_X * 32.0f, Cell.m_Y * 32.0f, 32, 32, Side, m_Zoom);
-			pGraphics->LinesEnd();
-			if(WholeLayer)
-				Marker(Editor, 0, 0, pLayer->m_Width * 32.0f, pLayer->m_Height * 32.0f, Side, m_Zoom, Highlight);
-			// Source overlay functions are read-only and include number, delay,
-			// force, max speed and direction. Restrict them to visible content.
-			if(m_Zoom <= 4 && (m_Context || WholeLayer || !vVisibleChanges.empty()))
+			if(Clip.w <= 0 || Clip.h <= 0)
+				continue;
+			const vec2 VisibleStart = TopLeft + (Clip.TopLeft() - Pane.TopLeft()) * m_Zoom;
+			const CScreenRect Visible(VisibleStart, VisibleStart + Clip.Size() * m_Zoom);
+			Editor.Ui()->ClipEnable(&Clip);
+			pGraphics->MapScreen(CScreenRect(FullTopLeft, FullTopLeft + Editor.Ui()->Screen()->Size() * m_Zoom));
+			pGraphics->BlendNormal();
+			const bool WholeLayer = Focused && (Entry.m_Before < 0 || Entry.m_After < 0 || Entry.m_Reordered || !Entry.m_vProperties.empty() || Selected.m_Reordered || (Selected.m_Kind == MapDiff::EEntryKind::GROUP && !Selected.m_vProperties.empty()));
+			if(SourceLayer.m_Type == LAYERTYPE_TILES)
 			{
-				const auto &Cells = m_Context || WholeLayer ? pLayer->m_vCells : vVisibleChanges;
-				ForVisibleCells(Cells, Visible, [&](const auto &Cell) {
-					vec2 Pos(Cell.m_X * 32.0f, Cell.m_Y * 32.0f);
-					if(!Visible.Inside(Pos) || pLayer->m_Kind == MapDiff::ELayerKind::TILES || pLayer->m_Kind == MapDiff::ELayerKind::GAME || pLayer->m_Kind == MapDiff::ELayerKind::FRONT)
-						return;
-					std::string Text = pLayer->m_Kind == MapDiff::ELayerKind::SPEEDUP ? std::to_string(Cell.m_Tile.m_Force) + "/" + std::to_string(Cell.m_Tile.m_MaxSpeed) + "\n" + std::to_string(Cell.m_Tile.m_Angle) + " deg" : std::to_string(Cell.m_Tile.m_Number);
-					if(pLayer->m_Kind == MapDiff::ELayerKind::SWITCH)
-						Text += "/" + std::to_string(Cell.m_Tile.m_Delay);
-					Editor.TextRender()->Text(Pos.x + 2, Pos.y + 18, 7, Text.c_str(), 32);
-				});
-			}
-		}
-		else if(SourceLayer.m_Type == LAYERTYPE_QUADS)
-		{
-			const auto &Quads = static_cast<const CLayerQuads &>(SourceLayer);
-			std::vector<bool> vChanged(Quads.m_vQuads.size(), WholeLayer);
-			for(const auto &Change : Entry.m_vObjects)
-			{
-				int Index = Side == 0 ? Change.m_Before : Change.m_After;
-				if(Index >= 0)
-					vChanged[Index] = true;
-			}
-			for(size_t q = 0; q < Quads.m_vQuads.size(); ++q)
-			{
-				if(!vChanged[q] && !m_Context)
-					continue;
-				CQuad Quad = Quads.m_vQuads[q];
-				for(auto &Color : Quad.m_aColors)
+				const auto &Tiles = static_cast<const CLayerTiles &>(SourceLayer);
+				IGraphics::CTextureHandle Texture;
+				switch(pLayer->m_Kind)
 				{
+				case MapDiff::ELayerKind::GAME: Texture = Editor.GetEntitiesTexture(); break;
+				case MapDiff::ELayerKind::FRONT: Texture = Editor.GetFrontTexture(); break;
+				case MapDiff::ELayerKind::TELE: Texture = Editor.GetTeleTexture(); break;
+				case MapDiff::ELayerKind::SPEEDUP: Texture = Editor.GetSpeedupTexture(); break;
+				case MapDiff::ELayerKind::SWITCH: Texture = Editor.GetSwitchTexture(); break;
+				case MapDiff::ELayerKind::TUNE: Texture = Editor.GetTuneTexture(); break;
+				default:
+					if(Tiles.m_Image >= 0 && Tiles.m_Image < (int)Map.m_vpImages.size())
+						Texture = Map.m_vpImages[Tiles.m_Image]->m_Texture;
+					break;
+				}
+				pGraphics->TextureSet(Texture);
+				ColorRGBA Color(Tiles.m_Color.r / 255.0f, Tiles.m_Color.g / 255.0f, Tiles.m_Color.b / 255.0f, Tiles.m_Color.a / 255.0f);
+				ColorRGBA EnvColor(1, 1, 1, 1);
+				Envelope.EnvelopeEval(Tiles.m_ColorEnvOffset, Tiles.m_ColorEnv, EnvColor, 4);
+				Color = Color.Multiply(EnvColor);
+				if(ContextPass)
+				{
+					m_pRenderCache->Draw(Editor, *pLayer, Visible, Color.Multiply(ColorRGBA(1, 1, 1, Focused ? SELECTED_CONTEXT_ALPHA : MAP_CONTEXT_ALPHA)), Texture.IsValid());
+					Editor.Ui()->MapScreen();
+					Editor.Ui()->ClipDisable();
+					continue;
+				}
+				if(WholeLayer)
+					m_pRenderCache->Draw(Editor, *pLayer, Visible, Color.Multiply(Highlight), Texture.IsValid());
+				std::vector<MapDiff::CCell> vVisibleChanges;
+				if(Focused)
+					ForVisibleCells(Entry.m_vTiles, Visible, [&](const auto &Change) {
+						vVisibleChanges.push_back({Change.m_X, Change.m_Y, Side == 0 ? Change.m_Before : Change.m_After});
+					});
+				if(!WholeLayer)
+					DrawTiles(Editor, vVisibleChanges, Visible, Color.Multiply(Highlight));
+				pGraphics->TextureClear();
+				pGraphics->LinesBegin();
+				pGraphics->SetColor(Highlight);
+				for(const auto &Cell : vVisibleChanges)
+					if(!(Cell.m_Tile == MapDiff::CTile{}))
+						MarkerLines(Editor, Cell.m_X * 32.0f, Cell.m_Y * 32.0f, 32, 32, Side, m_Zoom);
+				pGraphics->LinesEnd();
+				if(WholeLayer)
+					Marker(Editor, 0, 0, pLayer->m_Width * 32.0f, pLayer->m_Height * 32.0f, Side, m_Zoom, Highlight);
+				// Source overlay functions are read-only and include number, delay,
+				// force, max speed and direction. Restrict them to visible content.
+				if(Focused && m_Zoom <= 4 && (m_Context || WholeLayer || !vVisibleChanges.empty()))
+				{
+					const auto &Cells = m_Context || WholeLayer ? pLayer->m_vCells : vVisibleChanges;
+					ForVisibleCells(Cells, Visible, [&](const auto &Cell) {
+						vec2 Pos(Cell.m_X * 32.0f, Cell.m_Y * 32.0f);
+						if(!Visible.Inside(Pos) || pLayer->m_Kind == MapDiff::ELayerKind::TILES || pLayer->m_Kind == MapDiff::ELayerKind::GAME || pLayer->m_Kind == MapDiff::ELayerKind::FRONT)
+							return;
+						std::string Text = pLayer->m_Kind == MapDiff::ELayerKind::SPEEDUP ? std::to_string(Cell.m_Tile.m_Force) + "/" + std::to_string(Cell.m_Tile.m_MaxSpeed) + "\n" + std::to_string(Cell.m_Tile.m_Angle) + " deg" : std::to_string(Cell.m_Tile.m_Number);
+						if(pLayer->m_Kind == MapDiff::ELayerKind::SWITCH)
+							Text += "/" + std::to_string(Cell.m_Tile.m_Delay);
+						Editor.TextRender()->Text(Pos.x + 2, Pos.y + 18, 7, Text.c_str(), 32);
+					});
+				}
+			}
+			else if(SourceLayer.m_Type == LAYERTYPE_QUADS)
+			{
+				const auto &Quads = static_cast<const CLayerQuads &>(SourceLayer);
+				std::vector<bool> vChanged(Quads.m_vQuads.size(), !ContextPass && WholeLayer);
+				for(const auto &Change : Entry.m_vObjects)
+				{
+					int Index = Side == 0 ? Change.m_Before : Change.m_After;
+					if(!ContextPass && Index >= 0)
+						vChanged[Index] = true;
+				}
+				m_pRenderCache->VisibleObjects(Map, SourceLayer, *pLayer, Visible, [&](size_t q, const auto &B) {
+					if(!ContextPass && !vChanged[q])
+						return;
+					CQuad Quad = Quads.m_vQuads[q];
+					for(auto &Color : Quad.m_aColors)
+					{
+						if(vChanged[q])
+						{
+							Color.r = (int)(Color.r * Highlight.r);
+							Color.g = (int)(Color.g * Highlight.g);
+							Color.b = (int)(Color.b * Highlight.b);
+						}
+						else
+							Color.a = (int)(Color.a * (Focused ? SELECTED_CONTEXT_ALPHA : MAP_CONTEXT_ALPHA));
+					}
+					if(Quads.m_Image >= 0 && Quads.m_Image < (int)Map.m_vpImages.size())
+						pGraphics->TextureSet(Map.m_vpImages[Quads.m_Image]->m_Texture);
+					else
+						pGraphics->TextureClear();
+					Editor.RenderMap()->ForceRenderQuads(&Quad, 1, LAYERRENDERFLAG_TRANSPARENT, &Envelope);
 					if(vChanged[q])
 					{
-						Color.r = (int)(Color.r * Highlight.r);
-						Color.g = (int)(Color.g * Highlight.g);
-						Color.b = (int)(Color.b * Highlight.b);
+						Marker(Editor, B[0], B[1], B[2] - B[0], B[3] - B[1], Side, m_Zoom, Highlight);
 					}
-					else
-						Color.a = (int)(Color.a * 0.35f);
+				});
+			}
+			else if(!ContextPass && SourceLayer.m_Type == LAYERTYPE_SOUNDS)
+			{
+				const auto &Sounds = static_cast<const CLayerSounds &>(SourceLayer);
+				std::vector<bool> vChanged(Sounds.m_vSources.size(), WholeLayer);
+				for(const auto &Change : Entry.m_vObjects)
+				{
+					int Index = Side == 0 ? Change.m_Before : Change.m_After;
+					if(Index >= 0)
+						vChanged[Index] = true;
 				}
-				if(Quads.m_Image >= 0 && Quads.m_Image < (int)Map.m_vpImages.size())
-					pGraphics->TextureSet(Map.m_vpImages[Quads.m_Image]->m_Texture);
-				else
+				for(size_t s = 0; s < Sounds.m_vSources.size(); ++s)
+				{
+					if(!vChanged[s] && !m_Context)
+						continue;
+					const auto &Source = Sounds.m_vSources[s];
+					ColorRGBA Offset(0, 0, 0, 0);
+					Envelope.EnvelopeEval(Source.m_PosEnvOffset, Source.m_PosEnv, Offset, 2);
+					vec2 Position(Source.m_Position.x / 1024.0f + Offset.r, Source.m_Position.y / 1024.0f + Offset.g);
 					pGraphics->TextureClear();
-				Editor.RenderMap()->ForceRenderQuads(&Quad, 1, LAYERRENDERFLAG_TRANSPARENT, &Envelope);
-				if(vChanged[q])
-				{
-					const auto B = ObjectBounds(Map, SourceLayer, q, pLayer->m_vObjects[q].m_aBounds);
-					Marker(Editor, B[0], B[1], B[2] - B[0], B[3] - B[1], Side, m_Zoom, Highlight);
+					pGraphics->QuadsBegin();
+					pGraphics->SetColor(vChanged[s] ? Highlight.Multiply(ColorRGBA(1, 1, 1, 0.25f)) : ColorRGBA(0.6f, 0.7f, 0.9f, 0.15f));
+					if(Source.m_Shape.m_Type == CSoundShape::SHAPE_CIRCLE)
+						pGraphics->DrawCircle(Position.x, Position.y, Source.m_Shape.m_Circle.m_Radius, 32);
+					else if(Source.m_Shape.m_Type == CSoundShape::SHAPE_RECTANGLE)
+					{
+						float W = Source.m_Shape.m_Rectangle.m_Width / 1024.0f, H = Source.m_Shape.m_Rectangle.m_Height / 1024.0f;
+						pGraphics->DrawRectExt(Position.x - W / 2, Position.y - H / 2, W, H, 0, 0);
+					}
+					pGraphics->QuadsEnd();
+					Marker(Editor, Position.x - 8, Position.y - 8, 16, 16, Side, m_Zoom, vChanged[s] ? Highlight : ColorRGBA(0.7f, 0.7f, 0.7f, 1));
 				}
 			}
+			Editor.Ui()->MapScreen();
+			Editor.Ui()->ClipDisable();
 		}
-		else if(SourceLayer.m_Type == LAYERTYPE_SOUNDS)
-		{
-			const auto &Sounds = static_cast<const CLayerSounds &>(SourceLayer);
-			std::vector<bool> vChanged(Sounds.m_vSources.size(), WholeLayer);
-			for(const auto &Change : Entry.m_vObjects)
-			{
-				int Index = Side == 0 ? Change.m_Before : Change.m_After;
-				if(Index >= 0)
-					vChanged[Index] = true;
-			}
-			for(size_t s = 0; s < Sounds.m_vSources.size(); ++s)
-			{
-				if(!vChanged[s] && !m_Context)
-					continue;
-				const auto &Source = Sounds.m_vSources[s];
-				ColorRGBA Offset(0, 0, 0, 0);
-				Envelope.EnvelopeEval(Source.m_PosEnvOffset, Source.m_PosEnv, Offset, 2);
-				vec2 Position(Source.m_Position.x / 1024.0f + Offset.r, Source.m_Position.y / 1024.0f + Offset.g);
-				pGraphics->TextureClear();
-				pGraphics->QuadsBegin();
-				pGraphics->SetColor(vChanged[s] ? Highlight.Multiply(ColorRGBA(1, 1, 1, 0.25f)) : ColorRGBA(0.6f, 0.7f, 0.9f, 0.15f));
-				if(Source.m_Shape.m_Type == CSoundShape::SHAPE_CIRCLE)
-					pGraphics->DrawCircle(Position.x, Position.y, Source.m_Shape.m_Circle.m_Radius, 32);
-				else if(Source.m_Shape.m_Type == CSoundShape::SHAPE_RECTANGLE)
-				{
-					float W = Source.m_Shape.m_Rectangle.m_Width / 1024.0f, H = Source.m_Shape.m_Rectangle.m_Height / 1024.0f;
-					pGraphics->DrawRectExt(Position.x - W / 2, Position.y - H / 2, W, H, 0, 0);
-				}
-				pGraphics->QuadsEnd();
-				Marker(Editor, Position.x - 8, Position.y - 8, 16, 16, Side, m_Zoom, vChanged[s] ? Highlight : ColorRGBA(0.7f, 0.7f, 0.7f, 1));
-			}
-		}
-		Editor.Ui()->MapScreen();
-		Editor.Ui()->ClipDisable();
-	}
 	Editor.Ui()->MapScreen();
 	Pane.DrawOutline(Highlight.Multiply(ColorRGBA(1, 1, 1, 0.5f)));
 }
@@ -1003,11 +1144,11 @@ void CMapCompare::Render(CEditor &Editor)
 	View.Margin(6, &View);
 	CUIRect Toolbar;
 	View.HSplitTop(23, &Toolbar, &View);
-	auto Button = [&](int Id, const char *pText, float Width, int Checked = 0) {
+	auto Button = [&](int Id, const char *pText, float Width, int Checked = 0, const char *pTooltip = nullptr) {
 		CUIRect Rect;
 		Toolbar.VSplitLeft(Width, &Rect, &Toolbar);
 		Rect.VMargin(2, &Rect);
-		return Editor.DoButton_Editor(&m_aButtonIds[Id], pText, Checked, &Rect, BUTTONFLAG_LEFT, pText) != 0;
+		return Editor.DoButton_Editor(&m_aButtonIds[Id], pText, Checked, &Rect, BUTTONFLAG_LEFT, pTooltip ? pTooltip : pText) != 0;
 	};
 	if(Button(0, "Back [Esc]", 76))
 		Close();
@@ -1050,10 +1191,11 @@ void CMapCompare::Render(CEditor &Editor)
 		if(m_ByGroup && FocusedChild >= 0)
 			m_FocusEntry = FocusedChild;
 	}
-	if(Button(3, m_Context ? "Context: on" : "Context: off", 84, m_Context))
+	if(Button(3, m_Context ? "Context: map" : "Context: off", 84, m_Context, "Show the full map dimmed, with the selected layer or group and its changes emphasized."))
 	{
 		m_Context = !m_Context;
 		RebuildNavigator();
+		m_Navigator.ScrollToSelected();
 		if(m_SelectedEntry < 0 && !m_vNavigator.empty())
 			Select(m_vNavigator.front());
 	}

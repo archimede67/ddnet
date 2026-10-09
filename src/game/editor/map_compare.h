@@ -37,6 +37,8 @@ class CMapCompare
 	std::shared_ptr<CData> m_pData;
 	std::future<MapDiff::CResult> m_Future;
 	std::vector<std::future<MapDiff::CResult>> m_vRetiredWork;
+	struct CRenderCache;
+	std::unique_ptr<CRenderCache> m_pRenderCache;
 	MapDiff::CResult m_Result;
 	std::string m_Message;
 	bool m_ByGroup = false;
@@ -82,6 +84,7 @@ class CMapCompare
 	void RenderInspector(CEditor &Editor, CUIRect View);
 
 public:
+	CMapCompare();
 	~CMapCompare();
 	bool Active() const { return m_State != EState::CLOSED; }
 	void OpenSelector(CEditor &Editor);
