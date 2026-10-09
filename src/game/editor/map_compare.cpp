@@ -319,6 +319,8 @@ void CMapCompare::ReleaseBuffers()
 	std::vector<CDetail>().swap(m_vDetails);
 	std::vector<MapDiff::CPropertyChange>().swap(m_vValueRows);
 	std::vector<int>().swap(m_vNavigator);
+	std::vector<int>().swap(m_vChangedNavigator);
+	m_UnchangedCount = 0;
 	m_SelectedEntry = m_SelectedDetail = m_FocusEntry = -1;
 	m_ValueRowsEntry = m_ValueRowsDetail = -2;
 }
@@ -370,7 +372,8 @@ void CMapCompare::Open(CEditor &Editor, const CEditorMap *pBefore, const CEditor
 	m_ParallaxOrigin = pBefore->m_MapViewState.m_WorldOffset;
 	m_Center = vec2(0, 0);
 	m_Message.clear();
-	m_Context = false;
+	m_Context = CONTEXT_OFF;
+	m_UnchangedExpanded = false;
 	m_Panning = false;
 	Editor.Ui()->SetActiveItem(nullptr);
 	if(CLineInput::GetActiveInput())
@@ -520,7 +523,7 @@ void CMapCompare::OnUpdate(CEditor &Editor)
 			}
 			m_State = EState::READY;
 			RebuildNavigator();
-			if(!m_vNavigator.empty())
+			if(!m_vNavigator.empty() && m_vNavigator.front() >= 0)
 				Select(m_vNavigator.front());
 		}
 		catch(const std::exception &Exception)
@@ -532,6 +535,8 @@ void CMapCompare::OnUpdate(CEditor &Editor)
 void CMapCompare::RebuildNavigator()
 {
 	m_vNavigator.clear();
+	m_vChangedNavigator.clear();
+	std::vector<int> vUnchanged;
 	for(int i = 0; i < (int)m_Result.m_vEntries.size(); ++i)
 	{
 		const auto &Entry = m_Result.m_vEntries[i];
@@ -540,22 +545,47 @@ void CMapCompare::RebuildNavigator()
 			for(const auto &Child : m_Result.m_vEntries)
 				if(Child.m_Parent == i && Child.Changed())
 					Changed = true;
-		if(!m_Context && !Changed)
-			continue;
 		if(m_ByGroup && Entry.m_Kind == MapDiff::EEntryKind::LAYER)
 			continue;
 		// In layer mode retain changed group properties in the navigator, too.
 		if(!m_ByGroup && Entry.m_Kind == MapDiff::EEntryKind::GROUP && !Entry.Changed())
 			continue;
-		m_vNavigator.push_back(i);
+		(Changed ? m_vChangedNavigator : vUnchanged).push_back(i);
 	}
-	if(std::find(m_vNavigator.begin(), m_vNavigator.end(), m_SelectedEntry) == m_vNavigator.end())
+	m_vNavigator = m_vChangedNavigator;
+	m_UnchangedCount = vUnchanged.size();
+	if(m_Context != CONTEXT_OFF && !vUnchanged.empty())
+	{
+		m_vNavigator.push_back(-1); // Collapsible section header, never a selection.
+		if(m_UnchangedExpanded)
+			m_vNavigator.insert(m_vNavigator.end(), vUnchanged.begin(), vUnchanged.end());
+	}
+	if(m_SelectedEntry < 0 || std::find(m_vNavigator.begin(), m_vNavigator.end(), m_SelectedEntry) == m_vNavigator.end())
 	{
 		int Replacement = -1;
 		if(std::find(m_vNavigator.begin(), m_vNavigator.end(), m_FocusEntry) != m_vNavigator.end())
 			Replacement = m_FocusEntry;
-		if(Replacement < 0 && !m_vNavigator.empty())
-			Replacement = m_vNavigator.front();
+		// Opening context on equal maps should immediately show map content.
+		if(Replacement < 0 && m_Context == CONTEXT_SELECTION && m_vChangedNavigator.empty())
+			for(int Index : m_vNavigator)
+			{
+				if(Index < 0)
+					continue;
+				const auto Kind = m_Result.m_vEntries[Index].m_Kind;
+				if(Kind == MapDiff::EEntryKind::LAYER || (Kind == MapDiff::EEntryKind::GROUP &&
+										 std::any_of(m_Result.m_vEntries.begin(), m_Result.m_vEntries.end(), [Index](const auto &Entry) { return Entry.m_Parent == Index; })))
+				{
+					Replacement = Index;
+					break;
+				}
+			}
+		if(Replacement < 0)
+			for(int Index : m_vNavigator)
+				if(Index >= 0)
+				{
+					Replacement = Index;
+					break;
+				}
 		Select(Replacement);
 	}
 }
@@ -577,7 +607,7 @@ void CMapCompare::RebuildDetails()
 	for(int i = 0; i < (int)m_Result.m_vEntries.size(); ++i)
 	{
 		const auto &Entry = m_Result.m_vEntries[i];
-		if(i != m_SelectedEntry && Entry.m_Parent != m_SelectedEntry)
+		if(i != m_SelectedEntry && (!m_ByGroup || Entry.m_Parent != m_SelectedEntry))
 			continue;
 		if(Entry.m_Before < 0 || Entry.m_After < 0 || Entry.m_Reordered || Entry.m_Ambiguous)
 			m_vDetails.push_back({i, 4, 0});
@@ -592,6 +622,13 @@ void CMapCompare::RebuildDetails()
 	}
 	if(!m_vDetails.empty())
 		m_SelectedDetail = 0;
+}
+bool CMapCompare::IsDifference(const CDetail &Detail) const
+{
+	if(Detail.m_Kind != 4)
+		return true;
+	const auto &Entry = m_Result.m_vEntries[Detail.m_Entry];
+	return Entry.m_Before < 0 || Entry.m_After < 0 || Entry.m_Reordered;
 }
 std::vector<MapDiff::CPropertyChange> CMapCompare::DetailValues(const CDetail &Detail) const
 {
@@ -631,26 +668,34 @@ std::vector<MapDiff::CPropertyChange> CMapCompare::DetailValues(const CDetail &D
 }
 void CMapCompare::Navigate(int Direction)
 {
-	if(m_vNavigator.empty())
+	if(m_vChangedNavigator.empty())
 		return;
-	if(m_SelectedDetail >= 0 && m_SelectedDetail + Direction >= 0 && m_SelectedDetail + Direction < (int)m_vDetails.size())
+	auto Seek = [&](int Start) {
+		for(int Detail = Start; Detail >= 0 && Detail < (int)m_vDetails.size(); Detail += Direction)
+			if(IsDifference(m_vDetails[Detail]))
+			{
+				m_SelectedDetail = Detail;
+				m_FocusEntry = m_vDetails[Detail].m_Entry;
+				m_Details.ScrollToSelected();
+				m_Navigator.ScrollToSelected();
+				m_Values.Reset();
+				FitSelection();
+				return true;
+			}
+		return false;
+	};
+	if(Seek(m_SelectedDetail + Direction))
+		return;
+	auto It = std::find(m_vChangedNavigator.begin(), m_vChangedNavigator.end(), m_SelectedEntry);
+	const int Count = m_vChangedNavigator.size();
+	int Index = It == m_vChangedNavigator.end() ? (Direction > 0 ? -1 : 0) : It - m_vChangedNavigator.begin();
+	for(int Visited = 0; Visited < Count; ++Visited)
 	{
-		m_SelectedDetail += Direction;
-		m_FocusEntry = m_vDetails[m_SelectedDetail].m_Entry;
-		m_Details.ScrollToSelected();
+		Index = (Index + Direction + Count) % Count;
+		Select(m_vChangedNavigator[Index]);
+		if(Seek(Direction > 0 ? 0 : (int)m_vDetails.size() - 1))
+			return;
 	}
-	else
-	{
-		auto It = std::find(m_vNavigator.begin(), m_vNavigator.end(), m_SelectedEntry);
-		int Index = It == m_vNavigator.end() ? 0 : It - m_vNavigator.begin();
-		Index = (Index + Direction + m_vNavigator.size()) % m_vNavigator.size();
-		Select(m_vNavigator[Index]);
-		if(Direction < 0 && !m_vDetails.empty())
-			m_SelectedDetail = m_vDetails.size() - 1;
-		m_Navigator.ScrollToSelected();
-	}
-	m_Values.Reset();
-	FitSelection();
 }
 void CMapCompare::FitSelection()
 {
@@ -701,7 +746,7 @@ void CMapCompare::FitSelection()
 		if(m_SelectedDetail >= 0)
 		{
 			const auto &Detail = m_vDetails[m_SelectedDetail];
-			if((Detail.m_Kind == 1 || Detail.m_Kind == 2) && Detail.m_Entry != i)
+			if(IsDifference(Detail) && m_Result.m_vEntries[Detail.m_Entry].m_Kind == MapDiff::EEntryKind::LAYER && Detail.m_Entry != i)
 				continue;
 		}
 		for(int Side = 0; Side < 2; ++Side)
@@ -945,7 +990,7 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 	for(int i = 0; i < (int)m_Result.m_vEntries.size(); ++i)
 	{
 		const auto &Entry = m_Result.m_vEntries[i];
-		if(Entry.m_Kind == MapDiff::EEntryKind::LAYER && (m_Context || InSelection(i)))
+		if(Entry.m_Kind == MapDiff::EEntryKind::LAYER && (m_Context == CONTEXT_MAP || InSelection(i)))
 			vLayers.push_back(i);
 	}
 	std::sort(vLayers.begin(), vLayers.end(), [&](int A, int B) {
@@ -1191,17 +1236,22 @@ void CMapCompare::Render(CEditor &Editor)
 		if(m_ByGroup && FocusedChild >= 0)
 			m_FocusEntry = FocusedChild;
 	}
-	if(Button(3, m_Context ? "Context: map" : "Context: off", 84, m_Context, "Show the full map dimmed, with the selected layer or group and its changes emphasized."))
+	const char *pContextLabel = m_Context == CONTEXT_OFF ? "Context: off" : m_Context == CONTEXT_MAP ? "Context: map" :
+									m_ByGroup                        ? "Context: group" :
+													   "Context: layer";
+	if(Button(3, pContextLabel, 84, m_Context != CONTEXT_OFF, "Cycle context: changes only, selected layer/group, full map. Changes stay emphasized."))
 	{
-		m_Context = !m_Context;
+		m_Context = (m_Context + 1) % 3;
+		if(m_vChangedNavigator.empty())
+			m_UnchangedExpanded = true;
 		RebuildNavigator();
 		m_Navigator.ScrollToSelected();
-		if(m_SelectedEntry < 0 && !m_vNavigator.empty())
+		if(m_SelectedEntry < 0 && !m_vNavigator.empty() && m_vNavigator.front() >= 0)
 			Select(m_vNavigator.front());
 	}
-	if(Button(4, "Prev [P]", 65))
+	if(Button(4, "Prev [P]", 65, m_vChangedNavigator.empty() ? -1 : 0, "Go to the previous difference, skipping unchanged items."))
 		Navigate(-1);
-	if(Button(5, "Next [N]", 65))
+	if(Button(5, "Next [N]", 65, m_vChangedNavigator.empty() ? -1 : 0, "Go to the next difference, skipping unchanged items."))
 		Navigate(1);
 	if(Button(6, "Fit [Home]", 76))
 		FitSelection();
@@ -1238,11 +1288,23 @@ void CMapCompare::Render(CEditor &Editor)
 	}
 	int NavSelected = -1;
 	for(int i = 0; i < (int)m_vNavigator.size(); ++i)
-		if(m_vNavigator[i] == m_SelectedEntry)
+		if(m_SelectedEntry >= 0 && m_vNavigator[i] == m_SelectedEntry)
 			NavSelected = i;
 	m_Navigator.DoStart(36, m_vNavigator.size(), 1, 3, NavSelected, &Navigator);
+	bool ToggleUnchanged = false;
 	for(int Index : m_vNavigator)
 	{
+		if(Index < 0)
+		{
+			auto Item = m_Navigator.DoSubheader();
+			if(Item.m_Visible)
+			{
+				Item.m_Rect.Margin(3, &Item.m_Rect);
+				const std::string Title = std::string(m_UnchangedExpanded ? "- " : "+ ") + "Unchanged (" + std::to_string(m_UnchangedCount) + ")";
+				ToggleUnchanged = Editor.DoButton_Editor(&m_UnchangedButtonId, Title.c_str(), 0, &Item.m_Rect, BUTTONFLAG_LEFT, "Expand or collapse unchanged items. Prev/Next always skip these.");
+			}
+			continue;
+		}
 		const auto &Entry = m_Result.m_vEntries[Index];
 		auto Item = m_Navigator.DoNextItem(&Entry);
 		if(Item.m_Visible)
@@ -1251,7 +1313,7 @@ void CMapCompare::Render(CEditor &Editor)
 			Item.m_Rect.Margin(3, &Item.m_Rect);
 			Item.m_Rect.HSplitTop(15, &Name, &Count);
 			size_t Changes = Entry.ChangeCount();
-			if(Entry.m_Kind == MapDiff::EEntryKind::GROUP)
+			if(m_ByGroup && Entry.m_Kind == MapDiff::EEntryKind::GROUP)
 				for(const auto &Child : m_Result.m_vEntries)
 					if(Child.m_Parent == Index)
 						Changes += Child.ChangeCount();
@@ -1268,7 +1330,22 @@ void CMapCompare::Render(CEditor &Editor)
 		}
 	}
 	int NewSelected = m_Navigator.DoEnd();
-	if(NewSelected >= 0 && NewSelected != NavSelected)
+	if(NewSelected >= 0 && NewSelected != NavSelected && m_vNavigator[NewSelected] < 0)
+	{
+		const int Direction = NewSelected > NavSelected ? 1 : -1;
+		NewSelected += Direction;
+		if(NewSelected < 0 || NewSelected >= (int)m_vNavigator.size())
+			NewSelected -= 2 * Direction;
+		if(NewSelected < 0 || NewSelected >= (int)m_vNavigator.size())
+			NewSelected = -1;
+	}
+	if(ToggleUnchanged)
+	{
+		m_UnchangedExpanded = !m_UnchangedExpanded;
+		RebuildNavigator();
+		m_Navigator.ScrollToSelected();
+	}
+	else if(NewSelected >= 0 && NewSelected != NavSelected)
 		Select(m_vNavigator[NewSelected]);
 	RenderPane(Editor, m_aPanes[0], 0);
 	RenderPane(Editor, m_aPanes[1], 1);

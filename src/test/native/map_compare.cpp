@@ -28,6 +28,7 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <tuple>
 
 // Explicit instantiation permits test-only access without modifying product headers.
 template<class Tag, typename Tag::Type Member>
@@ -46,7 +47,9 @@ ACCESSOR(TCompare, CEditor, m_MapCompare, CMapCompare)
 ACCESSOR(TMaps, CEditor, m_vpMaps, std::vector<std::unique_ptr<CEditorMap>>)
 ACCESSOR(TSelectedMap, CEditor, m_SelectedMap, size_t)
 ACCESSOR(TResult, CMapCompare, m_Result, MapDiff::CResult)
-ACCESSOR(TContext, CMapCompare, m_Context, bool)
+ACCESSOR(TContext, CMapCompare, m_Context, int)
+ACCESSOR(TUnchangedExpanded, CMapCompare, m_UnchangedExpanded, bool)
+ACCESSOR(TChangedNavigator, CMapCompare, m_vChangedNavigator, std::vector<int>)
 ACCESSOR(TGroup, CMapCompare, m_ByGroup, bool)
 ACCESSOR(TSelectedEntry, CMapCompare, m_SelectedEntry, int)
 ACCESSOR(TSelectedDetail, CMapCompare, m_SelectedDetail, int)
@@ -104,6 +107,20 @@ struct CStateAccess
 	friend int CompareState(CMapCompare &Obj) { return static_cast<int>(Obj.*Member); }
 };
 template struct CStateAccess<&CMapCompare::m_State>;
+std::array<int, 3> SelectedDetail(CMapCompare &);
+template<auto Member>
+struct CDetailAccess
+{
+	friend std::array<int, 3> SelectedDetail(CMapCompare &Obj)
+	{
+		const int Index = Obj.*Access(TSelectedDetail{});
+		if(Index < 0)
+			return {-1, -1, -1};
+		const auto &Detail = (Obj.*Member)[Index];
+		return {Detail.m_Entry, Detail.m_Kind, Detail.m_Index};
+	}
+};
+template struct CDetailAccess<&CMapCompare::m_vDetails>;
 
 class CSmokeAction : public IEditorAction
 {
@@ -123,6 +140,7 @@ class CSmokeEditor : public CEditor
 	int m_Failures = 0;
 	int m_SavedEntry = -1;
 	bool m_MeasureRender = false;
+	int m_TargetContext = 0;
 	double m_LastRenderMs = 0;
 	vec2 m_SavedCenter;
 	std::vector<std::shared_ptr<CLayerTiles>> m_vPixelLayers;
@@ -193,6 +211,21 @@ class CSmokeEditor : public CEditor
 	{
 		Do([this, Name] { CImageInfo Image; static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Image); const std::string Path="screenshots/"+Name+".png"; Check(Image.m_pData && CImageLoader::SavePng(Storage()->OpenFile(Path.c_str(),IOFLAG_WRITE,IStorage::TYPE_SAVE),Path.c_str(),Image),"render screenshot "+Name); Image.Free(); });
 		Delay();
+	}
+	void ToggleMapContext()
+	{
+		Do([this] {
+			m_TargetContext = (Compare().*Access(TContext{})) == 0 ? 2 : 0;
+			Ui()->OnCursorMove((240 - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (16 - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
+		});
+		Delay();
+		for(int i = 0; i < 2; ++i)
+		{
+			Do([this] { if((Compare().*Access(TContext{})) != m_TargetContext) Mouse(SDL_BUTTON_LEFT, true); });
+			Delay();
+			Do([this] { Mouse(SDL_BUTTON_LEFT, false); });
+			Delay();
+		}
 	}
 	void CaptureSources()
 	{
@@ -425,6 +458,7 @@ class CSmokeEditor : public CEditor
 		{
 			auto Map = std::make_unique<CEditorMap>(this);
 			Map->CreateDefault();
+			str_copy(Map->m_aDisplayName, "Fixture");
 			WhiteImage(*Map, "white", true);
 			WhiteImage(*Map, "unused identical white", false);
 			auto Group = Map->NewGroup();
@@ -490,7 +524,7 @@ class CSmokeEditor : public CEditor
 		WaitReady();
 		Do([this] { SelectKind(MapDiff::EEntryKind::LAYER,"Pixel tiles"); m_SavedEntry=Compare().*Access(TSelectedEntry{}); });
 		Delay();
-		Click([] { return vec2(240, 16); });
+		ToggleMapContext();
 		Do([this] {
 			for(int i = 0; i < (int)Result().m_vEntries.size(); ++i)
 				if(Result().m_vEntries[i].m_Kind == MapDiff::EEntryKind::IMAGE && Result().m_vEntries[i].m_Name == "unused identical white")
@@ -505,7 +539,7 @@ class CSmokeEditor : public CEditor
 		});
 		Delay();
 		Do([this] { Check((Compare().*Access(TValueRows{})).size() == 2, "used resource lists its actual two source layer references"); });
-		Click([] { return vec2(240, 16); });
+		ToggleMapContext();
 		Do([this] { SelectKind(MapDiff::EEntryKind::LAYER, "Pixel tiles"); });
 		Delay();
 		Do([this] { CheckPixels(); Key(SDLK_HOME,true); });
@@ -514,9 +548,9 @@ class CSmokeEditor : public CEditor
 		Click([] { return vec2(167, 16); });
 		Click([] { return vec2(167, 16); });
 		Do([this] { Check((Compare().*Access(TSelectedEntry{})) == m_SavedEntry, "group to layer returns to focused child"); });
-		Click([] { return vec2(240, 16); });
+		ToggleMapContext();
 		Do([this] { for(int i=0;i<(int)Result().m_vEntries.size();++i) if(Result().m_vEntries[i].m_Name=="Unchanged") { (Compare().*Access(TSelect{}))(i); break; } });
-		Click([] { return vec2(240, 16); });
+		ToggleMapContext();
 		Do([this] { const auto &Nav=Compare().*Access(TNavigator{}); const int Selected=Compare().*Access(TSelectedEntry{}); Check(std::find(Nav.begin(),Nav.end(),Selected)!=Nav.end(),"hiding context selects visible navigator entry"); Key(SDLK_n,true); });
 		Delay(2);
 		Do([this] { Key(SDLK_n,false); const auto &Nav=Compare().*Access(TNavigator{}); Check(std::find(Nav.begin(),Nav.end(),Compare().*Access(TSelectedEntry{}))!=Nav.end(),"Next remains coherent after context change"); SelectKind(MapDiff::EEntryKind::SETTINGS); Graphics()->Resize(800,600,0); OnWindowResize(); });
@@ -541,6 +575,7 @@ class CSmokeEditor : public CEditor
 			{
 				auto pMap = std::make_unique<CEditorMap>(this);
 				pMap->CreateDefault();
+				str_copy(pMap->m_aDisplayName, "Fixture");
 				WhiteImage(*pMap, "fit", true);
 				auto pGroup = pMap->NewGroup();
 				str_copy(pGroup->m_aName, "Fit test");
@@ -616,7 +651,7 @@ class CSmokeEditor : public CEditor
 		}
 		Check(pBuffer == pGraphics->*Access(TCommandBuffer{}) && Uploads == 0 && TileDraws >= 3, "full-map steady frame reuses GPU tiles without uploads");
 	}
-	void ContextPixels(bool Context, bool Group)
+	void ContextPixels(bool Context, bool Group, bool FullMap = true)
 	{
 		CImageInfo Image;
 		static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Image);
@@ -635,14 +670,14 @@ class CSmokeEditor : public CEditor
 				const auto Actual = Image.PixelColor((int)(Point.x / Ui()->Screen()->w * Image.m_Width), (int)(Point.y / Ui()->Screen()->h * Image.m_Height));
 				Check(std::abs(Actual.r - Expected.r) < 0.012f && std::abs(Actual.g - Expected.g) < 0.012f && std::abs(Actual.b - Expected.b) < 0.012f, std::string(pWhat) + " side " + std::to_string(Side));
 			};
-			Sample(8, Context ? Over(Over(Background, ColorRGBA(1, 0, 0, 1), 0.25f), ColorRGBA(0, 0, 1, 1), 0.25f) : Background, "cross-group context preserves source order");
-			Sample(9, Context ? Over(Background, ColorRGBA(0, 0, 1, 1), 0.25f) : Background, "unselected changes remain neutral context");
-			Sample(10, Context ? Over(Over(Background, ColorRGBA(0, 0, 1, 1), 0.25f), ColorRGBA(1, 1, 1, 1), 0.65f) : Background, "selected layer context stays prominent above scenery");
-			Sample(11, Context ? Over(Background, ColorRGBA(1, 1, 1, 1), Group ? 0.65f : 0.25f) : Background, "sibling layer follows layer or group focus");
+			Sample(8, Context && FullMap ? Over(Over(Background, ColorRGBA(1, 0, 0, 1), 0.25f), ColorRGBA(0, 0, 1, 1), 0.25f) : Background, "cross-group context preserves source order");
+			Sample(9, Context && FullMap ? Over(Background, ColorRGBA(0, 0, 1, 1), 0.25f) : Background, "unselected changes remain neutral context");
+			Sample(10, Context ? Over(FullMap ? Over(Background, ColorRGBA(0, 0, 1, 1), 0.25f) : Background, ColorRGBA(1, 1, 1, 1), 0.65f) : Background, "selected layer context stays prominent above scenery");
+			Sample(11, Context && (FullMap || Group) ? Over(Background, ColorRGBA(1, 1, 1, 1), Group ? 0.65f : 0.25f) : Background, "sibling layer follows layer or group focus");
 			Sample(12, Side ? ColorRGBA(0.25f, 1, 0.45f, 1) : ColorRGBA(1, 0.3f, 0.3f, 1), "selected change remains visible");
-			Sample(14, Context ? Over(Background, ColorRGBA(0, 1, 0, 1), 0.25f) : Background, "background group offset and clipping");
+			Sample(14, Context && FullMap ? Over(Background, ColorRGBA(0, 1, 0, 1), 0.25f) : Background, "background group offset and clipping");
 			Sample(15, Background, "clipped background tile remains hidden");
-			Sample(16, Context ? Over(Background, ColorRGBA(0, 1, 1, 1), 0.25f) : Background, "untextured context uses the matching vertex layout");
+			Sample(16, Context && FullMap ? Over(Background, ColorRGBA(0, 1, 1, 1), 0.25f) : Background, "untextured context uses the matching vertex layout");
 		}
 		Image.Free();
 	}
@@ -702,6 +737,7 @@ class CSmokeEditor : public CEditor
 			{
 				auto pMap = std::make_unique<CEditorMap>(this);
 				pMap->CreateDefault();
+				str_copy(pMap->m_aDisplayName, "Fixture");
 				pMap->m_vpGroups.clear();
 				pMap->m_pGameGroup = nullptr;
 				pMap->m_MapViewState.m_WorldOffset = vec2(0, 0);
@@ -773,6 +809,9 @@ class CSmokeEditor : public CEditor
 		Delay();
 		Do([this] { ContextPixels(false, false); });
 		Click([] { return vec2(240, 16); });
+		Do([this] { Check((Compare().*Access(TContext{})) == 1, "context cycles to selected layer"); ContextPixels(true, false, false); });
+		Screenshot("selection-context-layer");
+		Click([] { return vec2(240, 16); });
 		Do([this] { ContextPixels(true, false); CheckCachedPane(); CheckContextBufferPixels(); });
 		Screenshot("full-map-context-layer");
 		Click([] { return vec2(167, 16); });
@@ -780,6 +819,11 @@ class CSmokeEditor : public CEditor
 		Delay();
 		Do([this] { ContextPixels(true, true); });
 		Screenshot("full-map-context-group");
+		Click([] { return vec2(240, 16); });
+		Click([] { return vec2(240, 16); });
+		Do([this] { Check((Compare().*Access(TContext{})) == 1, "context cycles to selected group"); ContextPixels(true, true, false); });
+		Screenshot("selection-context-group");
+		Click([] { return vec2(240, 16); });
 		for(const auto &[Center, Zoom] : {std::pair{vec2(50 * 32, 12 * 32), 20.0f}, std::pair{vec2(50 * 32, 12 * 32), 0.5f}, std::pair{vec2(10000, 10000), 1.0f}, std::pair{vec2(12 * 32, 10 * 32 + 16), 1.0f}})
 		{
 			Do([this, Center, Zoom] { Compare().*Access(TCenter{}) = Center; Compare().*Access(TZoom{}) = Zoom; });
@@ -793,7 +837,7 @@ class CSmokeEditor : public CEditor
 		Delay();
 		Do([this] { Compare().Open(*this, m_pBefore, m_pAfter); });
 		WaitReady();
-		Click([] { return vec2(240, 16); });
+		ToggleMapContext();
 		Do([this, Camera] {
 			bool Found = false;
 			for(int i = 0; i < (int)Result().m_vEntries.size(); ++i)
@@ -811,6 +855,174 @@ class CSmokeEditor : public CEditor
 		Delay();
 		Do([this] { CheckParallaxContext(); });
 		Do([this] { Check(HasRenderCache(Compare()), "reopen creates comparison cache"); Compare().Invalidate("context cache test"); Check(!HasRenderCache(Compare()), "source invalidation releases comparison cache"); Compare().Close(); });
+		Delay();
+	}
+	void NavigationSteps()
+	{
+		Do([this] {
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				auto pMap = std::make_unique<CEditorMap>(this);
+				pMap->CreateDefault();
+				str_copy(pMap->m_aDisplayName, "Fixture");
+				pMap->m_vpGroups.clear();
+				pMap->m_pGameGroup = nullptr;
+				pMap->m_MapViewState.m_WorldOffset = vec2(0, 0);
+				WhiteImage(*pMap, "navigation", true);
+				auto pGroup = pMap->NewGroup();
+				str_copy(pGroup->m_aName, "Navigation");
+				pGroup->m_OffsetX = Side * 32;
+				for(const char *pName : {"A", "B", "C", "Duplicate", "Duplicate"})
+				{
+					auto pTiles = std::make_shared<CLayerTiles>(pMap.get(), 64, 64);
+					str_copy(pTiles->m_aName, pName);
+					pTiles->m_Image = 0;
+					if(str_comp(pName, "A") == 0)
+					{
+						pTiles->m_pTiles[2 + 2 * 64].m_Index = Side + 1;
+						pTiles->m_pTiles[50 + 40 * 64].m_Index = Side + 1;
+					}
+					else if(str_comp(pName, "C") == 0)
+						pTiles->m_pTiles[7 + 9 * 64].m_Index = Side + 1;
+					else
+						pTiles->m_pTiles[0].m_Index = 1;
+					pGroup->AddLayer(pTiles);
+				}
+				auto pQuads = std::make_shared<CLayerQuads>(pMap.get());
+				str_copy(pQuads->m_aName, "Q");
+				pQuads->NewQuad(800, 640, 32, 32);
+				pQuads->m_vQuads[0].m_aColors[0].r = Side ? 128 : 255;
+				pGroup->AddLayer(pQuads);
+				if(Side)
+					str_copy(pMap->NewGroup()->m_aName, "Added empty");
+				(Side ? m_pAfter : m_pBefore) = pMap.get();
+				Maps().push_back(std::move(pMap));
+			}
+			CaptureSources();
+			Compare().*Access(TGroup{}) = false;
+			Compare().Open(*this, m_pBefore, m_pAfter);
+		});
+		WaitReady();
+		auto Find = [this](const char *pName) {
+			for(int i = 0; i < (int)Result().m_vEntries.size(); ++i)
+				if(Result().m_vEntries[i].m_Name == pName)
+					return i;
+			return -1;
+		};
+		auto Target = [this, Find](const char *pName, int Kind, int Index) {
+			const auto Detail = SelectedDetail(Compare());
+			Check(Detail == std::array{Find(pName), Kind, Index}, std::string("navigation target ") + pName + " kind " + std::to_string(Kind) + " index " + std::to_string(Index));
+			Check((Compare().*Access(TFocusEntry{})) == Find(pName), "navigation focus follows the actual difference");
+			if(Kind == 1)
+			{
+				const auto &Tile = Result().m_vEntries[Find(pName)].m_vTiles[Index];
+				Check(distance(Compare().*Access(TCenter{}), vec2(Tile.m_X * 32, Tile.m_Y * 32 + 16)) < 0.1f, "navigation centers the changed tile in both offset groups");
+			}
+			if(Kind == 2)
+				Check(distance(Compare().*Access(TCenter{}), vec2(784, 640)) < 0.1f, "navigation centers the changed quad");
+		};
+		auto Press = [this](SDL_Keycode KeyCode) {
+			Do([this, KeyCode] { Key(KeyCode, true); });
+			Delay(2);
+			Do([this, KeyCode] { Key(KeyCode, false); });
+			Delay(2);
+		};
+		Do([this, Find] {
+			Check(Result().ChangeCount() == 16, "navigation fixture includes structural and property differences for the added group");
+			Check((Compare().*Access(TChangedNavigator{})).size() == 5, "layer navigator separates group properties and child changes");
+			(Compare().*Access(TSelect{}))(Find("Navigation"));
+		});
+		Click([] { return vec2(240, 16); });
+		Do([this] {
+			const auto &Rows = Compare().*Access(TNavigator{});
+			Check(Rows.size() == 6 && Rows.back() == -1 && !(Compare().*Access(TUnchangedExpanded{})), "unchanged section starts collapsed after changed entries");
+		});
+		Click([] { return vec2(100, 53 + 5 * 36 + 18); });
+		Do([this] {
+			const auto &Rows = Compare().*Access(TNavigator{});
+			Check((Compare().*Access(TUnchangedExpanded{})) && Rows.size() > 6 && Rows[5] == -1, "unchanged section expands using its header");
+			bool OnlyUnchanged = true;
+			for(size_t i = 6; i < Rows.size(); ++i)
+				OnlyUnchanged &= !Result().m_vEntries[Rows[i]].Changed();
+			Check(OnlyUnchanged, "expanded section contains only unchanged items");
+		});
+		Screenshot("comparison-unchanged-section");
+		// Real toolbar and keyboard events must visit each difference exactly once.
+		Click([] { return vec2(391, 16); });
+		Do([Target] { Target("A", 1, 0); });
+		Press(SDLK_n);
+		Do([Target] { Target("A", 1, 1); });
+		Press(SDLK_n);
+		Do([Target] { Target("C", 1, 0); });
+		Press(SDLK_p);
+		Do([Target] { Target("A", 1, 1); });
+		Press(SDLK_n);
+		Press(SDLK_n);
+		Do([Target] { Target("Q", 2, 0); });
+		Press(SDLK_n);
+		Do([Target] { Target("Added empty", 4, 0); });
+		for(int i = 0; i < 10; ++i)
+		{
+			Press(SDLK_n);
+			Do([Target, i] { Target("Added empty", 0, i); });
+		}
+		Press(SDLK_n);
+		Do([Target] { Target("Navigation", 0, 0); });
+		Press(SDLK_p);
+		Do([Target] { Target("Added empty", 0, 9); });
+		// Arrow navigation may cross the header but must never select it.
+		Click([] { return vec2(100, 53 + 4 * 36 + 18); });
+		Press(SDLK_DOWN);
+		Do([this] { Check((Compare().*Access(TSelectedEntry{})) == (Compare().*Access(TNavigator{}))[6], "keyboard skips the unchanged header downwards"); });
+		Press(SDLK_UP);
+		Do([this, Find] { Check((Compare().*Access(TSelectedEntry{})) == Find("Added empty"), "keyboard skips the unchanged header upwards"); });
+		Do([this, Find] { (Compare().*Access(TSelect{}))(Find("B")); });
+		Press(SDLK_n);
+		Do([Target] { Target("Navigation", 0, 0); });
+		Do([this, Find] { (Compare().*Access(TSelect{}))(Find("B")); });
+		Press(SDLK_p);
+		Do([Target] { Target("Added empty", 0, 9); });
+		// Collapse with an unchanged selection, then enter group navigation.
+		Do([this, Find] { (Compare().*Access(TSelect{}))(Find("B")); });
+		Click([] { return vec2(100, 53 + 5 * 36 + 18); });
+		Do([this, Find] { Check(!(Compare().*Access(TUnchangedExpanded{})) && (Compare().*Access(TSelectedEntry{})) == Find("Navigation"), "collapse replaces hidden selection with a changed entry"); });
+		Press(SDLK_END);
+		Do([this, Find] { Check((Compare().*Access(TSelectedEntry{})) == Find("Added empty"), "End stops at the last real row before a collapsed header"); (Compare().*Access(TSelect{}))(Find("Navigation")); });
+		Press(SDLK_PAGEDOWN);
+		Do([this, Find] { Check((Compare().*Access(TSelectedEntry{})) == Find("Added empty"), "Page Down stops at the last real row before a collapsed header"); (Compare().*Access(TSelect{}))(Find("Navigation")); });
+		Click([] { return vec2(167, 16); });
+		Do([this] { Check((Compare().*Access(TChangedNavigator{})).size() == 2, "group navigator aggregates child changes"); });
+		for(const auto &[pName, Kind, Index] : {std::tuple{"A", 1, 0}, std::tuple{"A", 1, 1}, std::tuple{"C", 1, 0}, std::tuple{"Q", 2, 0}, std::tuple{"Added empty", 4, 0}})
+		{
+			Press(SDLK_n);
+			Do([Target, pName, Kind, Index] { Target(pName, Kind, Index); });
+		}
+		Do([this, Find] { (Compare().*Access(TSelect{}))(Find("Navigation")); });
+		Press(SDLK_p);
+		Do([Target] { Target("Added empty", 0, 9); });
+		Do([this, Find] { (Compare().*Access(TSelect{}))(Find("Added empty")); });
+		Press(SDLK_p);
+		Do([Target] { Target("Q", 2, 0); });
+		Click([] { return vec2(167, 16); });
+		Do([this, Find] { Check((Compare().*Access(TSelectedEntry{})) == Find("Q"), "group to layer follows backwards-navigated child"); });
+		Do([this] { CheckSources("comparison navigation"); Compare().Close(); });
+		Delay();
+		Do([this] {
+			// A distant sibling must not pull a child property's fit away from its layer.
+			for(auto *pMap : {m_pBefore, m_pAfter})
+				std::static_pointer_cast<CLayerTiles>(pMap->m_vpGroups[0]->m_vpLayers[2])->Resize(4096, 64);
+			str_copy(m_pAfter->m_vpGroups[0]->m_vpLayers[0]->m_aName, "A renamed");
+			Compare().*Access(TGroup{}) = true;
+			Compare().Open(*this, m_pBefore, m_pAfter);
+		});
+		WaitReady();
+		Do([this, Find] { (Compare().*Access(TSelect{}))(Find("Navigation")); });
+		Press(SDLK_n);
+		Do([this, Find] {
+			Check(SelectedDetail(Compare()) == std::array{Find("A renamed"), 0, 0}, "group navigation selects a child property");
+			Check(distance(Compare().*Access(TCenter{}), vec2(1008, 1024)) < 0.1f, "child property fit excludes other changed layers in the group");
+			Compare().Close();
+		});
 		Delay();
 	}
 	void MeasureMotion(const std::string &Name)
@@ -862,6 +1074,7 @@ class CSmokeEditor : public CEditor
 				{
 					auto pNew = std::make_unique<CEditorMap>(this);
 					pNew->CreateDefault();
+					str_copy(pNew->m_aDisplayName, "Fixture");
 					WhiteImage(*pNew, "dense", true);
 					auto pTiles = std::make_shared<CLayerTiles>(pNew.get(), 2048, 1024);
 					pTiles->m_Image = 0;
@@ -912,6 +1125,8 @@ class CSmokeEditor : public CEditor
 		if(LocalMaps)
 			Screenshot("performance-layer");
 		Click([] { return vec2(240, 16); });
+		MeasureFrames(LocalMaps ? "local selection context" : "dense selection context");
+		Click([] { return vec2(240, 16); });
 		MeasureFrames(LocalMaps ? "local context on" : "dense context on");
 		if(LocalMaps)
 			Screenshot("performance-full-context");
@@ -934,7 +1149,7 @@ class CSmokeEditor : public CEditor
 		Do([this] { Check((Compare().*Access(TZoom{})) <= 20.0f, "large group fit stays at inspection scale"); });
 		MeasureFrames(LocalMaps ? "local group context on" : "dense group context on");
 		MeasureMotion(LocalMaps ? "local group full context pan/zoom" : "dense group full context pan/zoom");
-		Click([] { return vec2(240, 16); });
+		ToggleMapContext();
 		MeasureFrames(LocalMaps ? "local group context off" : "dense group context off");
 		Do([this] { Compare().Close(); });
 		Delay();
@@ -958,7 +1173,7 @@ class CSmokeEditor : public CEditor
 			Delay();
 			Do([this] { CheckPixels(vec2(2040 * 32 + 16, 32 * 32 + 16)); CheckBatchedMarkers(); Compare().*Access(TZoom{}) = 20.0f; });
 			MeasureFrames("dense tile-only context off at far edge");
-			Click([] { return vec2(240, 16); });
+			ToggleMapContext();
 			MeasureFrames("dense tile-only context on at far edge");
 			Do([this] { Compare().Close(); });
 			Delay();
@@ -976,6 +1191,7 @@ class CSmokeEditor : public CEditor
 		RegressionSteps();
 		FitRegressionSteps();
 		FullContextSteps();
+		NavigationSteps();
 		PerformanceSteps(false);
 		const char *apNames[] = {"coverage", "Tutorial", "Tsunami", "Sunny Side Up"};
 		for(int Fixture = 0; Fixture < 4; ++Fixture)
@@ -985,7 +1201,27 @@ class CSmokeEditor : public CEditor
 			WaitReady();
 			Do([this, Name] { Check(Result().ChangeCount()==0,"equal real map "+Name); CheckSources(Name+" identical viewer"); });
 			if(Fixture == 0)
+			{
 				Screenshot("comparison-equal");
+				Click([] { return vec2(240, 16); });
+				Do([this] {
+					Check((Compare().*Access(TUnchangedExpanded{})) && (Compare().*Access(TSelectedEntry{})) >= 0, "equal maps open unchanged section with a real selection");
+					const int Selected = Compare().*Access(TSelectedEntry{});
+					Check(Selected >= 0 && (Result().m_vEntries[Selected].m_Kind == MapDiff::EEntryKind::LAYER || Result().m_vEntries[Selected].m_Kind == MapDiff::EEntryKind::GROUP), "equal-map selection context starts on spatial content");
+					m_SavedEntry = Compare().*Access(TSelectedEntry{});
+					m_SavedCenter = Compare().*Access(TCenter{});
+					Key(SDLK_n, true);
+				});
+				Delay(2);
+				Do([this] { Key(SDLK_n, false); Key(SDLK_p, true); });
+				Delay(2);
+				Do([this] { Key(SDLK_p, false); Check((Compare().*Access(TSelectedEntry{})) == m_SavedEntry && (Compare().*Access(TCenter{})) == m_SavedCenter, "equal-map Prev/Next preserve selection and camera"); });
+				Click([] { return vec2(100, 71); });
+				Do([this] { Check(!(Compare().*Access(TUnchangedExpanded{})) && (Compare().*Access(TSelectedEntry{})) == -1, "equal maps safely collapse the only navigator section"); });
+				Do([this] { Key(SDLK_END, true); });
+				Delay(2);
+				Do([this] { Key(SDLK_END, false); Check((Compare().*Access(TSelectedEntry{})) == -1, "End cannot select a header-only equal-map list"); });
+			}
 			Do([this] { Compare().Close(); });
 			Delay();
 			Do([this] { Mutate(); CaptureSources(); });
@@ -1009,7 +1245,7 @@ class CSmokeEditor : public CEditor
 			Do([this] { Check(Compare().*Access(TGroup{}),"By group button"); SelectKind(MapDiff::EEntryKind::GROUP,"Smoke"); });
 			Delay();
 			Screenshot("comparison-" + std::to_string(Fixture) + "-group");
-			Click([] { return vec2(240, 16); });
+			ToggleMapContext();
 			Do([this] { Check(Compare().*Access(TContext{}), "context toggle"); });
 			Click([] { return vec2(106, 16); });
 			WaitReady();

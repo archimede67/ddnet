@@ -42,7 +42,16 @@ class CMapCompare
 	MapDiff::CResult m_Result;
 	std::string m_Message;
 	bool m_ByGroup = false;
-	bool m_Context = false;
+	enum
+	{
+		CONTEXT_OFF,
+		CONTEXT_SELECTION,
+		CONTEXT_MAP,
+	};
+	int m_Context = CONTEXT_OFF;
+	bool m_UnchangedExpanded = false;
+	int m_UnchangedCount = 0;
+	char m_UnchangedButtonId{};
 	bool m_Panning = false;
 	vec2 m_LastMouse = vec2(0, 0);
 	vec2 m_Center = vec2(0, 0);
@@ -63,6 +72,7 @@ class CMapCompare
 	int m_ValueRowsEntry = -2;
 	int m_ValueRowsDetail = -2;
 	std::vector<int> m_vNavigator;
+	std::vector<int> m_vChangedNavigator;
 	CListBox m_Navigator;
 	CListBox m_Details;
 	CScrollRegion m_Values;
@@ -76,6 +86,7 @@ class CMapCompare
 	void RebuildNavigator();
 	void Select(int Entry);
 	void RebuildDetails();
+	bool IsDifference(const CDetail &Detail) const;
 	std::vector<MapDiff::CPropertyChange> DetailValues(const CDetail &Detail) const;
 	void Navigate(int Direction);
 	void FitSelection();
