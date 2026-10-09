@@ -1,6 +1,7 @@
 #include "map_compare.h"
 
 #include "editor.h"
+#include "map_compare_render.h"
 #include "map_diff_snapshot.h"
 
 #include <base/str.h>
@@ -20,6 +21,10 @@ namespace
 {
 	constexpr ColorRGBA REMOVE_COLOR(1.0f, 0.3f, 0.3f, 1.0f);
 	constexpr ColorRGBA ADD_COLOR(0.25f, 1.0f, 0.45f, 1.0f);
+	constexpr float MIN_ZOOM = 0.05f;
+	// Match the editor's 2000% limit. Drawing an entire huge map as subpixel
+	// tiles costs millions of submissions without providing useful detail.
+	constexpr float MAX_ZOOM = 20.0f;
 	class CFixedEnvelopeEval : public IEnvelopeEval
 	{
 		const CEditorMap &m_Map;
@@ -104,6 +109,15 @@ namespace
 		}
 		return std::string(Entry.Status()) + " " + pKind + Entry.m_Name + (Entry.m_Ambiguous ? " [?]" : "");
 	}
+	template<typename TCells, typename F>
+	void ForVisibleCells(const TCells &Cells, const CScreenRect &Visible, F Visit)
+	{
+		const int MinX = (int)std::floor(Visible.m_TopLeft.x / 32);
+		const int MaxX = (int)std::floor(Visible.m_BottomRight.x / 32);
+		const int MinY = (int)std::floor(Visible.m_TopLeft.y / 32);
+		const int MaxY = (int)std::floor(Visible.m_BottomRight.y / 32);
+		MapCompareRender::ForVisibleCells(Cells, MinX, MinY, MaxX, MaxY, Visit);
+	}
 	// Tile rendering uses canonical sparse cells, so stale skip/opaque flags and
 	// editor render toggles cannot hide current unsaved content.
 	void DrawTiles(CEditor &Editor, const std::vector<MapDiff::CCell> &Cells, const CScreenRect &Visible, ColorRGBA Color)
@@ -115,12 +129,9 @@ namespace
 		else
 			pGraphics->QuadsBegin();
 		pGraphics->SetColor(Color);
-		auto It = std::lower_bound(Cells.begin(), Cells.end(), (int)std::floor(Visible.m_TopLeft.y / 32) - 1, [](const auto &Cell, int Y) { return Cell.m_Y < Y; });
-		for(; It != Cells.end() && It->m_Y * 32 <= Visible.m_BottomRight.y; ++It)
-		{
-			const auto &Cell = *It;
-			if(!Cell.m_Tile.m_Index || Cell.m_X * 32 + 32 < Visible.m_TopLeft.x || Cell.m_X * 32 > Visible.m_BottomRight.x)
-				continue;
+		ForVisibleCells(Cells, Visible, [&](const auto &Cell) {
+			if(!Cell.m_Tile.m_Index)
+				return;
 			const auto &T = Cell.m_Tile;
 			const float X = (T.m_Index % 16) / 16.0f, Y = (T.m_Index / 16) / 16.0f;
 			vec2 aUV[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
@@ -142,22 +153,30 @@ namespace
 				pGraphics->QuadsTex3DDrawTL(&Quad, 1);
 			else
 				pGraphics->QuadsDrawTL(&Quad, 1);
-		}
+		});
 		if(Arrays)
 			pGraphics->QuadsTex3DEnd();
 		else
 			pGraphics->QuadsEnd();
 	}
+	void MarkerLines(CEditor &Editor, float X, float Y, float W, float H, int Side, float Zoom)
+	{
+		W = std::max(W, 2.0f * Zoom);
+		H = std::max(H, 2.0f * Zoom);
+		const float Size = std::min(10.0f * Zoom, 10.0f);
+		IGraphics::CLineItem aLines[] = {
+			{X, Y, X + W, Y}, {X + W, Y, X + W, Y + H},
+			{X + W, Y + H, X, Y + H}, {X, Y + H, X, Y},
+			{X + 2, Y + 2 + Size / 2, X + 2 + Size, Y + 2 + Size / 2},
+			{X + 2 + Size / 2, Y + 2, X + 2 + Size / 2, Y + 2 + Size}};
+		Editor.Graphics()->LinesDraw(aLines, Side == 0 ? 5 : 6);
+	}
 	void Marker(CEditor &Editor, float X, float Y, float W, float H, int Side, float Zoom, ColorRGBA Color)
 	{
-		CUIRect Rect{X, Y, std::max(W, 2.0f * Zoom), std::max(H, 2.0f * Zoom)};
-		Rect.DrawOutline(Color);
-		const float Size = std::min(10.0f * Zoom, 10.0f);
 		Editor.Graphics()->TextureClear();
 		Editor.Graphics()->LinesBegin();
 		Editor.Graphics()->SetColor(Color);
-		IGraphics::CLineItem aLines[2] = {{X + 2, Y + 2 + Size / 2, X + 2 + Size, Y + 2 + Size / 2}, {X + 2 + Size / 2, Y + 2, X + 2 + Size / 2, Y + 2 + Size}};
-		Editor.Graphics()->LinesDraw(aLines, Side == 0 ? 1 : 2);
+		MarkerLines(Editor, X, Y, W, H, Side, Zoom);
 		Editor.Graphics()->LinesEnd();
 	}
 }
@@ -298,9 +317,9 @@ void CMapCompare::OnInput(CEditor &Editor, const IInput::CEvent &Event)
 			if(m_aPanes[0].Inside(Mouse) || m_aPanes[1].Inside(Mouse))
 			{
 				if(Event.m_Key == KEY_MOUSE_WHEEL_UP)
-					m_Zoom = std::max(0.05f, m_Zoom / 1.2f);
+					m_Zoom = std::max(MIN_ZOOM, m_Zoom / 1.2f);
 				if(Event.m_Key == KEY_MOUSE_WHEEL_DOWN)
-					m_Zoom = std::min(4096.0f, m_Zoom * 1.2f);
+					m_Zoom = std::min(MAX_ZOOM, m_Zoom * 1.2f);
 				if(Event.m_Key == KEY_MOUSE_WHEEL_UP || Event.m_Key == KEY_MOUSE_WHEEL_DOWN)
 					return;
 			}
@@ -518,23 +537,46 @@ void CMapCompare::FitSelection()
 	if(m_SelectedEntry < 0 || !m_pData)
 		return;
 	float Left = std::numeric_limits<float>::max(), Top = Left, Right = -Left, Bottom = -Left;
-	auto Extend = [&](const MapDiff::CEntry &Entry, int Side, std::array<float, 4> Bounds) {
+	vec2 ContentCenter;
+	int ContentPriority = 0;
+	auto Extend = [&](const MapDiff::CEntry &Entry, int Side, std::array<float, 4> Bounds, bool Content = true) {
 		int G = Side == 0 ? Entry.m_BeforeGroup : Entry.m_AfterGroup;
 		if(G < 0 || !m_apSources[Side])
-			return;
+			return false;
 		const auto &Group = *m_apSources[Side]->m_vpGroups[G];
 		const vec2 Origin = ProjectionCenter(Group) - m_Center;
 		float X0 = Bounds[0] - Origin.x, X1 = Bounds[2] - Origin.x;
 		float Y0 = Bounds[1] - Origin.y, Y1 = Bounds[3] - Origin.y;
+		if(Group.m_UseClipping)
+		{
+			const auto &Map = *m_apSources[Side];
+			const vec2 GameOrigin = Map.m_pGameGroup ? ProjectionCenter(*Map.m_pGameGroup) - m_Center : vec2(0, 0);
+			X0 = std::max(X0, Group.m_ClipX - GameOrigin.x);
+			Y0 = std::max(Y0, Group.m_ClipY - GameOrigin.y);
+			X1 = std::min(X1, Group.m_ClipX + (float)Group.m_ClipW - GameOrigin.x);
+			Y1 = std::min(Y1, Group.m_ClipY + (float)Group.m_ClipH - GameOrigin.y);
+			if(X0 >= X1 || Y0 >= Y1)
+				return false;
+		}
 		Left = std::min(Left, std::min(X0, X1));
 		Top = std::min(Top, std::min(Y0, Y1));
 		Right = std::max(Right, std::max(X0, X1));
 		Bottom = std::max(Bottom, std::max(Y0, Y1));
+		const int Priority = (Entry.Changed() ? 2 : 1) + (m_FocusEntry >= 0 && &Entry == &m_Result.m_vEntries[m_FocusEntry] ? 2 : 0);
+		if(Content && Priority > ContentPriority)
+		{
+			ContentCenter = vec2((X0 + X1) / 2, (Y0 + Y1) / 2);
+			ContentPriority = Priority;
+		}
+		return true;
 	};
 	for(int i = 0; i < (int)m_Result.m_vEntries.size(); ++i)
 	{
 		const auto &Entry = m_Result.m_vEntries[i];
 		if(i != m_SelectedEntry && Entry.m_Parent != m_SelectedEntry)
+			continue;
+		const auto &Selected = m_Result.m_vEntries[m_SelectedEntry];
+		if(!m_Context && !Entry.Changed() && !Selected.Changed())
 			continue;
 		if(m_SelectedDetail >= 0)
 		{
@@ -569,7 +611,17 @@ void CMapCompare::FitSelection()
 				}
 			}
 			if(pLayer->m_Width > 0)
-				Extend(Entry, Side, {0, 0, pLayer->m_Width * 32.0f, pLayer->m_Height * 32.0f});
+			{
+				Extend(Entry, Side, {0, 0, pLayer->m_Width * 32.0f, pLayer->m_Height * 32.0f}, false);
+				auto AddCell = [&](const auto &Cell) {
+					return Extend(Entry, Side, {Cell.m_X * 32.0f, Cell.m_Y * 32.0f, Cell.m_X * 32.0f + 32, Cell.m_Y * 32.0f + 32});
+				};
+				auto Change = std::find_if(Entry.m_vTiles.begin(), Entry.m_vTiles.end(), [&](const auto &Cell) {
+					return !((Side == 0 ? Cell.m_Before : Cell.m_After) == MapDiff::CTile{}) && AddCell(Cell);
+				});
+				if(Change == Entry.m_vTiles.end())
+					std::find_if(pLayer->m_vCells.begin(), pLayer->m_vCells.end(), AddCell);
+			}
 			for(int O = 0; O < (int)pLayer->m_vObjects.size(); ++O)
 				Extend(Entry, Side, ObjectBounds(*m_apSources[Side], SourceLayer, O, pLayer->m_vObjects[O].m_aBounds));
 		}
@@ -577,7 +629,10 @@ void CMapCompare::FitSelection()
 	if(Left <= Right && Top <= Bottom)
 	{
 		m_Center = vec2((Left + Right) / 2, (Top + Bottom) / 2);
-		m_Zoom = std::clamp(std::max((Right - Left + 64) / std::max(200.0f, m_aPanes[0].w), (Bottom - Top + 64) / std::max(160.0f, m_aPanes[0].h)), 0.05f, 4096.0f);
+		const float FitZoom = std::max((Right - Left + 64) / std::max(200.0f, m_aPanes[0].w), (Bottom - Top + 64) / std::max(160.0f, m_aPanes[0].h));
+		m_Zoom = std::clamp(FitZoom, MIN_ZOOM, MAX_ZOOM);
+		if(FitZoom > MAX_ZOOM && ContentPriority > 0)
+			m_Center = ContentCenter;
 	}
 }
 
@@ -785,7 +840,6 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 		const auto &SourceLayer = *Group.m_vpLayers[L];
 		const vec2 GroupCenter = ProjectionCenter(Group);
 		const vec2 TopLeft = GroupCenter - Pane.Size() * m_Zoom / 2;
-		const CScreenRect Visible(TopLeft, TopLeft + Pane.Size() * m_Zoom);
 		const vec2 FullTopLeft = TopLeft - Pane.TopLeft() * m_Zoom;
 		CUIRect Clip = Pane;
 		if(Group.m_UseClipping)
@@ -803,6 +857,8 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 		}
 		if(Clip.w <= 0 || Clip.h <= 0)
 			continue;
+		const vec2 VisibleStart = TopLeft + (Clip.TopLeft() - Pane.TopLeft()) * m_Zoom;
+		const CScreenRect Visible(VisibleStart, VisibleStart + Clip.Size() * m_Zoom);
 		Editor.Ui()->ClipEnable(&Clip);
 		pGraphics->MapScreen(CScreenRect(FullTopLeft, FullTopLeft + Editor.Ui()->Screen()->Size() * m_Zoom));
 		pGraphics->BlendNormal();
@@ -832,18 +888,18 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 			if(m_Context || WholeLayer)
 				DrawTiles(Editor, pLayer->m_vCells, Visible, WholeLayer ? Color.Multiply(Highlight) : Color.Multiply(ColorRGBA(1, 1, 1, 0.35f)));
 			std::vector<MapDiff::CCell> vVisibleChanges;
-			auto ChangeIt = std::lower_bound(Entry.m_vTiles.begin(), Entry.m_vTiles.end(), (int)std::floor(Visible.m_TopLeft.y / 32), [](const auto &Cell, int Y) { return Cell.m_Y < Y; });
-			for(; ChangeIt != Entry.m_vTiles.end() && ChangeIt->m_Y * 32 <= Visible.m_BottomRight.y; ++ChangeIt)
-			{
-				const auto &Change = *ChangeIt;
-				if(Change.m_X * 32 + 32 >= Visible.m_TopLeft.x && Change.m_X * 32 <= Visible.m_BottomRight.x && Change.m_Y * 32 + 32 >= Visible.m_TopLeft.y && Change.m_Y * 32 <= Visible.m_BottomRight.y)
-					vVisibleChanges.push_back({Change.m_X, Change.m_Y, Side == 0 ? Change.m_Before : Change.m_After});
-			}
+			ForVisibleCells(Entry.m_vTiles, Visible, [&](const auto &Change) {
+				vVisibleChanges.push_back({Change.m_X, Change.m_Y, Side == 0 ? Change.m_Before : Change.m_After});
+			});
 			if(!WholeLayer)
 				DrawTiles(Editor, vVisibleChanges, Visible, Color.Multiply(Highlight));
+			pGraphics->TextureClear();
+			pGraphics->LinesBegin();
+			pGraphics->SetColor(Highlight);
 			for(const auto &Cell : vVisibleChanges)
 				if(!(Cell.m_Tile == MapDiff::CTile{}))
-					Marker(Editor, Cell.m_X * 32.0f, Cell.m_Y * 32.0f, 32, 32, Side, m_Zoom, Highlight);
+					MarkerLines(Editor, Cell.m_X * 32.0f, Cell.m_Y * 32.0f, 32, 32, Side, m_Zoom);
+			pGraphics->LinesEnd();
 			if(WholeLayer)
 				Marker(Editor, 0, 0, pLayer->m_Width * 32.0f, pLayer->m_Height * 32.0f, Side, m_Zoom, Highlight);
 			// Source overlay functions are read-only and include number, delay,
@@ -851,18 +907,15 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 			if(m_Zoom <= 4 && (m_Context || WholeLayer || !vVisibleChanges.empty()))
 			{
 				const auto &Cells = m_Context || WholeLayer ? pLayer->m_vCells : vVisibleChanges;
-				auto CellIt = std::lower_bound(Cells.begin(), Cells.end(), (int)std::floor(Visible.m_TopLeft.y / 32), [](const auto &Cell, int Y) { return Cell.m_Y < Y; });
-				for(; CellIt != Cells.end() && CellIt->m_Y * 32 <= Visible.m_BottomRight.y; ++CellIt)
-				{
-					const auto &Cell = *CellIt;
+				ForVisibleCells(Cells, Visible, [&](const auto &Cell) {
 					vec2 Pos(Cell.m_X * 32.0f, Cell.m_Y * 32.0f);
 					if(!Visible.Inside(Pos) || pLayer->m_Kind == MapDiff::ELayerKind::TILES || pLayer->m_Kind == MapDiff::ELayerKind::GAME || pLayer->m_Kind == MapDiff::ELayerKind::FRONT)
-						continue;
+						return;
 					std::string Text = pLayer->m_Kind == MapDiff::ELayerKind::SPEEDUP ? std::to_string(Cell.m_Tile.m_Force) + "/" + std::to_string(Cell.m_Tile.m_MaxSpeed) + "\n" + std::to_string(Cell.m_Tile.m_Angle) + " deg" : std::to_string(Cell.m_Tile.m_Number);
 					if(pLayer->m_Kind == MapDiff::ELayerKind::SWITCH)
 						Text += "/" + std::to_string(Cell.m_Tile.m_Delay);
 					Editor.TextRender()->Text(Pos.x + 2, Pos.y + 18, 7, Text.c_str(), 32);
-				}
+				});
 			}
 		}
 		else if(SourceLayer.m_Type == LAYERTYPE_QUADS)

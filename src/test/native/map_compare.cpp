@@ -58,6 +58,7 @@ ACCESSOR(TZoom, CMapCompare, m_Zoom, float)
 ACCESSOR(TValues, CMapCompare, m_Values, CScrollRegion)
 ACCESSOR(TContentSize, CScrollRegion, m_ContentSize, float)
 ACCESSOR(TValueRows, CMapCompare, m_vValueRows, std::vector<MapDiff::CPropertyChange>)
+ACCESSOR(TCommandBuffer, CGraphics_Threaded, m_pCommandBuffer, CCommandBuffer *)
 using TPaneArray = CUIRect[2];
 ACCESSOR(TPanes, CMapCompare, m_aPanes, TPaneArray)
 struct TFit
@@ -66,6 +67,12 @@ struct TFit
 	friend Type Access(TFit);
 };
 template struct CAccess<TFit, &CMapCompare::FitSelection>;
+struct TRenderPane
+{
+	using Type = void (CMapCompare::*)(CEditor &, CUIRect, int);
+	friend Type Access(TRenderPane);
+};
+template struct CAccess<TRenderPane, &CMapCompare::RenderPane>;
 bool HasSnapshot(CMapCompare &);
 template<auto Member>
 struct CDataAccess
@@ -107,6 +114,8 @@ class CSmokeEditor : public CEditor
 	int m_StepFrames = 0;
 	int m_Failures = 0;
 	int m_SavedEntry = -1;
+	bool m_MeasureRender = false;
+	double m_LastRenderMs = 0;
 	vec2 m_SavedCenter;
 	std::vector<std::shared_ptr<CLayerTiles>> m_vPixelLayers;
 	CEditorMap *m_pBefore = nullptr, *m_pAfter = nullptr;
@@ -436,7 +445,7 @@ class CSmokeEditor : public CEditor
 		Compare().*Access(TGroup{}) = false;
 		Compare().Open(*this, m_pBefore, m_pAfter);
 	}
-	void CheckPixels()
+	void CheckPixels(vec2 WorldPosition = vec2(180 * 32 + 16, 190 * 32 + 16))
 	{
 		CImageInfo Image;
 		static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Image);
@@ -451,8 +460,8 @@ class CSmokeEditor : public CEditor
 			const float Zoom = Compare().*Access(TZoom{});
 			const auto &Group = *(Side ? m_pAfter : m_pBefore)->m_vpGroups.back();
 			const vec2 Projection = Center + vec2(Origin.x * Group.m_ParallaxX / 100.0f + Group.m_OffsetX, Origin.y * Group.m_ParallaxY / 100.0f + Group.m_OffsetY);
-			const vec2 Point = Pane.Center() + (vec2(180 * 32 + 16, 190 * 32 + 16) - Projection) / Zoom;
-			Check(Pane.Inside(Point), "zero-parallax fit reveals distant tile side " + std::to_string(Side));
+			const vec2 Point = Pane.Center() + (WorldPosition - Projection) / Zoom;
+			Check(Pane.Inside(Point), "fit/pan reveals sampled tile side " + std::to_string(Side));
 			const int X = (int)(Point.x / Ui()->Screen()->w * Image.m_Width), Y = (int)(Point.y / Ui()->Screen()->h * Image.m_Height);
 			if(X < 0 || Y < 0 || X >= (int)Image.m_Width || Y >= (int)Image.m_Height)
 			{
@@ -517,10 +526,209 @@ class CSmokeEditor : public CEditor
 		Do([this] { Check(Result().ChangeCount()==0,"reopened comparison completes after cancelled work is reaped"); Compare().Close(); });
 		Delay();
 	}
+	void FitRegressionSteps()
+	{
+		Do([this] {
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				auto pMap = std::make_unique<CEditorMap>(this);
+				pMap->CreateDefault();
+				WhiteImage(*pMap, "fit", true);
+				auto pGroup = pMap->NewGroup();
+				str_copy(pGroup->m_aName, "Fit test");
+				auto pHidden = std::make_shared<CLayerTiles>(pMap.get(), 4, 4);
+				pHidden->m_Image = 0;
+				pHidden->m_pTiles[0].m_Index = 1;
+				pGroup->AddLayer(pHidden);
+				auto pFar = std::make_shared<CLayerTiles>(pMap.get(), 2048, 1024);
+				str_copy(pFar->m_aName, Side ? "Changed" : "Original");
+				pFar->m_Image = 0;
+				pFar->m_pTiles[2000 + 900 * 2048].m_Index = 1;
+				pGroup->AddLayer(pFar);
+				(Side ? m_pAfter : m_pBefore) = pMap.get();
+				Maps().push_back(std::move(pMap));
+			}
+			Compare().*Access(TGroup{}) = true;
+			Compare().Open(*this, m_pBefore, m_pAfter);
+		});
+		WaitReady();
+		auto SelectGroup = [this] {
+			for(int i = 0; i < (int)Result().m_vEntries.size(); ++i)
+				if(Result().m_vEntries[i].m_Kind == MapDiff::EEntryKind::GROUP && Result().m_vEntries[i].m_Name == "Fit test")
+					(Compare().*Access(TSelect{}))(i);
+		};
+		Do(SelectGroup);
+		Delay();
+		Do([this] { CheckPixels(vec2(2000 * 32 + 16, 900 * 32 + 16)); Compare().Close(); });
+		Delay();
+		Do([this] {
+			for(auto *pMap : {m_pBefore, m_pAfter})
+			{
+				auto pGroup = pMap->m_vpGroups.back();
+				pGroup->m_UseClipping = 1;
+				pGroup->m_ClipX = 2000 * 32;
+				pGroup->m_ClipY = 900 * 32;
+				pGroup->m_ClipW = pGroup->m_ClipH = 64;
+				std::static_pointer_cast<CLayerTiles>(pGroup->m_vpLayers.back())->m_pTiles[0].m_Index = 1;
+			}
+			Compare().Open(*this, m_pBefore, m_pAfter);
+		});
+		WaitReady();
+		Do(SelectGroup);
+		Delay();
+		Do([this] { CheckPixels(vec2(2000 * 32 + 16, 900 * 32 + 16)); Compare().Close(); });
+		Delay();
+	}
+	void CheckBatchedMarkers()
+	{
+		auto *pGraphics = static_cast<CGraphics_Threaded *>(Graphics());
+		CImageInfo Image;
+		pGraphics->ReadFramebuffer(Image); // Start with an empty command buffer.
+		Image.Free();
+		auto *pBuffer = pGraphics->*Access(TCommandBuffer{});
+		const auto Calls = pBuffer->m_RenderCallCount;
+		(Compare().*Access(TRenderPane{}))(*this, (Compare().*Access(TPanes{}))[0], 0);
+		Check(pBuffer == pGraphics->*Access(TCommandBuffer{}) && pBuffer->m_RenderCallCount - Calls < 20, "visible changed tile markers share bounded render batches");
+	}
+	void MeasureFrames(const std::string &Name)
+	{
+		Do([this] { m_MeasureRender = true; });
+		Delay(2);
+		m_vSteps.push_back([this, Name, Count = 0, Total = 0.0, Maximum = 0.0]() mutable {
+			Total += m_LastRenderMs;
+			Maximum = std::max(Maximum, m_LastRenderMs);
+			if(++Count < 5)
+				return false;
+			m_Log << "TIMING render " << Name << " zoom=" << (Compare().*Access(TZoom{})) << " mean_ms=" << Total / Count << " max_ms=" << Maximum << std::endl;
+			m_MeasureRender = false;
+			return true;
+		});
+	}
+	void PerformanceSteps(bool LocalMaps)
+	{
+		Do([this, LocalMaps] {
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				CEditorMap *pMap;
+				if(LocalMaps)
+				{
+					Check(Load(Side ? "maps/perf-after.map" : "maps/perf-before.map", IStorage::TYPE_SAVE), "load local performance fixture");
+					pMap = Map();
+				}
+				else
+				{
+					auto pNew = std::make_unique<CEditorMap>(this);
+					pNew->CreateDefault();
+					WhiteImage(*pNew, "dense", true);
+					auto pTiles = std::make_shared<CLayerTiles>(pNew.get(), 2048, 1024);
+					pTiles->m_Image = 0;
+					for(int n = 0; n < pTiles->m_Width * pTiles->m_Height; ++n)
+						pTiles->m_pTiles[n].m_Index = Side && n < 64 * pTiles->m_Width ? 2 : 1;
+					pNew->NewGroup()->AddLayer(pTiles);
+					pMap = pNew.get();
+					Maps().push_back(std::move(pNew));
+				}
+				(Side ? m_pAfter : m_pBefore) = pMap;
+			}
+			this->*Access(TSelectedMap{}) = Maps().size() - 2;
+			// A layer property edit exercises whole-layer drawing even with context off.
+			std::shared_ptr<CLayerTiles> pLargest;
+			std::shared_ptr<CLayerGroup> pLargestGroup;
+			size_t MostTiles = 0;
+			for(const auto &pGroup : m_pAfter->m_vpGroups)
+				for(const auto &pLayer : pGroup->m_vpLayers)
+					if(pLayer->m_Type == LAYERTYPE_TILES)
+					{
+						auto pTiles = std::static_pointer_cast<CLayerTiles>(pLayer);
+						size_t Nonempty = 0;
+						for(int n = 0; n < pTiles->m_Width * pTiles->m_Height; ++n)
+							Nonempty += pTiles->m_pTiles[n].m_Index != 0;
+						if(!pLargest || Nonempty > MostTiles)
+						{
+							pLargest = pTiles;
+							pLargestGroup = pGroup;
+							MostTiles = Nonempty;
+						}
+					}
+			Check(pLargest != nullptr, "performance fixture has tile layer");
+			if(pLargest)
+			{
+				str_copy(pLargest->m_aName, "Perf layer");
+				str_copy(pLargestGroup->m_aName, "Perf group");
+				m_Log << "TIMING fixture dimensions=" << pLargest->m_Width << "x" << pLargest->m_Height << " nonempty=" << MostTiles << std::endl;
+			}
+			Compare().*Access(TGroup{}) = false;
+			Compare().Open(*this, m_pBefore, m_pAfter);
+		});
+		WaitReady();
+		Do([this] {
+			SelectKind(MapDiff::EEntryKind::LAYER, "Perf layer");
+			Check((Compare().*Access(TZoom{})) <= 20.0f, "large layer automatic fit stays at inspection scale");
+		});
+		MeasureFrames(LocalMaps ? "local context off" : "dense context off");
+		if(LocalMaps)
+			Screenshot("performance-layer");
+		Click([] { return vec2(240, 16); });
+		MeasureFrames(LocalMaps ? "local context on" : "dense context on");
+		Do([this] {
+			const auto P = (Compare().*Access(TPanes{}))[0].Center();
+			Ui()->OnCursorMove((P.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (P.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
+		});
+		Delay();
+		Do([this] {
+			IInput::CEvent Event{};
+			Event.m_Key = KEY_MOUSE_WHEEL_DOWN;
+			Event.m_Flags = IInput::FLAG_PRESS;
+			for(int i = 0; i < 80; ++i)
+				Compare().OnInput(*this, Event);
+			Check((Compare().*Access(TZoom{})) <= 20.0f, "wheel cannot zoom out to an unbounded tile workload");
+		});
+		MeasureFrames(LocalMaps ? "local maximum zoom out" : "dense maximum zoom out");
+		Click([] { return vec2(167, 16); });
+		Do([this] { Check((Compare().*Access(TZoom{})) <= 20.0f, "large group fit stays at inspection scale"); });
+		MeasureFrames(LocalMaps ? "local group context on" : "dense group context on");
+		Click([] { return vec2(240, 16); });
+		MeasureFrames(LocalMaps ? "local group context off" : "dense group context off");
+		Do([this] { Compare().Close(); });
+		Delay();
+		if(!LocalMaps)
+		{
+			Do([this] {
+				auto pGroup = m_pAfter->m_vpGroups.back();
+				str_copy(pGroup->m_aName, m_pBefore->m_vpGroups.back()->m_aName);
+				str_copy(pGroup->m_vpLayers.back()->m_aName, m_pBefore->m_vpGroups.back()->m_vpLayers.back()->m_aName);
+				Compare().*Access(TGroup{}) = false;
+				Compare().Open(*this, m_pBefore, m_pAfter);
+			});
+			WaitReady();
+			Do([this] {
+				SelectKind(MapDiff::EEntryKind::LAYER);
+				const auto &Entry = Result().m_vEntries[Compare().*Access(TSelectedEntry{})];
+				Check(Entry.m_vProperties.empty() && Entry.m_vTiles.size() == 64u * 2048, "large tile-only changes exercise sparse rendering");
+				Compare().*Access(TCenter{}) = vec2(2040 * 32 + 16, 32 * 32 + 16);
+				Compare().*Access(TZoom{}) = 1.0f;
+			});
+			Delay();
+			Do([this] { CheckPixels(vec2(2040 * 32 + 16, 32 * 32 + 16)); CheckBatchedMarkers(); Compare().*Access(TZoom{}) = 20.0f; });
+			MeasureFrames("dense tile-only context off at far edge");
+			Click([] { return vec2(240, 16); });
+			MeasureFrames("dense tile-only context on at far edge");
+			Do([this] { Compare().Close(); });
+			Delay();
+		}
+	}
 	void Setup()
 	{
 		Delay(10);
+		if(Storage()->FileExists("maps/perf-before.map", IStorage::TYPE_SAVE) && Storage()->FileExists("maps/perf-after.map", IStorage::TYPE_SAVE))
+		{
+			PerformanceSteps(true);
+			Do([this] { m_Log << "RESULT failures=" << m_Failures << " steps=" << m_vSteps.size() << std::endl; Client()->Quit(); });
+			return;
+		}
 		RegressionSteps();
+		FitRegressionSteps();
+		PerformanceSteps(false);
 		const char *apNames[] = {"coverage", "Tutorial", "Tsunami", "Sunny Side Up"};
 		for(int Fixture = 0; Fixture < 4; ++Fixture)
 		{
@@ -604,7 +812,15 @@ public:
 	void OnUpdate() override { CEditor::OnUpdate(); }
 	void OnRender() override
 	{
+		const auto RenderStart = std::chrono::steady_clock::now();
 		CEditor::OnRender();
+		if(m_MeasureRender)
+		{
+			CImageInfo Image;
+			static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Image);
+			Image.Free();
+			m_LastRenderMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - RenderStart).count();
+		}
 		if(m_vSteps.empty())
 		{
 			m_Log.open("map-compare-native-results.log");

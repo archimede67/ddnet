@@ -10,6 +10,7 @@ Comparison reads current in-memory content, including unsaved edits. Both panes 
 - **By layer / By group** changes how the same result is organized. Map metadata, ordered server settings, images, sounds, and envelopes appear in the map-wide entries. Group properties remain inspectable in layer mode.
 - The navigator gives change counts. Select a row to inspect its layers or resource. Select a detail below the canvases to read exact Before/After fields. Tile coordinates and object indices are zero-based. Fixed-point coordinates and envelope values explicitly state their units.
 - **Prev / Next**, or **P / N**, move through individual changes and across entries. **Fit / Home** fits the selected tile, object, layer, or group. Drag either canvas with the left or middle mouse button to pan both; use the wheel over a canvas to zoom both.
+- Zoom-out is limited to a useful inspection scale, matching the normal editor's maximum. If a layer or group is too large to fit at that scale, Fit centers on a changed tile or occupied area. Pan or use Prev/Next to inspect the rest; exact differences remain available throughout the map.
 - **Context: off** shows changed content by default. **Context: on** also shows unchanged layers/items as dim context and includes unchanged navigator entries.
 - Red **minus** markers identify old content. Green **plus** markers identify new content. Replacements appear on both sides. Added/deleted layers and groups remain navigable, including empty ones. Textual statuses and exact fields accompany color.
 - Envelopes in both panes use time zero plus each object's persisted time offset. Parallax is evaluated at the same initial reference position on both sides. Fit and pan use an independent inspection translation so even zero-parallax content can be inspected, while source group offsets and parallax differences stay observable. The viewer has its own camera and clipping; it does not switch the active editing tab or change the source animation evaluators.
@@ -43,7 +44,7 @@ Use a compiler environment appropriate for your platform. On Windows, use a Visu
 ```sh
 cmake -S . -B build/map-comparison -G Ninja -DCMAKE_BUILD_TYPE=Debug -DDOWNLOAD_GTEST=ON
 cmake --build build/map-comparison --target game-client testrunner
-build/map-comparison/testrunner --gtest_filter=MapDiff.*:Editor.*
+build/map-comparison/testrunner --gtest_filter=MapDiff.*:MapCompareRender.*:Editor.*
 ```
 
 Append `.exe` to executable names on Windows. Supply your platform's dependency options as usual.
@@ -58,5 +59,7 @@ ctest --test-dir build/map-comparison-native -R '^MapCompare.Native$' --output-o
 ```
 
 The runner creates isolated storage below the build directory, retains per-run reports and screenshots, and fails on assertion failures, crashes, or timeout. The checked-in harness exercises the real editor and input/render lifecycle. It covers special tile arrays, angle-only speedup edits, ignored fields, semantic resource renumbering with actual presentation references, snapshot independence, a nonempty brush and source histories, held closing input, immediate reopen/cancel cleanup, changed-to-equal reopening, Home and navigator mode/context changes, wrapped inspector values, and distant zero-parallax content. A solid white source texture produces deterministic red/green tile-interior framebuffer samples; those pixels are asserted independently of screenshot writes. The bundled-map corpus also records isolated capture-of-both-sources and pure comparison timings.
+
+The native suite also exercises a dense 2048-by-1024 tile layer, automatic fit, wheel limits, and rendering in both context modes and navigation modes. It checks that Fit reveals distant changes despite hidden unchanged layers or group clipping, samples changed tiles at the far edge, and bounds marker render submissions. A deterministic unit test bounds coordinate reads when culling a 20,000-column layer. To benchmark downloaded maps separately, set `DDNET_MAP_COMPARE_PERF_BEFORE` and `DDNET_MAP_COMPARE_PERF_AFTER` to their paths before running the native test. The runner copies them into isolated storage and makes in-memory layer and group property edits to exercise whole-layer rendering. It logs frame timings including framebuffer synchronization; it does not impose hardware-specific timing assertions.
 
 The pure-core suite covers coordinate-preserving resize, all tile value fields, owned snapshots, layer/object insertion and order, duplicate names, semantic resource renumbering, missing content, metadata and ordered duplicate commands, group changes, envelope/source properties, cancellation, and sparse large extents. Native rendering and source-state checks must be recorded separately; passing this corpus does not establish that all real-world maps are issue-free.

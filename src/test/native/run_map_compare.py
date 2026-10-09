@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Run the opt-in real editor test client with isolated storage and an assertion oracle."""
+import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -8,11 +10,20 @@ import tempfile
 
 def main():
     executable, source, output = (pathlib.Path(arg).resolve() for arg in sys.argv[1:])
+    fixtures = [os.environ.get(f"DDNET_MAP_COMPARE_PERF_{side}") for side in ("BEFORE", "AFTER")]
+    if any(fixtures) and not all(fixtures):
+        print("Set both DDNET_MAP_COMPARE_PERF_BEFORE and DDNET_MAP_COMPARE_PERF_AFTER.")
+        return 1
     output.mkdir(parents=True, exist_ok=True)
     # Preserve each run's report/screenshots without using the user's DDNet profile.
     run = pathlib.Path(tempfile.mkdtemp(prefix="run-", dir=output))
     save = run / "save"
     (save / "screenshots").mkdir(parents=True)
+    # Optional local maps stay outside the repository and the user's profile.
+    for side, fixture in zip(("before", "after"), fixtures):
+        if fixture:
+            (save / "maps").mkdir(exist_ok=True)
+            shutil.copyfile(fixture, save / f"maps/perf-{side}.map")
     (run / "storage.cfg").write_text(
         f"add_path {save.as_posix()}\nadd_path {(source / 'data').as_posix()}\n",
         encoding="utf-8",
