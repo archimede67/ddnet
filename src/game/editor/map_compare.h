@@ -52,6 +52,17 @@ class CMapCompare
 	bool m_UnchangedExpanded = false;
 	int m_UnchangedCount = 0;
 	char m_UnchangedButtonId{};
+	bool m_ShowLayers = false;
+	struct CLayerState
+	{
+		bool m_Visible = true;
+		bool m_Expanded = true;
+		size_t m_Changes = 0; // Groups include their children's differences.
+	};
+	std::vector<CLayerState> m_vLayerStates;
+	CScrollRegion m_LayerTree;
+	bool m_ScrollToLayer = false;
+	bool m_LayerTreeActive = true;
 	bool m_Panning = false;
 	vec2 m_LastMouse = vec2(0, 0);
 	vec2 m_Center = vec2(0, 0);
@@ -77,13 +88,16 @@ class CMapCompare
 	CListBox m_Details;
 	CScrollRegion m_Values;
 	CListBox m_aPairLists[2];
-	char m_aButtonIds[12]{};
+	char m_aButtonIds[15]{};
 	bool ValidSources(const CEditor &Editor) const;
 	void Start(CEditor &Editor);
 	void CancelWork();
 	void ReleaseBuffers();
 	vec2 ProjectionCenter(const CLayerGroup &Group) const;
-	void RebuildNavigator();
+	void RebuildNavigator(bool KeepSelection = false);
+	bool LayerVisible(int Entry) const;
+	void RevealLayerSelection();
+	void RenderLayerTree(CEditor &Editor, CUIRect View);
 	void Select(int Entry);
 	void RebuildDetails();
 	bool IsDifference(const CDetail &Detail) const;

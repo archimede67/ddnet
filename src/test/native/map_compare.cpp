@@ -49,6 +49,13 @@ ACCESSOR(TSelectedMap, CEditor, m_SelectedMap, size_t)
 ACCESSOR(TResult, CMapCompare, m_Result, MapDiff::CResult)
 ACCESSOR(TContext, CMapCompare, m_Context, int)
 ACCESSOR(TUnchangedExpanded, CMapCompare, m_UnchangedExpanded, bool)
+ACCESSOR(TShowLayers, CMapCompare, m_ShowLayers, bool)
+ACCESSOR(TLayerTree, CMapCompare, m_LayerTree, CScrollRegion)
+ACCESSOR(TNavList, CMapCompare, m_Navigator, CListBox)
+ACCESSOR(TListScroll, CListBox, m_ScrollRegion, CScrollRegion)
+ACCESSOR(TScrollPos, CScrollRegion, m_ScrollPos, float)
+ACCESSOR(TScrollOffset, CScrollRegion, m_ContentScrollOffset, float)
+ACCESSOR(TScrollRect, CScrollRegion, m_ContentAreaRect, CUIRect)
 ACCESSOR(TChangedNavigator, CMapCompare, m_vChangedNavigator, std::vector<int>)
 ACCESSOR(TGroup, CMapCompare, m_ByGroup, bool)
 ACCESSOR(TSelectedEntry, CMapCompare, m_SelectedEntry, int)
@@ -121,6 +128,17 @@ struct CDetailAccess
 	}
 };
 template struct CDetailAccess<&CMapCompare::m_vDetails>;
+std::tuple<bool, bool, size_t> LayerState(CMapCompare &, int);
+template<auto Member>
+struct CLayerStateAccess
+{
+	friend std::tuple<bool, bool, size_t> LayerState(CMapCompare &Obj, int Index)
+	{
+		const auto &State = (Obj.*Member)[Index];
+		return {State.m_Visible, State.m_Expanded, State.m_Changes};
+	}
+};
+template struct CLayerStateAccess<&CMapCompare::m_vLayerStates>;
 
 class CSmokeAction : public IEditorAction
 {
@@ -143,6 +161,8 @@ class CSmokeEditor : public CEditor
 	int m_TargetContext = 0;
 	double m_LastRenderMs = 0;
 	vec2 m_SavedCenter;
+	float m_SavedScroll = 0;
+	std::vector<bool> m_aVisibility[2];
 	std::vector<std::shared_ptr<CLayerTiles>> m_vPixelLayers;
 	CEditorMap *m_pBefore = nullptr, *m_pAfter = nullptr;
 	MapDiff::CSnapshot m_aSaved[2];
@@ -232,6 +252,13 @@ class CSmokeEditor : public CEditor
 		for(int i = 0; i < 2; ++i)
 		{
 			auto *p = i ? m_pAfter : m_pBefore;
+			m_aVisibility[i].clear();
+			for(const auto &pGroup : p->m_vpGroups)
+			{
+				m_aVisibility[i].push_back(pGroup->m_Visible);
+				for(const auto &pLayer : pGroup->m_vpLayers)
+					m_aVisibility[i].push_back(pLayer->m_Visible);
+			}
 			Check(MapDiff::Capture(*p, m_aSaved[i]), "capture source");
 			m_aContexts[i] = {p->m_Modified, p->m_ModifiedAuto, p->m_SelectedGroup, p->m_vSelectedLayers, p->m_vSelectedQuads, p->m_MapViewState.m_WorldOffset, p->m_MapViewState.m_EditorOffset, p->m_MapViewState.m_WorldZoom, p->m_EnvelopeEvaluator.m_AnimateTime, p->m_EditorHistory.m_vpUndoActions.size(), p->m_EditorHistory.m_vpRedoActions.size()};
 		}
@@ -250,6 +277,14 @@ class CSmokeEditor : public CEditor
 		for(int i = 0; i < 2; ++i)
 		{
 			auto *p = i ? m_pAfter : m_pBefore;
+			std::vector<bool> Visibility;
+			for(const auto &pGroup : p->m_vpGroups)
+			{
+				Visibility.push_back(pGroup->m_Visible);
+				for(const auto &pLayer : pGroup->m_vpLayers)
+					Visibility.push_back(pLayer->m_Visible);
+			}
+			Check(Visibility == m_aVisibility[i], Label + " source visibility " + std::to_string(i));
 			MapDiff::CSnapshot Now;
 			Check(MapDiff::Capture(*p, Now) && MapDiff::Compare(m_aSaved[i], Now).ChangeCount() == 0, Label + " source contents " + std::to_string(i));
 			const auto &C = m_aContexts[i];
@@ -730,6 +765,68 @@ class CSmokeEditor : public CEditor
 			}
 		Image.Free();
 	}
+	int FindEntry(const char *pName)
+	{
+		for(int i = 0; i < (int)Result().m_vEntries.size(); ++i)
+			if(Result().m_vEntries[i].m_Name == pName)
+				return i;
+		Check(false, std::string("find tree entry ") + pName);
+		return 0;
+	}
+	vec2 TreePosition(const char *pName, int Control = 0) // 0: label, 1: eye, 2: fold
+	{
+		const int EntryIndex = FindEntry(pName);
+		int Row = 0;
+		for(int i = 0; i < EntryIndex; ++i)
+		{
+			const auto &Entry = Result().m_vEntries[i];
+			if((Entry.m_Kind == MapDiff::EEntryKind::GROUP || Entry.m_Kind == MapDiff::EEntryKind::LAYER) && (Entry.m_Parent < 0 || std::get<1>(LayerState(Compare(), Entry.m_Parent))))
+				++Row;
+		}
+		const auto &Scroll = Compare().*Access(TLayerTree{});
+		const auto &Rect = Scroll.*Access(TScrollRect{});
+		const vec2 Point(Control == 1 ? Rect.x + Rect.w - 13 : Rect.x + (Control == 2 ? 11 : 85), Rect.y + (Scroll.*Access(TScrollOffset{})) + Row * 36 + 18);
+		Check(Rect.Inside(Point), std::string("tree control visible ") + pName);
+		return Point;
+	}
+	void ContextPoint(int X, ColorRGBA Expected, const char *pMessage)
+	{
+		CImageInfo Image;
+		static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Image);
+		Check(Image.m_pData != nullptr, "visibility framebuffer available");
+		if(!Image.m_pData)
+			return;
+		for(int Side = 0; Side < 2; ++Side)
+		{
+			const auto Pane = (Compare().*Access(TPanes{}))[Side];
+			const vec2 Point = Pane.Center() + (vec2(X * 32 + 16, 10 * 32 + 16) - (Compare().*Access(TCenter{}))) / (Compare().*Access(TZoom{}));
+			Check(Pane.Inside(Point), "visibility probe inside pane");
+			const auto Actual = Image.PixelColor((int)(Point.x / Ui()->Screen()->w * Image.m_Width), (int)(Point.y / Ui()->Screen()->h * Image.m_Height));
+			Check(std::abs(Actual.r - Expected.r) < 0.012f && std::abs(Actual.g - Expected.g) < 0.012f && std::abs(Actual.b - Expected.b) < 0.012f, std::string(pMessage) + " side " + std::to_string(Side));
+		}
+		Image.Free();
+	}
+	void CheckPaneNotice()
+	{
+		CImageInfo Image;
+		static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Image);
+		Check(Image.m_pData != nullptr, "notice framebuffer available");
+		if(!Image.m_pData)
+			return;
+		for(const auto &Pane : Compare().*Access(TPanes{}))
+		{
+			bool Found = false;
+			const float Scale = Image.m_Height / Ui()->Screen()->h;
+			for(int Y = (int)((Pane.y + 5) * Scale); Y < (Pane.y + 23) * Scale; ++Y)
+				for(int X = (int)((Pane.x + 5) * Scale); X < (Pane.x + Pane.w - 5) * Scale; ++X)
+				{
+					const auto Color = Image.PixelColor(X, Y);
+					Found |= Color.r > 0.6f && Color.g > 0.4f && Color.b < 0.6f;
+				}
+			Check(Found, "both panes explain hidden or unchanged focus");
+		}
+		Image.Free();
+	}
 	void FullContextSteps()
 	{
 		Do([this] {
@@ -766,8 +863,16 @@ class CSmokeEditor : public CEditor
 				Add(pSelected, "Sibling", ColorRGBA(1, 1, 1, 1), {11});
 				for(int n = 0; n < 3; ++n)
 					Add(pSelected, "Overlap", ColorRGBA(1, 1, 1, 1), {12});
+				std::shared_ptr<CLayer> pStructural;
+				if(Side)
+					pStructural = std::make_shared<CLayerQuads>(pMap.get());
+				else
+					pStructural = std::make_shared<CLayerSounds>(pMap.get());
+				str_copy(pStructural->m_aName, Side ? "Added quads" : "Removed");
+				pSelected->AddLayer(pStructural);
 				Add(pMap->NewGroup(), "Red", ColorRGBA(1, 0, 0, 1), {8});
 				pTiles = Add(pMap->NewGroup(), "Blue", ColorRGBA(0, 0, 1, 1), {8, 9, 10, 12});
+				pTiles->m_Visible = false; // Viewer visibility must not overwrite source state.
 				pTiles->m_pTiles[9 + 10 * 64].m_Index = Side ? 2 : 1;
 				auto pClipped = pMap->NewGroup();
 				pClipped->m_OffsetX = 32;
@@ -814,6 +919,40 @@ class CSmokeEditor : public CEditor
 		Click([] { return vec2(240, 16); });
 		Do([this] { ContextPixels(true, false); CheckCachedPane(); CheckContextBufferPixels(); });
 		Screenshot("full-map-context-layer");
+		Click([] { return vec2(170, 41); });
+		Do([this] {
+			Check(Compare().*Access(TShowLayers{}), "Layers tab opens a separate tree");
+			Check(std::get<2>(LayerState(Compare(), FindEntry("Selected"))) > 2 && std::get<2>(LayerState(Compare(), FindEntry("Sibling"))) == 0, "tree aggregates child differences and distinguishes unchanged layers");
+			Check(Result().m_vEntries[FindEntry("Added quads")].m_Before < 0 && Result().m_vEntries[FindEntry("Removed")].m_After < 0, "tree fixture includes added and removed layer sides");
+			m_SavedCenter = Compare().*Access(TCenter{});
+		});
+		Screenshot("comparison-layer-tree");
+		Click([this] { return TreePosition("Blue", 1); });
+		Do([this] { ContextPoint(9, ColorRGBA(0.08f, 0.09f, 0.11f, 1), "hidden background layer is absent"); ContextPoint(8, ColorRGBA(0.31f, 0.0675f, 0.0825f, 1), "other groups retain their source order"); });
+		Click([this] { return TreePosition("Blue", 1); });
+		Click([this] { return TreePosition("Focus", 1); });
+		Do([this] {
+			ContextPoint(10, ColorRGBA(0.06f, 0.0675f, 0.3325f, 1), "hidden selected layer removes context and diff rendering");
+			Check((Compare().*Access(TSelectedEntry{})) == FindEntry("Focus") && (Compare().*Access(TCenter{})) == m_SavedCenter, "eye click preserves selection and camera");
+		});
+		Click([this] { return TreePosition("Selected", 1); });
+		Do([this] { ContextPoint(11, ColorRGBA(0.08f, 0.09f, 0.11f, 1), "hidden group suppresses all child layers"); });
+		Click([this] { return TreePosition("Focus", 1); });
+		Do([this] { Check(!std::get<0>(LayerState(Compare(), FindEntry("Focus"))), "parent-hidden eye does not lose the child choice"); });
+		Click([this] { return TreePosition("Selected", 1); });
+		Do([this] { ContextPoint(10, ColorRGBA(0.06f, 0.0675f, 0.3325f, 1), "showing a group preserves its hidden child"); });
+		Click([this] { return TreePosition("Selected", 2); });
+		Do([this] { Check(!std::get<1>(LayerState(Compare(), FindEntry("Selected"))) && (Compare().*Access(TCenter{})) == m_SavedCenter, "folding group preserves the inspection camera"); });
+		Click([this] { return TreePosition("Selected", 2); });
+		Click([] { return vec2(190, 582); });
+		Do([this] { ContextPixels(true, false); CheckCachedPane(); CheckSources("layer visibility controls"); });
+		Click([this] { return TreePosition("Added quads"); });
+		Do([this] { Check((Compare().*Access(TSelectedEntry{})) == FindEntry("Added quads") && !(Compare().*Access(TGroup{})), "tree selects an added layer for inspection"); });
+		Click([this] { return TreePosition("Removed"); });
+		Do([this] { Check((Compare().*Access(TSelectedEntry{})) == FindEntry("Removed"), "tree selects a removed layer for inspection"); });
+		Do([this, Camera] { SelectKind(MapDiff::EEntryKind::LAYER, "Focus"); Camera(); });
+		Delay();
+		Click([] { return vec2(55, 41); });
 		Click([] { return vec2(167, 16); });
 		Do(Camera);
 		Delay();
@@ -985,7 +1124,7 @@ class CSmokeEditor : public CEditor
 		// Collapse with an unchanged selection, then enter group navigation.
 		Do([this, Find] { (Compare().*Access(TSelect{}))(Find("B")); });
 		Click([] { return vec2(100, 53 + 5 * 36 + 18); });
-		Do([this, Find] { Check(!(Compare().*Access(TUnchangedExpanded{})) && (Compare().*Access(TSelectedEntry{})) == Find("Navigation"), "collapse replaces hidden selection with a changed entry"); });
+		Do([this, Find] { Check(!(Compare().*Access(TUnchangedExpanded{})) && (Compare().*Access(TSelectedEntry{})) == Find("B"), "collapse preserves the inspected unchanged entry"); (Compare().*Access(TSelect{}))(Find("Navigation")); });
 		Press(SDLK_END);
 		Do([this, Find] { Check((Compare().*Access(TSelectedEntry{})) == Find("Added empty"), "End stops at the last real row before a collapsed header"); (Compare().*Access(TSelect{}))(Find("Navigation")); });
 		Press(SDLK_PAGEDOWN);
@@ -1023,6 +1162,162 @@ class CSmokeEditor : public CEditor
 			Check(distance(Compare().*Access(TCenter{}), vec2(1008, 1024)) < 0.1f, "child property fit excludes other changed layers in the group");
 			Compare().Close();
 		});
+		Delay();
+	}
+	void SectionScrollSteps()
+	{
+		Do([this] {
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				auto pMap = std::make_unique<CEditorMap>(this);
+				pMap->CreateDefault();
+				str_copy(pMap->m_aDisplayName, "Scroll fixture");
+				pMap->m_vpGroups.clear();
+				pMap->m_pGameGroup = nullptr;
+				WhiteImage(*pMap, "scroll", true);
+				auto pGroup = pMap->NewGroup();
+				str_copy(pGroup->m_aName, "Scroll");
+				for(int n = 0; n < 60; ++n)
+				{
+					auto pTiles = std::make_shared<CLayerTiles>(pMap.get(), 8, 8);
+					str_format(pTiles->m_aName, sizeof(pTiles->m_aName), "Layer %d", n);
+					pTiles->m_Image = 0;
+					pTiles->m_pTiles[n % 64].m_Index = Side && n < 24 ? 2 : 1;
+					pGroup->AddLayer(pTiles);
+				}
+				(Side ? m_pAfter : m_pBefore) = pMap.get();
+				Maps().push_back(std::move(pMap));
+			}
+			CaptureSources();
+			Compare().*Access(TGroup{}) = false;
+			Compare().Open(*this, m_pBefore, m_pAfter);
+		});
+		WaitReady();
+		Click([] { return vec2(240, 16); });
+		Do([this] {
+			Check((Compare().*Access(TChangedNavigator{})).size() == 24, "scroll fixture overflows with changed layers");
+			Ui()->OnCursorMove((100 - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (300 - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
+		});
+		Delay();
+		for(int i = 0; i < 8; ++i)
+		{
+			Do([] { SDL_Event E{}; E.type = SDL_MOUSEWHEEL; E.wheel.y = -1; SDL_PushEvent(&E); });
+			Delay(2);
+		}
+		Delay(30);
+		Do([this] {
+			auto &Scroll = (Compare().*Access(TNavList{})).*Access(TListScroll{});
+			m_SavedScroll = Scroll.*Access(TScrollPos{});
+			Check(m_SavedScroll > 100, "mouse wheel scrolls the navigator to the unchanged header");
+			m_SavedEntry = Compare().*Access(TSelectedEntry{});
+			m_SavedCenter = Compare().*Access(TCenter{});
+		});
+		auto Header = [this] {
+			const auto &Scroll = (Compare().*Access(TNavList{})).*Access(TListScroll{});
+			return vec2(100, 53 + 24 * 36 + 18 + (Scroll.*Access(TScrollOffset{})));
+		};
+		Click(Header);
+		Delay(15);
+		Do([this] {
+			const auto &Scroll = (Compare().*Access(TNavList{})).*Access(TListScroll{});
+			Check((Compare().*Access(TUnchangedExpanded{})) && std::abs((Scroll.*Access(TScrollPos{})) - m_SavedScroll) < 0.1f, "expanding unchanged retains scrolled viewport");
+			Check((Compare().*Access(TSelectedEntry{})) == m_SavedEntry && (Compare().*Access(TCenter{})) == m_SavedCenter, "expanding unchanged retains inspection");
+			(Compare().*Access(TSelect{}))(FindEntry("Layer 40"));
+			m_SavedCenter = Compare().*Access(TCenter{});
+		});
+		Click(Header);
+		Delay(15);
+		Do([this] {
+			const auto &Scroll = (Compare().*Access(TNavList{})).*Access(TListScroll{});
+			Check(!(Compare().*Access(TUnchangedExpanded{})) && std::abs((Scroll.*Access(TScrollPos{})) - m_SavedScroll) < 0.1f, "collapsing unchanged retains scrolled viewport");
+			Check((Compare().*Access(TSelectedEntry{})) == FindEntry("Layer 40") && (Compare().*Access(TCenter{})) == m_SavedCenter, "collapsing unchanged preserves a hidden selection and camera");
+		});
+		Click([] { return vec2(170, 41); });
+		Click([] { return vec2(55, 41); });
+		Do([this] { Check(std::abs((((Compare().*Access(TNavList{})).*Access(TListScroll{})).*Access(TScrollPos{})) - m_SavedScroll) < 0.1f, "sidebar views retain independent scroll positions"); });
+		Click([] { return vec2(170, 41); });
+		Click([this] { return TreePosition("Scroll", 2); });
+		Click([this] { return TreePosition("Scroll"); });
+		Do([this] { Key(SDLK_n, true); });
+		Delay(2);
+		Do([this] { Key(SDLK_n, false); Check(std::get<1>(LayerState(Compare(), FindEntry("Scroll"))), "Next reveals the focused child's collapsed parent"); });
+		Click([this] { return TreePosition("Scroll", 1); });
+		Do([this] { CheckSources("scroll and tree navigation"); });
+		Click([] { return vec2(106, 16); });
+		WaitReady();
+		Do([this] { Check(std::get<0>(LayerState(Compare(), FindEntry("Scroll"))) && std::get<2>(LayerState(Compare(), FindEntry("Scroll"))) == 24, "Swap resets visibility without accumulating group counts"); });
+		Click([] { return vec2(106, 16); });
+		WaitReady();
+		Do([this] { Check(std::get<2>(LayerState(Compare(), FindEntry("Scroll"))) == 24, "repeated Swap retains exact aggregate counts"); Compare().Close(); });
+		Delay();
+		Do([this] { Compare().Open(*this, m_pBefore, m_pAfter); });
+		WaitReady();
+		Do([this] { Check(std::get<0>(LayerState(Compare(), FindEntry("Scroll"))) && !(Compare().*Access(TShowLayers{})), "reopening resets viewer visibility and sidebar view"); Compare().Close(); });
+		Delay();
+		Do([this] {
+			for(int n = 3; n < 60; ++n)
+				std::static_pointer_cast<CLayerTiles>(m_pAfter->m_vpGroups[0]->m_vpLayers[n])->m_pTiles[n % 64].m_Index = 1;
+			for(auto *pMap : {m_pBefore, m_pAfter})
+			{
+				auto pLarge = pMap->m_vpGroups[0];
+				auto pSmall = pMap->NewGroup();
+				str_copy(pSmall->m_aName, "Small");
+				pSmall->m_vpLayers.assign(pLarge->m_vpLayers.begin(), pLarge->m_vpLayers.begin() + 3);
+				pLarge->m_vpLayers.erase(pLarge->m_vpLayers.begin(), pLarge->m_vpLayers.begin() + 3);
+				std::swap(pMap->m_vpGroups[0], pMap->m_vpGroups[1]);
+			}
+			Compare().*Access(TGroup{}) = false;
+			Compare().Open(*this, m_pBefore, m_pAfter);
+		});
+		WaitReady();
+		Click([] { return vec2(240, 16); });
+		Click([] { return vec2(100, 53 + 3 * 36 + 18); });
+		auto ScrollOnce = [this] {
+			Do([this] { Ui()->OnCursorMove((100 - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (300 - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); });
+			Delay();
+			Do([] { SDL_Event E{}; E.type = SDL_MOUSEWHEEL; E.wheel.y = -1; SDL_PushEvent(&E); });
+			Delay(30);
+		};
+		ScrollOnce();
+		Do([this] { Check((((Compare().*Access(TNavList{})).*Access(TListScroll{})).*Access(TScrollPos{})) > 50, "expanded section scrolls before collapse-to-fit"); });
+		Click([this] { return vec2(100, 53 + 3 * 36 + 18 + (((Compare().*Access(TNavList{})).*Access(TListScroll{})).*Access(TScrollOffset{}))); });
+		Do([this] { Check((((Compare().*Access(TNavList{})).*Access(TListScroll{})).*Access(TScrollPos{})) == 0, "section collapse clamps stored scrolling when content fits"); });
+		Click([] { return vec2(100, 53 + 3 * 36 + 18); });
+		Do([this] { Check((((Compare().*Access(TNavList{})).*Access(TListScroll{})).*Access(TScrollPos{})) == 0, "section expansion cannot resurrect old scroll position"); });
+		Click([] { return vec2(170, 41); });
+		ScrollOnce();
+		Do([this] { Check(((Compare().*Access(TLayerTree{})).*Access(TScrollPos{})) > 50, "layer tree scrolls before collapse-to-fit"); });
+		Click([this] { return TreePosition("Scroll", 2); });
+		Do([this] { Check(((Compare().*Access(TLayerTree{})).*Access(TScrollPos{})) == 0, "tree collapse clamps stored scrolling when content fits"); });
+		Click([this] { return TreePosition("Scroll", 2); });
+		Do([this] { Check(((Compare().*Access(TLayerTree{})).*Access(TScrollPos{})) == 0, "tree expansion cannot resurrect old scroll position"); });
+		Click([this] { return TreePosition("Small"); });
+		auto Press = [this](SDL_Keycode K) {
+			Do([this, K] { Key(K, true); });
+			Delay(2);
+			Do([this, K] { Key(K, false); });
+			Delay(2);
+		};
+		Press(SDLK_DOWN);
+		Do([this] { Check((Compare().*Access(TSelectedEntry{})) == FindEntry("Layer 0"), "Down moves the layer tree selection rather than inspector details"); });
+		Press(SDLK_END);
+		Do([this] { Check((Compare().*Access(TSelectedEntry{})) == FindEntry("Layer 59"), "End selects and reveals the final tree layer"); });
+		Press(SDLK_LEFT);
+		Do([this] { Check((Compare().*Access(TSelectedEntry{})) == FindEntry("Scroll"), "Left selects the layer's parent group"); });
+		Press(SDLK_LEFT);
+		Do([this] { Check(!std::get<1>(LayerState(Compare(), FindEntry("Scroll"))), "Left folds the selected group"); });
+		Press(SDLK_RIGHT);
+		Do([this] { Check(std::get<1>(LayerState(Compare(), FindEntry("Scroll"))), "Right expands the selected group"); });
+		ToggleMapContext();
+		Click([this] { return TreePosition("Layer 3"); });
+		Do([this] { Check((Compare().*Access(TContext{})) == 0, "unchanged tree inspection retains explicit context mode"); CheckPaneNotice(); });
+		Click([this] { return TreePosition("Layer 0", 1); });
+		Click([this] { return TreePosition("Small"); });
+		Do([this] { Check(SelectedDetail(Compare())[0] == FindEntry("Layer 0") && (Compare().*Access(TFocusEntry{})) == FindEntry("Small"), "group inspection initially selects a hidden child detail"); CheckPaneNotice(); });
+		Do([this] { Graphics()->Resize(800, 600, 0); OnWindowResize(); });
+		Delay();
+		Screenshot("comparison-layer-tree-compact");
+		Do([this] { Graphics()->Resize(1280, 800, 0); OnWindowResize(); Compare().Close(); });
 		Delay();
 	}
 	void MeasureMotion(const std::string &Name)
@@ -1128,6 +1423,9 @@ class CSmokeEditor : public CEditor
 		MeasureFrames(LocalMaps ? "local selection context" : "dense selection context");
 		Click([] { return vec2(240, 16); });
 		MeasureFrames(LocalMaps ? "local context on" : "dense context on");
+		Click([] { return vec2(170, 41); });
+		MeasureFrames(LocalMaps ? "local full context with layer tree" : "dense full context with layer tree");
+		Click([] { return vec2(55, 41); });
 		if(LocalMaps)
 			Screenshot("performance-full-context");
 		MeasureMotion(LocalMaps ? "local full context pan/zoom" : "dense full context pan/zoom");
@@ -1192,6 +1490,7 @@ class CSmokeEditor : public CEditor
 		FitRegressionSteps();
 		FullContextSteps();
 		NavigationSteps();
+		SectionScrollSteps();
 		PerformanceSteps(false);
 		const char *apNames[] = {"coverage", "Tutorial", "Tsunami", "Sunny Side Up"};
 		for(int Fixture = 0; Fixture < 4; ++Fixture)
@@ -1217,10 +1516,10 @@ class CSmokeEditor : public CEditor
 				Delay(2);
 				Do([this] { Key(SDLK_p, false); Check((Compare().*Access(TSelectedEntry{})) == m_SavedEntry && (Compare().*Access(TCenter{})) == m_SavedCenter, "equal-map Prev/Next preserve selection and camera"); });
 				Click([] { return vec2(100, 71); });
-				Do([this] { Check(!(Compare().*Access(TUnchangedExpanded{})) && (Compare().*Access(TSelectedEntry{})) == -1, "equal maps safely collapse the only navigator section"); });
+				Do([this] { Check(!(Compare().*Access(TUnchangedExpanded{})) && (Compare().*Access(TSelectedEntry{})) == m_SavedEntry, "equal maps collapse without replacing the inspected selection"); });
 				Do([this] { Key(SDLK_END, true); });
 				Delay(2);
-				Do([this] { Key(SDLK_END, false); Check((Compare().*Access(TSelectedEntry{})) == -1, "End cannot select a header-only equal-map list"); });
+				Do([this] { Key(SDLK_END, false); Check((Compare().*Access(TSelectedEntry{})) == m_SavedEntry, "End cannot select a header-only equal-map list"); });
 			}
 			Do([this] { Compare().Close(); });
 			Delay();
@@ -1246,7 +1545,7 @@ class CSmokeEditor : public CEditor
 			Delay();
 			Screenshot("comparison-" + std::to_string(Fixture) + "-group");
 			ToggleMapContext();
-			Do([this] { Check(Compare().*Access(TContext{}), "context toggle"); });
+			Do([this] { Check(Compare().*Access(TContext{}), "context toggle actual=" + std::to_string(Compare().*Access(TContext{})) + " target=" + std::to_string(m_TargetContext)); });
 			Click([] { return vec2(106, 16); });
 			WaitReady();
 			Do([this] { Check((Compare().*Access(TSources{}))[0]==m_pAfter,"Swap button"); SelectKind(MapDiff::EEntryKind::GROUP,"Smoke"); });

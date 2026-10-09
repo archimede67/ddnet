@@ -6,6 +6,7 @@
 
 #include <base/str.h>
 
+#include <engine/font_icons.h>
 #include <engine/keys.h>
 #include <engine/textrender.h>
 
@@ -23,6 +24,7 @@ namespace
 {
 	constexpr ColorRGBA REMOVE_COLOR(1.0f, 0.3f, 0.3f, 1.0f);
 	constexpr ColorRGBA ADD_COLOR(0.25f, 1.0f, 0.45f, 1.0f);
+	constexpr ColorRGBA CHANGE_COLOR(1.0f, 0.78f, 0.35f, 1.0f);
 	constexpr float MIN_ZOOM = 0.05f;
 	// Match the editor's 2000% limit. Drawing an entire huge map as subpixel
 	// tiles costs millions of submissions without providing useful detail.
@@ -320,6 +322,9 @@ void CMapCompare::ReleaseBuffers()
 	std::vector<MapDiff::CPropertyChange>().swap(m_vValueRows);
 	std::vector<int>().swap(m_vNavigator);
 	std::vector<int>().swap(m_vChangedNavigator);
+	std::vector<CLayerState>().swap(m_vLayerStates);
+	m_LayerTree.Reset();
+	m_ScrollToLayer = false;
 	m_UnchangedCount = 0;
 	m_SelectedEntry = m_SelectedDetail = m_FocusEntry = -1;
 	m_ValueRowsEntry = m_ValueRowsDetail = -2;
@@ -374,6 +379,7 @@ void CMapCompare::Open(CEditor &Editor, const CEditorMap *pBefore, const CEditor
 	m_Message.clear();
 	m_Context = CONTEXT_OFF;
 	m_UnchangedExpanded = false;
+	m_ShowLayers = false;
 	m_Panning = false;
 	Editor.Ui()->SetActiveItem(nullptr);
 	if(CLineInput::GetActiveInput())
@@ -522,6 +528,16 @@ void CMapCompare::OnUpdate(CEditor &Editor)
 				return;
 			}
 			m_State = EState::READY;
+			m_vLayerStates.assign(m_Result.m_vEntries.size(), CLayerState{});
+			m_LayerTree.Reset();
+			m_ScrollToLayer = false;
+			for(int i = 0; i < (int)m_Result.m_vEntries.size(); ++i)
+			{
+				const auto &Entry = m_Result.m_vEntries[i];
+				m_vLayerStates[i].m_Changes += Entry.ChangeCount();
+				if(Entry.m_Parent >= 0)
+					m_vLayerStates[Entry.m_Parent].m_Changes += Entry.ChangeCount();
+			}
 			RebuildNavigator();
 			if(!m_vNavigator.empty() && m_vNavigator.front() >= 0)
 				Select(m_vNavigator.front());
@@ -532,7 +548,7 @@ void CMapCompare::OnUpdate(CEditor &Editor)
 		}
 	}
 }
-void CMapCompare::RebuildNavigator()
+void CMapCompare::RebuildNavigator(bool KeepSelection)
 {
 	m_vNavigator.clear();
 	m_vChangedNavigator.clear();
@@ -560,7 +576,7 @@ void CMapCompare::RebuildNavigator()
 		if(m_UnchangedExpanded)
 			m_vNavigator.insert(m_vNavigator.end(), vUnchanged.begin(), vUnchanged.end());
 	}
-	if(m_SelectedEntry < 0 || std::find(m_vNavigator.begin(), m_vNavigator.end(), m_SelectedEntry) == m_vNavigator.end())
+	if(!KeepSelection && (m_SelectedEntry < 0 || std::find(m_vNavigator.begin(), m_vNavigator.end(), m_SelectedEntry) == m_vNavigator.end()))
 	{
 		int Replacement = -1;
 		if(std::find(m_vNavigator.begin(), m_vNavigator.end(), m_FocusEntry) != m_vNavigator.end())
@@ -588,6 +604,20 @@ void CMapCompare::RebuildNavigator()
 				}
 		Select(Replacement);
 	}
+}
+bool CMapCompare::LayerVisible(int Entry) const
+{
+	const int Parent = m_Result.m_vEntries[Entry].m_Parent;
+	return m_vLayerStates[Entry].m_Visible && (Parent < 0 || m_vLayerStates[Parent].m_Visible);
+}
+void CMapCompare::RevealLayerSelection()
+{
+	if(m_FocusEntry < 0)
+		return;
+	const int Parent = m_Result.m_vEntries[m_FocusEntry].m_Parent;
+	if(Parent >= 0)
+		m_vLayerStates[Parent].m_Expanded = true;
+	m_ScrollToLayer = true;
 }
 void CMapCompare::Select(int Entry)
 {
@@ -680,6 +710,7 @@ void CMapCompare::Navigate(int Direction)
 				m_Navigator.ScrollToSelected();
 				m_Values.Reset();
 				FitSelection();
+				RevealLayerSelection();
 				return true;
 			}
 		return false;
@@ -990,7 +1021,7 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 	for(int i = 0; i < (int)m_Result.m_vEntries.size(); ++i)
 	{
 		const auto &Entry = m_Result.m_vEntries[i];
-		if(Entry.m_Kind == MapDiff::EEntryKind::LAYER && (m_Context == CONTEXT_MAP || InSelection(i)))
+		if(Entry.m_Kind == MapDiff::EEntryKind::LAYER && LayerVisible(i) && (m_Context == CONTEXT_MAP || InSelection(i)))
 			vLayers.push_back(i);
 	}
 	std::sort(vLayers.begin(), vLayers.end(), [&](int A, int B) {
@@ -1179,6 +1210,154 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 		}
 	Editor.Ui()->MapScreen();
 	Pane.DrawOutline(Highlight.Multiply(ColorRGBA(1, 1, 1, 0.5f)));
+	const int Focus = m_SelectedDetail >= 0 ? m_vDetails[m_SelectedDetail].m_Entry : m_SelectedEntry;
+	const auto FocusKind = m_Result.m_vEntries[Focus].m_Kind;
+	const bool SpatialFocus = FocusKind == MapDiff::EEntryKind::LAYER || FocusKind == MapDiff::EEntryKind::GROUP;
+	const char *pNotice = SpatialFocus && !LayerVisible(Focus)                                             ? "Selection hidden. Use Layers or Show all." :
+			      SpatialFocus && m_Context == CONTEXT_OFF && m_vLayerStates[Focus].m_Changes == 0 ? "Enable Context to see unchanged content." :
+														 nullptr;
+	if(pNotice)
+	{
+		CUIRect Notice = Pane;
+		Notice.Margin(5, &Notice);
+		Notice.HSplitTop(18, &Notice, nullptr);
+		Notice.Draw(ColorRGBA(0.08f, 0.09f, 0.11f, 0.9f), IGraphics::CORNER_NONE, 0);
+		Label(Editor, Notice, pNotice, 10, CHANGE_COLOR);
+	}
+}
+
+void CMapCompare::RenderLayerTree(CEditor &Editor, CUIRect View)
+{
+	std::vector<int> vRows;
+	for(int i = 0; i < (int)m_Result.m_vEntries.size(); ++i)
+	{
+		const auto &Entry = m_Result.m_vEntries[i];
+		if((Entry.m_Kind == MapDiff::EEntryKind::GROUP || Entry.m_Kind == MapDiff::EEntryKind::LAYER) &&
+			(Entry.m_Parent < 0 || m_vLayerStates[Entry.m_Parent].m_Expanded))
+			vRows.push_back(i);
+	}
+	bool FoldChanged = false;
+	if(m_LayerTreeActive && !vRows.empty() && !Editor.Input()->ModifierIsPressed() && !Editor.Input()->ShiftIsPressed() && !Editor.Input()->AltIsPressed())
+	{
+		const auto It = std::find(vRows.begin(), vRows.end(), m_FocusEntry);
+		int Row = It == vRows.end() ? -1 : It - vRows.begin();
+		int NewRow = Row;
+		if(Editor.Ui()->ConsumeHotkey(CUi::HOTKEY_DOWN))
+			NewRow = std::min(Row + 1, (int)vRows.size() - 1);
+		else if(Editor.Ui()->ConsumeHotkey(CUi::HOTKEY_UP))
+			NewRow = std::max(Row - 1, 0);
+		else if(Editor.Ui()->ConsumeHotkey(CUi::HOTKEY_PAGE_DOWN))
+			NewRow = std::min(Row + 12, (int)vRows.size() - 1);
+		else if(Editor.Ui()->ConsumeHotkey(CUi::HOTKEY_PAGE_UP))
+			NewRow = std::max(Row - 12, 0);
+		else if(Editor.Ui()->ConsumeHotkey(CUi::HOTKEY_END))
+			NewRow = vRows.size() - 1;
+		else if(Editor.Ui()->ConsumeHotkey(CUi::HOTKEY_LEFT) && Row >= 0)
+		{
+			auto &State = m_vLayerStates[vRows[Row]];
+			const auto &Entry = m_Result.m_vEntries[vRows[Row]];
+			if(Entry.m_Kind == MapDiff::EEntryKind::GROUP && State.m_Expanded)
+			{
+				State.m_Expanded = false;
+				FoldChanged = true;
+			}
+			else if(Entry.m_Parent >= 0)
+				NewRow = std::find(vRows.begin(), vRows.end(), Entry.m_Parent) - vRows.begin();
+		}
+		else if(Editor.Ui()->ConsumeHotkey(CUi::HOTKEY_RIGHT) && Row >= 0 && m_Result.m_vEntries[vRows[Row]].m_Kind == MapDiff::EEntryKind::GROUP)
+		{
+			if(!m_vLayerStates[vRows[Row]].m_Expanded)
+			{
+				m_vLayerStates[vRows[Row]].m_Expanded = true;
+				FoldChanged = true;
+			}
+			else if(Row + 1 < (int)vRows.size() && m_Result.m_vEntries[vRows[Row + 1]].m_Parent == vRows[Row])
+				NewRow = Row + 1;
+		}
+		if(NewRow >= 0 && NewRow != Row)
+		{
+			m_ByGroup = m_Result.m_vEntries[vRows[NewRow]].m_Kind == MapDiff::EEntryKind::GROUP;
+			Select(vRows[NewRow]);
+			RebuildNavigator(true);
+			RevealLayerSelection();
+		}
+	}
+	View.Draw(ColorRGBA(0, 0, 0, 0.15f), IGraphics::CORNER_ALL, 5);
+	CScrollRegionParams Params;
+	Params.m_ScrollUnit = 36 * 3;
+	m_LayerTree.Begin(&View, &Params);
+	for(int i = 0; i < (int)m_Result.m_vEntries.size(); ++i)
+	{
+		const auto &Entry = m_Result.m_vEntries[i];
+		const bool Group = Entry.m_Kind == MapDiff::EEntryKind::GROUP;
+		if(!Group && Entry.m_Kind != MapDiff::EEntryKind::LAYER)
+			continue;
+		if(Entry.m_Parent >= 0 && !m_vLayerStates[Entry.m_Parent].m_Expanded)
+			continue;
+		auto &State = m_vLayerStates[i];
+		CUIRect Row;
+		View.HSplitTop(36, &Row, &View);
+		const bool Focused = i == m_FocusEntry;
+		if(!m_LayerTree.AddRect(Row, m_ScrollToLayer && Focused))
+			continue;
+		Row.Margin(2, &Row);
+		CUIRect Fold, Eye, Name, Status;
+		Row.VSplitLeft(18, &Fold, &Row);
+		if(Group)
+		{
+			Fold.HMargin(6, &Fold);
+			if(Editor.DoButton_FontIcon(&State.m_Expanded, State.m_Expanded ? FontIcon::CHEVRON_DOWN : FontIcon::CHEVRON_RIGHT, 0, &Fold, BUTTONFLAG_LEFT, "Expand or collapse the group's layers.", IGraphics::CORNER_ALL, 8))
+			{
+				State.m_Expanded = !State.m_Expanded;
+				FoldChanged = true;
+			}
+		}
+		else
+			Row.VSplitLeft(10, nullptr, &Row);
+		Row.VSplitRight(22, &Row, &Eye);
+		Eye.HMargin(6, &Eye);
+		const bool ParentHidden = Entry.m_Parent >= 0 && !m_vLayerStates[Entry.m_Parent].m_Visible;
+		if(Editor.DoButton_FontIcon(&State.m_Visible, LayerVisible(i) ? FontIcon::EYE : FontIcon::EYE_SLASH, ParentHidden ? -1 : 0, &Eye, BUTTONFLAG_LEFT,
+			   ParentHidden ? "Hidden by its group. Show the group first; this layer's visibility choice is preserved." : Group ? "Show or hide this group in both panes, preserving each layer's visibility choice." :
+																	      "Show or hide this layer in both comparison panes.",
+			   IGraphics::CORNER_ALL, 8) &&
+			!ParentHidden)
+			State.m_Visible = !State.m_Visible;
+		if(Focused || Editor.Ui()->MouseHovered(&Row))
+			Row.Draw(ColorRGBA(1, 1, 1, Focused ? 0.25f : 0.12f), IGraphics::CORNER_ALL, 3);
+		if(Editor.Ui()->DoButtonLogic(&Entry, 0, &Row, BUTTONFLAG_LEFT))
+		{
+			m_ByGroup = Group;
+			Select(i);
+			RebuildNavigator(true);
+		}
+		const bool Added = Entry.m_Before < 0, Removed = Entry.m_After < 0;
+		const bool Changed = State.m_Changes > 0;
+		ColorRGBA Color = Added ? ADD_COLOR : Removed ? REMOVE_COLOR :
+					      Changed         ? CHANGE_COLOR :
+								ColorRGBA(0.75f, 0.75f, 0.75f, 1);
+		if(!LayerVisible(i))
+			Color.a = 0.5f;
+		Row.VMargin(3, &Row);
+		Row.HSplitTop(16, &Name, &Status);
+		const std::string Title = std::string(Added ? "+ " : Removed ? "- " :
+							     Changed         ? "~ " :
+									       "= ") +
+					  (Entry.m_Name.empty() ? "(unnamed)" : Entry.m_Name) + (Entry.m_Ambiguous ? " [?]" : "");
+		Label(Editor, Name, Title, 10, Color);
+		std::string Description = Added ? "Added / After only" : Removed ? "Removed / Before only" :
+								 Changed         ? "Changed / " + std::to_string(State.m_Changes) + " changes" :
+										   "Unchanged";
+		if(!LayerVisible(i))
+			Description += ParentHidden ? " / group hidden" : " / hidden";
+		Label(Editor, Status, Description, 8, Color);
+	}
+	m_LayerTree.End();
+	// The generic region retains its old animation position when content fits.
+	// Clear it on this transition so expanding cannot revive an obsolete offset.
+	if(FoldChanged && !m_LayerTree.ContentOverflows())
+		m_LayerTree.Reset();
+	m_ScrollToLayer = false;
 }
 
 void CMapCompare::Render(CEditor &Editor)
@@ -1258,6 +1437,18 @@ void CMapCompare::Render(CEditor &Editor)
 	Label(Editor, Toolbar, "READ ONLY", 11);
 	CUIRect Summary;
 	View.HSplitTop(24, &Summary, &View);
+	CUIRect SidebarTabs, ChangesTab, LayersTab;
+	Summary.VSplitLeft(std::min(225.0f, View.w * 0.25f), &SidebarTabs, &Summary);
+	SidebarTabs.HMargin(2, &SidebarTabs);
+	SidebarTabs.VSplitMid(&ChangesTab, &LayersTab, 3);
+	if(Editor.DoButton_Editor(&m_aButtonIds[12], "Changes", !m_ShowLayers, &ChangesTab, BUTTONFLAG_LEFT, "Browse differences and map-wide resources."))
+		m_ShowLayers = false;
+	if(Editor.DoButton_Editor(&m_aButtonIds[13], "Layers", m_ShowLayers, &LayersTab, BUTTONFLAG_LEFT, "Inspect the group/layer hierarchy and toggle visibility in both panes."))
+	{
+		m_ShowLayers = true;
+		m_LayerTreeActive = true;
+	}
+	Summary.VMargin(4, &Summary);
 	Label(Editor, Summary, m_Result.ChangeCount() == 0 ? "No differences in map content. Enable context to inspect matching layers." : std::to_string(m_Result.ChangeCount()) + " changes. - red: Before   + green: After   [?]: ambiguous pairing. Drag a canvas to pan; wheel to zoom.", 11);
 	CUIRect Navigator, Inspector;
 	View.VSplitLeft(std::min(225.0f, View.w * 0.25f), &Navigator, &View);
@@ -1286,67 +1477,92 @@ void CMapCompare::Render(CEditor &Editor)
 		if(!Editor.Ui()->MouseButton(0) && !Editor.Ui()->MouseButton(2))
 			m_Panning = false;
 	}
-	int NavSelected = -1;
-	for(int i = 0; i < (int)m_vNavigator.size(); ++i)
-		if(m_SelectedEntry >= 0 && m_vNavigator[i] == m_SelectedEntry)
-			NavSelected = i;
-	m_Navigator.DoStart(36, m_vNavigator.size(), 1, 3, NavSelected, &Navigator);
-	bool ToggleUnchanged = false;
-	for(int Index : m_vNavigator)
+	CUIRect VisibilityBar, ShowAll;
+	Navigator.HSplitBottom(24, &Navigator, &VisibilityBar);
+	if(Editor.Ui()->MouseButtonClicked(0) && (Navigator.Inside(Mouse) || Inspector.Inside(Mouse)))
+		m_LayerTreeActive = Navigator.Inside(Mouse);
+	VisibilityBar.Margin(2, &VisibilityBar);
+	VisibilityBar.VSplitRight(64, &VisibilityBar, &ShowAll);
+	int Hidden = 0;
+	for(int i = 0; i < (int)m_Result.m_vEntries.size(); ++i)
+		if((m_Result.m_vEntries[i].m_Kind == MapDiff::EEntryKind::LAYER || m_Result.m_vEntries[i].m_Kind == MapDiff::EEntryKind::GROUP) && !LayerVisible(i))
+			++Hidden;
+	Label(Editor, VisibilityBar, Hidden ? std::to_string(Hidden) + " hidden / both maps" : "All layers visible", 9);
+	if(Editor.DoButton_Editor(&m_aButtonIds[14], "Show all", Hidden ? 0 : -1, &ShowAll, BUTTONFLAG_LEFT, "Restore all comparison visibility. Source editor visibility is unchanged."))
+		for(auto &State : m_vLayerStates)
+			State.m_Visible = true;
+	if(m_ShowLayers)
+		RenderLayerTree(Editor, Navigator);
+	else
 	{
-		if(Index < 0)
+		int NavSelected = -1;
+		for(int i = 0; i < (int)m_vNavigator.size(); ++i)
+			if(m_SelectedEntry >= 0 && m_vNavigator[i] == m_SelectedEntry)
+				NavSelected = i;
+		m_Navigator.DoStart(36, m_vNavigator.size(), 1, 3, NavSelected, &Navigator);
+		bool ToggleUnchanged = false;
+		for(int Index : m_vNavigator)
 		{
-			auto Item = m_Navigator.DoSubheader();
+			if(Index < 0)
+			{
+				auto Item = m_Navigator.DoSubheader();
+				if(Item.m_Visible)
+				{
+					Item.m_Rect.Margin(3, &Item.m_Rect);
+					const std::string Title = std::string(m_UnchangedExpanded ? "- " : "+ ") + "Unchanged (" + std::to_string(m_UnchangedCount) + ")";
+					ToggleUnchanged = Editor.DoButton_Editor(&m_UnchangedButtonId, Title.c_str(), 0, &Item.m_Rect, BUTTONFLAG_LEFT, "Expand or collapse unchanged items. Prev/Next always skip these.");
+				}
+				continue;
+			}
+			const auto &Entry = m_Result.m_vEntries[Index];
+			auto Item = m_Navigator.DoNextItem(&Entry);
 			if(Item.m_Visible)
 			{
+				CUIRect Name, Count;
 				Item.m_Rect.Margin(3, &Item.m_Rect);
-				const std::string Title = std::string(m_UnchangedExpanded ? "- " : "+ ") + "Unchanged (" + std::to_string(m_UnchangedCount) + ")";
-				ToggleUnchanged = Editor.DoButton_Editor(&m_UnchangedButtonId, Title.c_str(), 0, &Item.m_Rect, BUTTONFLAG_LEFT, "Expand or collapse unchanged items. Prev/Next always skip these.");
+				Item.m_Rect.HSplitTop(15, &Name, &Count);
+				size_t Changes = Entry.ChangeCount();
+				if(m_ByGroup && Entry.m_Kind == MapDiff::EEntryKind::GROUP)
+					for(const auto &Child : m_Result.m_vEntries)
+						if(Child.m_Parent == Index)
+							Changes += Child.ChangeCount();
+				std::string RowLabel = EntryLabel(Entry);
+				if(Entry.m_Kind == MapDiff::EEntryKind::GROUP && !Entry.Changed() && Changes > 0)
+					RowLabel = "-/+ Group: " + Entry.m_Name + (Entry.m_Ambiguous ? " [?]" : "");
+				const ColorRGBA StatusColor = Entry.m_Before < 0 ? ADD_COLOR : Entry.m_After < 0 ? REMOVE_COLOR :
+										       Changes > 0               ? CHANGE_COLOR :
+														   ColorRGBA(0.75f, 0.75f, 0.75f, 1);
+				Label(Editor, Name, RowLabel, 10, StatusColor);
+				std::string Text = std::to_string(Changes) + " changes";
+				if(!LayerVisible(Index))
+					Text = "Hidden / " + Text;
+				if(Entry.m_Parent >= 0)
+					Text += " / " + m_Result.m_vEntries[Entry.m_Parent].m_Name;
+				else if(Entry.m_Kind != MapDiff::EEntryKind::GROUP)
+					Text += " / map-wide";
+				Label(Editor, Count, Text, 9);
 			}
-			continue;
 		}
-		const auto &Entry = m_Result.m_vEntries[Index];
-		auto Item = m_Navigator.DoNextItem(&Entry);
-		if(Item.m_Visible)
+		int NewSelected = m_Navigator.DoEnd();
+		if(NewSelected >= 0 && NewSelected != NavSelected && m_vNavigator[NewSelected] < 0)
 		{
-			CUIRect Name, Count;
-			Item.m_Rect.Margin(3, &Item.m_Rect);
-			Item.m_Rect.HSplitTop(15, &Name, &Count);
-			size_t Changes = Entry.ChangeCount();
-			if(m_ByGroup && Entry.m_Kind == MapDiff::EEntryKind::GROUP)
-				for(const auto &Child : m_Result.m_vEntries)
-					if(Child.m_Parent == Index)
-						Changes += Child.ChangeCount();
-			std::string RowLabel = EntryLabel(Entry);
-			if(Entry.m_Kind == MapDiff::EEntryKind::GROUP && !Entry.Changed() && Changes > 0)
-				RowLabel = "-/+ Group: " + Entry.m_Name + (Entry.m_Ambiguous ? " [?]" : "");
-			Label(Editor, Name, RowLabel, 10);
-			std::string Text = std::to_string(Changes) + " changes";
-			if(Entry.m_Parent >= 0)
-				Text += " / " + m_Result.m_vEntries[Entry.m_Parent].m_Name;
-			else if(Entry.m_Kind != MapDiff::EEntryKind::GROUP)
-				Text += " / map-wide";
-			Label(Editor, Count, Text, 9);
+			const int Direction = NewSelected > NavSelected ? 1 : -1;
+			NewSelected += Direction;
+			if(NewSelected < 0 || NewSelected >= (int)m_vNavigator.size())
+				NewSelected -= 2 * Direction;
+			if(NewSelected < 0 || NewSelected >= (int)m_vNavigator.size())
+				NewSelected = -1;
 		}
+		if(ToggleUnchanged)
+		{
+			m_UnchangedExpanded = !m_UnchangedExpanded;
+			RebuildNavigator(true);
+			if(m_vNavigator.size() * 36 <= Navigator.h)
+				m_Navigator.Reset();
+		}
+		else if(NewSelected >= 0 && NewSelected != NavSelected)
+			Select(m_vNavigator[NewSelected]);
 	}
-	int NewSelected = m_Navigator.DoEnd();
-	if(NewSelected >= 0 && NewSelected != NavSelected && m_vNavigator[NewSelected] < 0)
-	{
-		const int Direction = NewSelected > NavSelected ? 1 : -1;
-		NewSelected += Direction;
-		if(NewSelected < 0 || NewSelected >= (int)m_vNavigator.size())
-			NewSelected -= 2 * Direction;
-		if(NewSelected < 0 || NewSelected >= (int)m_vNavigator.size())
-			NewSelected = -1;
-	}
-	if(ToggleUnchanged)
-	{
-		m_UnchangedExpanded = !m_UnchangedExpanded;
-		RebuildNavigator();
-		m_Navigator.ScrollToSelected();
-	}
-	else if(NewSelected >= 0 && NewSelected != NavSelected)
-		Select(m_vNavigator[NewSelected]);
 	RenderPane(Editor, m_aPanes[0], 0);
 	RenderPane(Editor, m_aPanes[1], 1);
 	RenderInspector(Editor, Inspector);
