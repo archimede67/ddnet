@@ -127,6 +127,7 @@ namespace MapDiff
 		int m_After = -1;
 		bool m_Ambiguous = false;
 		bool m_Reordered = false;
+		bool m_Positional = false; // Conservative ordered-span fallback, not identity.
 	};
 	struct CSettingRow
 	{
@@ -162,6 +163,7 @@ namespace MapDiff
 		std::vector<CTileChange> m_vTiles;
 		std::vector<CObjectChange> m_vObjects;
 		std::vector<std::string> m_vIssues;
+		bool m_Positional = false; // Presentation provenance, excluded from change counts.
 		bool Changed() const;
 		size_t ChangeCount() const;
 		const char *Status() const;

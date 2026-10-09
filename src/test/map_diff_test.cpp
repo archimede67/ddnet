@@ -142,6 +142,88 @@ TEST(MapDiff, DuplicateNamesNeverLoseData)
 	EXPECT_GT(Ambiguous, 0);
 }
 
+TEST(MapDiff, UniqueUnnamedContentAndPositionalProvenance)
+{
+	auto Before = Map();
+	auto &Layers = Before.m_vGroups[0].m_vLayers;
+	Layers[0].m_Name.clear();
+	Layers[0].m_Kind = MapDiff::ELayerKind::TILES;
+	Layers.push_back(Layers[0]);
+	Layers[1].m_vCells[0].m_Tile.m_Index = 2;
+	auto After = Before;
+	After.m_vGroups[0].m_vLayers.insert(After.m_vGroups[0].m_vLayers.begin(), Layers[0]);
+	After.m_vGroups[0].m_vLayers[0].m_vCells[0].m_Tile.m_Index = 3;
+	auto Result = MapDiff::Compare(Before, After);
+	int Added = 0;
+	for(const auto &Entry : Result.m_vEntries)
+		if(Entry.m_Kind == MapDiff::EEntryKind::LAYER)
+		{
+			EXPECT_FALSE(Entry.m_Ambiguous);
+			EXPECT_FALSE(Entry.m_Positional);
+			EXPECT_FALSE(Entry.m_Reordered);
+			if(Entry.m_Before < 0)
+				++Added;
+			else
+			{
+				EXPECT_EQ(Entry.m_After, Entry.m_Before + 1);
+				EXPECT_FALSE(Entry.Changed());
+			}
+		}
+	EXPECT_EQ(Added, 1);
+	After = Before;
+	std::swap(After.m_vGroups[0].m_vLayers[0], After.m_vGroups[0].m_vLayers[1]);
+	Result = MapDiff::Compare(Before, After);
+	for(const auto &Entry : Result.m_vEntries)
+		if(Entry.m_Kind == MapDiff::EEntryKind::LAYER)
+		{
+			EXPECT_TRUE(Entry.m_Reordered);
+			EXPECT_FALSE(Entry.m_Ambiguous);
+			EXPECT_FALSE(Entry.m_Positional);
+			EXPECT_TRUE(Entry.m_vTiles.empty());
+		}
+	After = Before;
+	After.m_vGroups[0].m_vLayers[0].m_vCells[0].m_Tile.m_Index = 9;
+	Result = MapDiff::Compare(Before, After);
+	EXPECT_TRUE(LayerEntry(Result).m_Positional);
+	EXPECT_TRUE(LayerEntry(Result).m_Ambiguous);
+	EXPECT_EQ(LayerEntry(Result).m_vTiles.size(), 1u);
+}
+
+TEST(MapDiff, MatchingProvenanceForGroupsResourcesAndObjects)
+{
+	MapDiff::CSnapshot Before;
+	Before.m_vGroups.push_back({"", false, {{"Offset X", "0"}}});
+	Before.m_vEnvelopes.push_back({"", {{"value", "1"}}});
+	auto After = Before;
+	auto Result = MapDiff::Compare(Before, After);
+	for(const auto &Entry : Result.m_vEntries)
+		EXPECT_FALSE(Entry.m_Ambiguous || Entry.m_Positional);
+	After.m_vGroups[0].m_vProperties[0].m_Value = "20";
+	After.m_vEnvelopes[0].m_vProperties[0].m_Value = "2";
+	Result = MapDiff::Compare(Before, After);
+	for(const auto &Entry : Result.m_vEntries)
+		if(Entry.m_Kind == MapDiff::EEntryKind::GROUP || Entry.m_Kind == MapDiff::EEntryKind::ENVELOPE)
+			EXPECT_TRUE(Entry.m_Ambiguous && Entry.m_Positional && Entry.Changed());
+	Before.m_vGroups.push_back(Before.m_vGroups[0]);
+	Result = MapDiff::Compare(Before, Before);
+	for(const auto &Entry : Result.m_vEntries)
+		if(Entry.m_Kind == MapDiff::EEntryKind::GROUP)
+		{
+			EXPECT_TRUE(Entry.m_Ambiguous);
+			EXPECT_FALSE(Entry.m_Positional);
+		}
+	Before = Map();
+	Before.m_vGroups[0].m_vLayers[0].m_vObjects = {Object(0), Object(1), Object(2)};
+	After = Before;
+	After.m_vGroups[0].m_vLayers[0].m_vObjects[1] = Object(10);
+	Result = MapDiff::Compare(Before, After);
+	ASSERT_EQ(LayerEntry(Result).m_vObjects.size(), 1u);
+	EXPECT_TRUE(LayerEntry(Result).m_vObjects[0].m_Positional);
+	EXPECT_TRUE(LayerEntry(Result).m_vObjects[0].m_Ambiguous);
+	EXPECT_EQ(LayerEntry(Result).m_vObjects[0].m_Before, 1);
+	EXPECT_EQ(LayerEntry(Result).m_vObjects[0].m_After, 1);
+}
+
 TEST(MapDiff, ResourceRenumberingAndContent)
 {
 	auto Before = Map();

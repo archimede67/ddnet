@@ -3600,6 +3600,14 @@ void CEditor::DoEditorDragBar(CUIRect View, CUIRect *pDragBar, EDragSide Side, f
 	static float s_InitialMouseOffsetY = 0.0f;
 	static float s_InitialMouseX = 0.0f;
 	static float s_InitialMouseOffsetX = 0.0f;
+	static const CUIRect *s_pOwner = nullptr;
+	// Forced view changes can clear the active item while a button is held.
+	// Never carry that operation into another divider or a later reopening.
+	if(s_pOwner && Ui()->ActiveItem() != s_pOwner)
+	{
+		s_Operation = OP_NONE;
+		s_pOwner = nullptr;
+	}
 
 	bool IsVertical = Side == EDragSide::TOP || Side == EDragSide::BOTTOM;
 
@@ -3612,6 +3620,7 @@ void CEditor::DoEditorDragBar(CUIRect View, CUIRect *pDragBar, EDragSide Side, f
 	{
 		if(s_Operation == OP_NONE && Result == 1)
 		{
+			s_pOwner = pDragBar;
 			s_InitialMouseY = Ui()->MouseY();
 			s_InitialMouseOffsetY = Ui()->MouseY() - pDragBar->y;
 			s_InitialMouseX = Ui()->MouseX();
@@ -3620,7 +3629,10 @@ void CEditor::DoEditorDragBar(CUIRect View, CUIRect *pDragBar, EDragSide Side, f
 		}
 
 		if(Clicked || Abrupted)
+		{
 			s_Operation = OP_NONE;
+			s_pOwner = nullptr;
+		}
 
 		if(s_Operation == OP_CLICKED && absolute(IsVertical ? Ui()->MouseY() - s_InitialMouseY : Ui()->MouseX() - s_InitialMouseX) > 5.0f)
 			s_Operation = OP_DRAGGING;

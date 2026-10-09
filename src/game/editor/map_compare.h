@@ -59,7 +59,26 @@ class CMapCompare
 	bool m_UnchangedExpanded = false;
 	int m_UnchangedCount = 0;
 	char m_UnchangedButtonId{};
-	bool m_ShowLayers = false;
+	enum
+	{
+		SECTION_CHANGES,
+		SECTION_LAYERS,
+		SECTION_ENVELOPES,
+		SECTION_SETTINGS,
+		NUM_SECTIONS,
+	};
+	int m_Section = SECTION_CHANGES;
+	float m_SidebarWidth = 225.0f;
+	CUIRect m_Divider{}; // Stable address for the native drag bar's UI identity.
+	struct CSectionState
+	{
+		int m_Entry = -1;
+		int m_Detail = -1;
+		vec2 m_Center = vec2(0, 0);
+		float m_Zoom = 4;
+		bool m_ByGroup = false;
+	};
+	CSectionState m_aSectionStates[NUM_SECTIONS];
 	struct CLayerState
 	{
 		bool m_Visible = true;
@@ -91,16 +110,19 @@ class CMapCompare
 	int m_ValueRowsDetail = -2;
 	std::vector<int> m_vNavigator;
 	std::vector<int> m_vChangedNavigator;
-	CListBox m_Navigator;
+	CListBox m_aNavigators[NUM_SECTIONS];
+	CListBox &NavigatorList() { return m_aNavigators[m_Section]; }
 	CListBox m_Details;
 	CScrollRegion m_Values;
 	CListBox m_aPairLists[2];
-	char m_aButtonIds[15]{};
+	char m_aButtonIds[17]{};
 	bool ValidSources(const CEditor &Editor) const;
 	void Start(CEditor &Editor);
 	void CancelWork();
 	void ReleaseBuffers();
-	vec2 ProjectionCenter(const CLayerGroup &Group) const;
+	vec2 ProjectionCenter(const CLayerGroup &Group, bool Inspection = false) const;
+	bool InSection(const MapDiff::CEntry &Entry) const;
+	void SetSection(int Section);
 	void RebuildNavigator(bool KeepSelection = false);
 	bool LayerVisible(int Entry) const;
 	void RevealLayerSelection();

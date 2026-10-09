@@ -258,7 +258,7 @@ namespace MapDiff
 		std::vector<CPair> Match(const std::vector<CMatchItem> &A, const std::vector<CMatchItem> &B, F Exact, CCheck &Check, bool Ordered = true)
 		{
 			std::vector<int> vA(A.size(), -1), vB(B.size(), -1);
-			std::vector<bool> vAmbiguous(A.size());
+			std::vector<bool> vAmbiguous(A.size()), vPositional(A.size());
 			auto Pair = [&](int i, int j, bool Ambiguous) {
 				vA[i] = j;
 				vB[j] = i;
@@ -329,7 +329,7 @@ namespace MapDiff
 						Indices.pop_front();
 						Other.pop_front();
 						if(Pass != 1 || Exact(i, j))
-							Pair(i, j, Ambiguous || (Pass == 1 && (A[i].m_Name.empty() || B[j].m_Name.empty())));
+							Pair(i, j, Ambiguous);
 					}
 				}
 			}
@@ -357,7 +357,10 @@ namespace MapDiff
 					Check.Tick();
 					int i = vLeft[k], j = vRight[k];
 					if(A[i].m_Compatible == B[j].m_Compatible)
+					{
 						Pair(i, j, true);
+						vPositional[i] = true;
+					}
 				}
 			};
 			for(int i = 0; i < (int)A.size(); ++i)
@@ -384,7 +387,7 @@ namespace MapDiff
 				Check.Tick();
 				const int j = vA[i];
 				bool Reordered = Ordered && j >= 0 && (j < PrefixMax || j > vSuffixMin[i + 1]);
-				vPairs.push_back({i, j, vAmbiguous[i], Reordered});
+				vPairs.push_back({i, j, vAmbiguous[i], Reordered, vPositional[i]});
 				PrefixMax = std::max(PrefixMax, j);
 			}
 			for(int j = 0; j < (int)B.size(); ++j)
@@ -469,6 +472,7 @@ namespace MapDiff
 				Entry.m_Before = Pair.m_Before;
 				Entry.m_After = Pair.m_After;
 				Entry.m_Ambiguous = Pair.m_Ambiguous;
+				Entry.m_Positional = Pair.m_Positional;
 				Entry.m_vProperties = Properties(A.m_vProperties, B.m_vProperties, Check);
 				AddName(Entry, A.m_Name, B.m_Name);
 				if(!EqualBytes(A.m_vData, B.m_vData, Check))
@@ -618,6 +622,7 @@ namespace MapDiff
 				GroupEntry.m_Before = GroupEntry.m_BeforeGroup = GroupPair.m_Before;
 				GroupEntry.m_After = GroupEntry.m_AfterGroup = GroupPair.m_After;
 				GroupEntry.m_Ambiguous = GroupPair.m_Ambiguous;
+				GroupEntry.m_Positional = GroupPair.m_Positional;
 				GroupEntry.m_Reordered = GroupPair.m_Reordered;
 				GroupEntry.m_vProperties = Properties(A.m_vProperties, B.m_vProperties, Check);
 				AddName(GroupEntry, A.m_Name, B.m_Name);
@@ -637,6 +642,7 @@ namespace MapDiff
 					Entry.m_Before = LayerPair.m_Before;
 					Entry.m_After = LayerPair.m_After;
 					Entry.m_Ambiguous = LayerPair.m_Ambiguous;
+					Entry.m_Positional = LayerPair.m_Positional;
 					Entry.m_Reordered = LayerPair.m_Reordered;
 					Entry.m_vProperties = Properties(LA.m_vProperties, LB.m_vProperties, Check);
 					AddName(Entry, LA.m_Name, LB.m_Name);

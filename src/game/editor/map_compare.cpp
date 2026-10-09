@@ -53,6 +53,8 @@ namespace
 	{
 		SLabelProperties Props;
 		Props.m_EllipsisAtEnd = true;
+		Props.m_MaxWidth = Rect.w;
+		Props.m_EnableWidthCheck = false;
 		Props.SetColor(Color);
 		Editor.Ui()->DoLabel(&Rect, Text.c_str(), Size, TEXTALIGN_ML, Props);
 	}
@@ -104,6 +106,19 @@ namespace
 		Bounds[3] += Offset.g;
 		return Bounds;
 	}
+	std::string SourceIndices(const MapDiff::CEntry &Entry)
+	{
+		return "Before #" + (Entry.m_Before < 0 ? std::string("absent") : std::to_string(Entry.m_Before)) + " / After #" +
+		       (Entry.m_After < 0 ? std::string("absent") : std::to_string(Entry.m_After));
+	}
+	std::string EntryName(const MapDiff::CEntry &Entry)
+	{
+		if(!Entry.m_Name.empty() && Entry.m_Name != "(unnamed)")
+			return Entry.m_Name;
+		const auto Index = [](int Value) { return Value < 0 ? std::string("-") : std::to_string(Value); };
+		return "#" + Index(Entry.m_Before < 0 ? Entry.m_After : Entry.m_Before) +
+		       (Entry.m_Before >= 0 && Entry.m_After >= 0 && Entry.m_Before != Entry.m_After ? " -> #" + Index(Entry.m_After) : "") + " (unnamed)";
+	}
 	std::string EntryLabel(const MapDiff::CEntry &Entry)
 	{
 		const char *pKind = "";
@@ -115,7 +130,7 @@ namespace
 		case MapDiff::EEntryKind::GROUP: pKind = "Group: "; break;
 		default: break;
 		}
-		return std::string(Entry.Status()) + " " + pKind + Entry.m_Name + (Entry.m_Ambiguous ? " [?]" : "");
+		return std::string(Entry.Status()) + " " + pKind + EntryName(Entry) + (Entry.m_Ambiguous ? " [?]" : "");
 	}
 	template<typename TCells, typename F>
 	void ForVisibleCells(const TCells &Cells, const CScreenRect &Visible, F Visit)
@@ -351,10 +366,23 @@ void CMapCompare::ReleaseBuffers()
 	m_SelectedEntry = m_SelectedDetail = m_FocusEntry = -1;
 	m_ValueRowsEntry = m_ValueRowsDetail = -2;
 }
-vec2 CMapCompare::ProjectionCenter(const CLayerGroup &Group) const
+vec2 CMapCompare::ProjectionCenter(const CLayerGroup &Group, bool Inspection) const
 {
-	// Parallax is evaluated at one shared reference position. Independent
-	// inspection translation allows even zero-parallax axes to be panned.
+	// The selected owning group retains an independent inspection translation,
+	// including its siblings. Other map context follows the current camera.
+	if(!Inspection && m_Context == CONTEXT_MAP && m_SelectedEntry >= 0)
+	{
+		const auto &Selected = m_Result.m_vEntries[m_SelectedEntry];
+		for(int Side = 0; Side < 2; ++Side)
+		{
+			const int G = Side == 0 ? Selected.m_BeforeGroup : Selected.m_AfterGroup;
+			if(G >= 0 && m_apSources[Side] && m_apSources[Side]->m_vpGroups[G].get() == &Group)
+				Inspection = true;
+		}
+		if(!Inspection)
+			return vec2((m_ParallaxOrigin.x + m_Center.x) * Group.m_ParallaxX / 100.0f + Group.m_OffsetX,
+				(m_ParallaxOrigin.y + m_Center.y) * Group.m_ParallaxY / 100.0f + Group.m_OffsetY);
+	}
 	return m_Center + vec2(m_ParallaxOrigin.x * Group.m_ParallaxX / 100.0f + Group.m_OffsetX, m_ParallaxOrigin.y * Group.m_ParallaxY / 100.0f + Group.m_OffsetY);
 }
 bool CMapCompare::ValidSources(const CEditor &Editor) const
@@ -401,7 +429,7 @@ void CMapCompare::Open(CEditor &Editor, const CEditorMap *pBefore, const CEditor
 	m_Message.clear();
 	m_Context = CONTEXT_OFF;
 	m_UnchangedExpanded = false;
-	m_ShowLayers = false;
+	m_Section = SECTION_CHANGES;
 	m_LayerTreeActive = true;
 	m_Panning = false;
 	Editor.Ui()->SetActiveItem(nullptr);
@@ -465,7 +493,7 @@ void CMapCompare::OnInput(CEditor &Editor, const IInput::CEvent &Event)
 				return;
 			}
 			vec2 Mouse(Editor.Ui()->MouseX(), Editor.Ui()->MouseY());
-			if(MapView() && (m_aPanes[0].Inside(Mouse) || m_aPanes[1].Inside(Mouse)))
+			if(MapView() && Editor.Ui()->ActiveItem() == nullptr && (m_aPanes[0].Inside(Mouse) || m_aPanes[1].Inside(Mouse)))
 			{
 				if(Event.m_Key == KEY_MOUSE_WHEEL_UP)
 					m_Zoom = std::max(MIN_ZOOM, m_Zoom / 1.2f);
@@ -506,7 +534,10 @@ void CMapCompare::Start(CEditor &Editor)
 	m_vDetails.clear();
 	m_vValueRows.clear();
 	m_ValueRowsEntry = m_ValueRowsDetail = -2;
-	m_Navigator.Reset();
+	for(auto &List : m_aNavigators)
+		List.Reset();
+	for(auto &State : m_aSectionStates)
+		State = {};
 	m_Details.Reset();
 	m_Values.Reset();
 	Editor.Ui()->ClosePopupMenus();
@@ -574,6 +605,74 @@ void CMapCompare::OnUpdate(CEditor &Editor)
 		}
 	}
 }
+bool CMapCompare::InSection(const MapDiff::CEntry &Entry) const
+{
+	switch(m_Section)
+	{
+	case SECTION_ENVELOPES: return Entry.m_Kind == MapDiff::EEntryKind::ENVELOPE;
+	case SECTION_SETTINGS: return Entry.m_Kind == MapDiff::EEntryKind::SETTINGS;
+	case SECTION_LAYERS: return Entry.m_Kind == MapDiff::EEntryKind::GROUP || Entry.m_Kind == MapDiff::EEntryKind::LAYER;
+	default: return Entry.m_Kind != MapDiff::EEntryKind::ENVELOPE && Entry.m_Kind != MapDiff::EEntryKind::SETTINGS;
+	}
+}
+void CMapCompare::SetSection(int Section)
+{
+	if(Section == m_Section)
+		return;
+	m_aSectionStates[m_Section] = {m_SelectedEntry, m_SelectedDetail, m_Center, m_Zoom, m_ByGroup};
+	const int PreviousEntry = m_SelectedEntry;
+	const int PreviousDetail = m_SelectedDetail;
+	const vec2 Center = m_Center;
+	const float Zoom = m_Zoom;
+	const bool LeavingSettings = PreviousEntry >= 0 && m_Result.m_vEntries[PreviousEntry].m_Kind == MapDiff::EEntryKind::SETTINGS;
+	m_Section = Section;
+	m_LayerTreeActive = true;
+	auto Available = [&](int Entry) {
+		return Entry >= 0 && Entry < (int)m_Result.m_vEntries.size() && InSection(m_Result.m_vEntries[Entry]);
+	};
+	const auto Saved = m_aSectionStates[Section];
+	const bool RestoreSaved = Available(Saved.m_Entry);
+	const int Entry = RestoreSaved ? Saved.m_Entry : Available(PreviousEntry) ? PreviousEntry :
+										    -1;
+	if(!RestoreSaved && Entry == PreviousEntry && Entry >= 0)
+	{
+		RebuildNavigator(true);
+		return; // An unvisited destination inherits the current inspection.
+	}
+	if(Entry >= 0 && Entry == Saved.m_Entry && Section <= SECTION_LAYERS)
+		m_ByGroup = Saved.m_ByGroup;
+	RebuildNavigator(true);
+	Select(Entry);
+	if(Entry >= 0)
+	{
+		const int Detail = Entry == Saved.m_Entry ? Saved.m_Detail : PreviousDetail;
+		if(Detail >= 0 && Detail < (int)m_vDetails.size())
+		{
+			m_SelectedDetail = Detail;
+			m_FocusEntry = m_vDetails[Detail].m_Entry;
+			m_Details.ScrollToSelected();
+		}
+	}
+	else
+	{
+		RebuildNavigator();
+		m_FitAfterSettings = LeavingSettings && MapView();
+	}
+	if(Entry >= 0 && Entry == Saved.m_Entry && MapView())
+	{
+		m_Center = Saved.m_Center;
+		m_Zoom = Saved.m_Zoom;
+		m_FitAfterSettings = false;
+	}
+	if(Entry >= 0 && Entry == Saved.m_Entry && Section == SECTION_SETTINGS)
+		m_ScrollToSetting = false;
+	// Resource sections preserve the independent map inspection camera.
+	if(!MapView())
+	{
+		m_Center = Center;
+		m_Zoom = Zoom;
+	}
+}
 void CMapCompare::RebuildNavigator(bool KeepSelection)
 {
 	m_vNavigator.clear();
@@ -582,21 +681,21 @@ void CMapCompare::RebuildNavigator(bool KeepSelection)
 	for(int i = 0; i < (int)m_Result.m_vEntries.size(); ++i)
 	{
 		const auto &Entry = m_Result.m_vEntries[i];
-		bool Changed = Entry.Changed();
-		if(Entry.m_Kind == MapDiff::EEntryKind::GROUP)
-			for(const auto &Child : m_Result.m_vEntries)
-				if(Child.m_Parent == i && Child.Changed())
-					Changed = true;
+		if(!InSection(Entry))
+			continue;
+		const bool Changed = Entry.m_Kind == MapDiff::EEntryKind::GROUP && m_ByGroup ? m_vLayerStates[i].m_Changes > 0 : Entry.Changed();
 		if(m_ByGroup && Entry.m_Kind == MapDiff::EEntryKind::LAYER)
 			continue;
 		// In layer mode retain changed group properties in the navigator, too.
-		if(!m_ByGroup && Entry.m_Kind == MapDiff::EEntryKind::GROUP && !Entry.Changed())
+		if(m_Section != SECTION_LAYERS && !m_ByGroup && Entry.m_Kind == MapDiff::EEntryKind::GROUP && !Entry.Changed())
 			continue;
 		(Changed ? m_vChangedNavigator : vUnchanged).push_back(i);
 	}
 	m_vNavigator = m_vChangedNavigator;
 	m_UnchangedCount = vUnchanged.size();
-	if(m_Context != CONTEXT_OFF && !vUnchanged.empty())
+	if(m_Section != SECTION_CHANGES)
+		m_vNavigator.insert(m_vNavigator.end(), vUnchanged.begin(), vUnchanged.end());
+	else if(m_Context != CONTEXT_OFF && !vUnchanged.empty())
 	{
 		m_vNavigator.push_back(-1); // Collapsible section header, never a selection.
 		if(m_UnchangedExpanded)
@@ -654,7 +753,6 @@ void CMapCompare::Select(int Entry)
 	if(m_SelectedEntry != Entry)
 	{
 		m_pObjectViewCache.reset();
-		m_Settings.Reset();
 		m_ScrollToSetting = true;
 	}
 	m_Panning = false;
@@ -678,7 +776,7 @@ void CMapCompare::SelectDetail(int Detail)
 	m_FocusEntry = m_vDetails[Detail].m_Entry;
 	m_Values.Reset();
 	m_Details.ScrollToSelected();
-	m_Navigator.ScrollToSelected();
+	NavigatorList().ScrollToSelected();
 	m_ScrollToSetting = true;
 	FitSelection();
 	RevealLayerSelection();
@@ -704,6 +802,9 @@ void CMapCompare::RebuildDetails()
 		for(int e = 0; e < (int)Entry.m_vIssues.size(); ++e)
 			m_vDetails.push_back({i, 3, e});
 	}
+	const auto &Selected = m_Result.m_vEntries[m_SelectedEntry];
+	if(Selected.m_Kind != MapDiff::EEntryKind::INFO && Selected.m_Kind != MapDiff::EEntryKind::SETTINGS && Selected.m_Before >= 0 && Selected.m_After >= 0 && !Selected.m_Reordered && !Selected.m_Ambiguous)
+		m_vDetails.push_back({m_SelectedEntry, 4, 0});
 	if(!m_vDetails.empty())
 		m_SelectedDetail = 0;
 }
@@ -738,7 +839,7 @@ std::vector<MapDiff::CPropertyChange> CMapCompare::DetailValues(const CDetail &D
 		if(Object.m_Reordered)
 			Values.push_back({"Draw order", "Previous relative order", "Changed relative order"});
 		if(Object.m_Ambiguous)
-			Values.push_back({"Matching", "Ambiguous content/ordered match", "Historical identity is unknown"});
+			Values.push_back({"Matching", Object.m_Positional ? "Positional fallback in compatible ordered span" : "Ambiguous duplicate content match", "Historical identity is unknown"});
 		return Values;
 	}
 	if(Detail.m_Kind == 3)
@@ -747,7 +848,11 @@ std::vector<MapDiff::CPropertyChange> CMapCompare::DetailValues(const CDetail &D
 	if(Entry.m_Reordered)
 		Values.push_back({"Draw order", "Previous relative order", "Changed relative order among matched items"});
 	if(Entry.m_Ambiguous)
-		Values.push_back({"Matching", "Ambiguous content/ordered match", "Historical identity is unknown"});
+		Values.push_back({"Matching", Entry.m_Positional ? "Positional fallback in compatible ordered span" : "Ambiguous duplicate content match", "Historical identity is unknown"});
+	else if(Entry.m_Before >= 0 && Entry.m_After >= 0)
+		Values.push_back({"Matching", "Unique role, content or name match", "Source indices do not establish historical identity"});
+	if(Entry.m_Kind == MapDiff::EEntryKind::LAYER)
+		Values.push_back({"Group (zero-based index)", std::to_string(Entry.m_BeforeGroup), std::to_string(Entry.m_AfterGroup)});
 	return Values;
 }
 void CMapCompare::Navigate(int Direction)
@@ -788,13 +893,13 @@ void CMapCompare::FitSelection()
 		if(G < 0 || !m_apSources[Side])
 			return false;
 		const auto &Group = *m_apSources[Side]->m_vpGroups[G];
-		const vec2 Origin = ProjectionCenter(Group) - m_Center;
+		const vec2 Origin = ProjectionCenter(Group, true) - m_Center;
 		float X0 = Bounds[0] - Origin.x, X1 = Bounds[2] - Origin.x;
 		float Y0 = Bounds[1] - Origin.y, Y1 = Bounds[3] - Origin.y;
 		if(Group.m_UseClipping)
 		{
 			const auto &Map = *m_apSources[Side];
-			const vec2 GameOrigin = Map.m_pGameGroup ? ProjectionCenter(*Map.m_pGameGroup) - m_Center : vec2(0, 0);
+			const vec2 GameOrigin = Map.m_pGameGroup ? ProjectionCenter(*Map.m_pGameGroup, true) - m_Center : vec2(0, 0);
 			X0 = std::max(X0, Group.m_ClipX - GameOrigin.x);
 			Y0 = std::max(Y0, Group.m_ClipY - GameOrigin.y);
 			X1 = std::min(X1, Group.m_ClipX + (float)Group.m_ClipW - GameOrigin.x);
@@ -946,7 +1051,7 @@ void CMapCompare::RenderInspector(CEditor &Editor, CUIRect View)
 				Name = Entry.m_vProperties[Detail.m_Index].m_Name;
 			else
 				Name = Detail.m_Kind == 3 ? "Unavailable / invalid content" : "Structure / matching";
-			Label(Editor, Item.m_Rect, Entry.m_Name + ": " + Name, 10);
+			Label(Editor, Item.m_Rect, EntryName(Entry) + ": " + Name, 10);
 		}
 	}
 	int Selected = m_Details.DoEnd();
@@ -1051,7 +1156,7 @@ void CMapCompare::RenderSettings(CEditor &Editor, CUIRect View)
 	Params.m_ForceShowScrollbar = true;
 	m_Settings.Begin(&View, &Params);
 	const float ColumnWidth = std::max(1.0f, (View.w - 8) / 2 - 43);
-	const bool Remeasured = Cache.m_SettingsWidth != ColumnWidth;
+	const bool Remeasured = Cache.m_SettingsWidth < 0 || (Editor.Ui()->ActiveItem() != &m_Divider && Cache.m_SettingsWidth != ColumnWidth);
 	if(Remeasured)
 	{
 		Cache.m_SettingsWidth = ColumnWidth;
@@ -1105,6 +1210,7 @@ void CMapCompare::RenderSettings(CEditor &Editor, CUIRect View)
 		Row.VSplitMid(&aSides[0], &aSides[1], 8);
 		for(int Side = 0; Side < 2; ++Side)
 		{
+			Editor.Ui()->ClipEnable(&aSides[Side]);
 			const int Line = Side == 0 ? Setting.m_Before : Setting.m_After;
 			CUIRect Number, Text;
 			aSides[Side].Margin(4, &Text);
@@ -1113,8 +1219,10 @@ void CMapCompare::RenderSettings(CEditor &Editor, CUIRect View)
 			const ColorRGBA Color = Changed ? (Side == 0 ? REMOVE_COLOR : ADD_COLOR) : ColorRGBA(0.76f, 0.78f, 0.8f, 1);
 			Label(Editor, Number, Line < 0 ? "-" : std::to_string(Line + 1), 9, Color);
 			Editor.TextRender()->TextColor(Line < 0 ? ColorRGBA(0.5f, 0.5f, 0.5f, 1) : Color);
-			Editor.TextRender()->Text(Text.x, Text.y, 10, Line < 0 ? "[no line]" : m_pData->m_aSnapshots[Side].m_vSettings[Line].c_str(), ColumnWidth);
+			// Keep wrapping and cached row heights together during divider drags.
+			Editor.TextRender()->Text(Text.x, Text.y, 10, Line < 0 ? "[no line]" : m_pData->m_aSnapshots[Side].m_vSettings[Line].c_str(), Cache.m_SettingsWidth);
 			Editor.TextRender()->TextColor(ColorRGBA(1, 1, 1, 1));
+			Editor.Ui()->ClipDisable();
 		}
 	}
 	m_Settings.End();
@@ -1511,6 +1619,8 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 					if(!ContextPass && Index >= 0)
 						vChanged[Index] = true;
 				}
+				std::vector<CQuad> vVisibleQuads;
+				std::vector<std::array<float, 4>> vMarkers;
 				m_pRenderCache->VisibleObjects(Map, SourceLayer, *pLayer, Visible, [&](size_t q, const auto &B) {
 					if(!ContextPass && !vChanged[q])
 						return;
@@ -1526,16 +1636,29 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 						else
 							Color.a = (int)(Color.a * (Focused ? SELECTED_CONTEXT_ALPHA : MAP_CONTEXT_ALPHA));
 					}
+					vVisibleQuads.push_back(Quad);
+					if(vChanged[q])
+						vMarkers.push_back(B);
+				});
+				// Keep source order and envelope evaluation while submitting one
+				// batch per visible layer/pass instead of rebinding every quad.
+				if(!vVisibleQuads.empty())
+				{
 					if(Quads.m_Image >= 0 && Quads.m_Image < (int)Map.m_vpImages.size())
 						pGraphics->TextureSet(Map.m_vpImages[Quads.m_Image]->m_Texture);
 					else
 						pGraphics->TextureClear();
-					Editor.RenderMap()->ForceRenderQuads(&Quad, 1, LAYERRENDERFLAG_TRANSPARENT, &Envelope);
-					if(vChanged[q])
-					{
-						Marker(Editor, B[0], B[1], B[2] - B[0], B[3] - B[1], Side, m_Zoom, Highlight);
-					}
-				});
+					Editor.RenderMap()->ForceRenderQuads(vVisibleQuads.data(), vVisibleQuads.size(), LAYERRENDERFLAG_TRANSPARENT, &Envelope);
+				}
+				if(!vMarkers.empty())
+				{
+					pGraphics->TextureClear();
+					pGraphics->LinesBegin();
+					pGraphics->SetColor(Highlight);
+					for(const auto &B : vMarkers)
+						MarkerLines(Editor, B[0], B[1], B[2] - B[0], B[3] - B[1], Side, m_Zoom);
+					pGraphics->LinesEnd();
+				}
 			}
 			else if(!ContextPass && SourceLayer.m_Type == LAYERTYPE_SOUNDS)
 			{
@@ -1647,6 +1770,11 @@ void CMapCompare::RenderLayerTree(CEditor &Editor, CUIRect View)
 		}
 	}
 	View.Draw(ColorRGBA(0, 0, 0, 0.15f), IGraphics::CORNER_ALL, 5);
+	if(vRows.empty())
+	{
+		Label(Editor, View, "No groups or layers on either side.", 10);
+		return;
+	}
 	CScrollRegionParams Params;
 	Params.m_ScrollUnit = 12 * 5;
 	Params.m_ScrollbarThickness = 10;
@@ -1709,16 +1837,29 @@ void CMapCompare::RenderLayerTree(CEditor &Editor, CUIRect View)
 								 Changed         ? "Changed / " + std::to_string(State.m_Changes) + " changes" :
 										   "Unchanged";
 		if(Entry.m_Ambiguous)
-			Description += ". Ambiguous pairing; historical identity is unknown";
+			Description += Entry.m_Positional ? ". Positional fallback; historical identity is unknown" : ". Ambiguous duplicate content; historical identity is unknown";
+		Description += ". " + SourceIndices(Entry);
 		if(!LayerVisible(i))
 			Description += ParentHidden ? ". Group hidden" : ". Hidden";
 		if(Group)
 			Description += State.m_Expanded ? ". Double click to fold" : ". Double click to expand";
 		const auto *pLayer = Group ? nullptr : Layer(m_pData->m_aSnapshots[Added ? 1 : 0], Entry, Added ? 1 : 0);
 		const bool Gameplay = pLayer && pLayer->m_Kind >= MapDiff::ELayerKind::GAME && pLayer->m_Kind <= MapDiff::ELayerKind::TUNE;
-		const std::string Title = (Group ? "#" + std::to_string(Added ? Entry.m_After : Entry.m_Before) + " " : "") + (Entry.m_Name.empty() ? "(unnamed)" : Entry.m_Name);
+		const std::string Title = (Group && Entry.m_Name != "(unnamed)" && !Entry.m_Name.empty() ? "#" + std::to_string(Added ? Entry.m_After : Entry.m_Before) + " " : "") + EntryName(Entry);
 		Row.VSplitRight(Entry.m_Ambiguous ? 23 : 13, &Row, &Badge);
-		if(Editor.DoButton_Ex(&Entry, Title.c_str(), (Focused ? 1 : 0) + (Gameplay ? 6 : 0), &Row, BUTTONFLAG_LEFT, Description.c_str(), IGraphics::CORNER_R, 10, TEXTALIGN_ML))
+		const ColorRGBA Color = Added ? ADD_COLOR : Removed ? REMOVE_COLOR :
+						    Changed         ? CHANGE_COLOR :
+								      ColorRGBA(0.75f, 0.75f, 0.75f, 1);
+		const int Checked = (Focused ? 1 : 0) + (Gameplay ? 6 : 0);
+		Row.Draw(Editor.GetButtonColor(&Entry, Checked), IGraphics::CORNER_R, 3);
+		CUIRect Name;
+		Row.VMargin(5, &Name);
+		SLabelProperties Props;
+		Props.m_MaxWidth = Name.w;
+		Props.m_EllipsisAtEnd = true;
+		Props.SetColor(Color);
+		Editor.Ui()->DoLabel(&Name, Title.c_str(), 10, TEXTALIGN_ML, Props);
+		if(Editor.DoButtonLogic(&Entry, Checked, &Row, BUTTONFLAG_LEFT, Description.c_str()))
 		{
 			if(m_SelectedEntry != i || m_ByGroup != Group)
 			{
@@ -1732,9 +1873,6 @@ void CMapCompare::RenderLayerTree(CEditor &Editor, CUIRect View)
 				FoldChanged = true;
 			}
 		}
-		const ColorRGBA Color = Added ? ADD_COLOR : Removed ? REMOVE_COLOR :
-						    Changed         ? CHANGE_COLOR :
-								      ColorRGBA(0.65f, 0.65f, 0.65f, 1);
 		Label(Editor, Badge, std::string(Added ? "+" : Removed ? "-" :
 						       Changed         ? "~" :
 									 "=") +
@@ -1752,6 +1890,7 @@ void CMapCompare::RenderLayerTree(CEditor &Editor, CUIRect View)
 void CMapCompare::Render(CEditor &Editor)
 {
 	Editor.m_aTooltip[0] = 0;
+	Editor.m_CursorType = CEditor::CURSOR_NORMAL;
 	Editor.Graphics()->Clear(0.08f, 0.08f, 0.1f);
 	Editor.Ui()->MapScreen();
 	CUIRect View = *Editor.Ui()->Screen();
@@ -1814,7 +1953,7 @@ void CMapCompare::Render(CEditor &Editor)
 		if(m_vChangedNavigator.empty())
 			m_UnchangedExpanded = true;
 		RebuildNavigator();
-		m_Navigator.ScrollToSelected();
+		NavigatorList().ScrollToSelected();
 		if(m_SelectedEntry < 0 && !m_vNavigator.empty() && m_vNavigator.front() >= 0)
 			Select(m_vNavigator.front());
 	}
@@ -1825,24 +1964,34 @@ void CMapCompare::Render(CEditor &Editor)
 	if(Button(6, "Fit [Home]", 76))
 		FitSelection();
 	Label(Editor, Toolbar, "READ ONLY", 11);
+	const float MaxSidebar = std::max(120.0f, std::min({400.0f, View.w * 0.45f, View.w - 300.0f}));
+	const float MinSidebar = std::min(160.0f, MaxSidebar);
+	m_SidebarWidth = std::clamp(m_SidebarWidth, MinSidebar, MaxSidebar);
+	CUIRect Sidebar, Navigator, Inspector{};
+	View.VSplitLeft(m_SidebarWidth, &Sidebar, &View);
+	m_Divider = {Sidebar.x + Sidebar.w - 2, Sidebar.y, 5, Sidebar.h};
+	Editor.DoEditorDragBar(Sidebar, &m_Divider, CEditor::EDragSide::RIGHT, &m_SidebarWidth, MinSidebar, MaxSidebar);
+	if(Editor.Ui()->ActiveItem() == &m_Divider)
+		m_Panning = false;
+	View.VMargin(4, &View);
+	CUIRect Tabs, aRows[2], aTabs[4];
+	Sidebar.HSplitTop(48, &Tabs, &Navigator);
+	Tabs.VSplitRight(4, &Tabs, nullptr);
+	Tabs.HSplitMid(&aRows[0], &aRows[1], 3);
+	for(int Row = 0; Row < 2; ++Row)
+	{
+		aRows[Row].HMargin(2, &aRows[Row]);
+		aRows[Row].VSplitMid(&aTabs[Row * 2], &aTabs[Row * 2 + 1], 3);
+	}
+	const char *apSections[] = {"Changes", "Layers", "Envelopes", "Server settings"};
+	const char *apTips[] = {"Browse map, image, sound and layer differences.", "Inspect layers and comparison visibility.", "Inspect all envelopes, including unchanged ones.", "Inspect ordered server commands, including unchanged ones."};
+	const int aIds[] = {12, 13, 15, 16};
+	for(int Section = 0; Section < NUM_SECTIONS; ++Section)
+		if(Editor.DoButton_Editor(&m_aButtonIds[aIds[Section]], apSections[Section], m_Section == Section, &aTabs[Section], BUTTONFLAG_LEFT, apTips[Section]))
+			SetSection(Section);
 	CUIRect Summary;
 	View.HSplitTop(24, &Summary, &View);
-	CUIRect SidebarTabs, ChangesTab, LayersTab;
-	Summary.VSplitLeft(std::min(225.0f, View.w * 0.25f), &SidebarTabs, &Summary);
-	SidebarTabs.HMargin(2, &SidebarTabs);
-	SidebarTabs.VSplitMid(&ChangesTab, &LayersTab, 3);
-	if(Editor.DoButton_Editor(&m_aButtonIds[12], "Changes", !m_ShowLayers, &ChangesTab, BUTTONFLAG_LEFT, "Browse differences and map-wide resources."))
-		m_ShowLayers = false;
-	if(Editor.DoButton_Editor(&m_aButtonIds[13], "Layers", m_ShowLayers, &LayersTab, BUTTONFLAG_LEFT, "Inspect the group/layer hierarchy and toggle visibility in both panes."))
-	{
-		m_ShowLayers = true;
-		m_LayerTreeActive = true;
-	}
-	Summary.VMargin(4, &Summary);
-	Label(Editor, Summary, m_Result.ChangeCount() == 0 ? "No differences in map content. Enable context to inspect matching layers." : std::to_string(m_Result.ChangeCount()) + " changes. - red: Before   + green: After   [?]: ambiguous pairing." + (MapView() ? " Drag a canvas to pan; wheel to zoom." : ""), 11);
-	CUIRect Navigator, Inspector{};
-	View.VSplitLeft(std::min(225.0f, View.w * 0.25f), &Navigator, &View);
-	View.VMargin(4, &View);
+	Label(Editor, Summary, m_Result.ChangeCount() == 0 ? "No differences in map content. Enable context to inspect matching layers." : std::to_string(m_Result.ChangeCount()) + " changes. - red: Before   + green: After   [?]: uncertain pairing." + (MapView() ? " Drag a canvas to pan; wheel to zoom." : ""), 11);
 	const CUIRect ContentView = View;
 	const bool SettingsView = m_SelectedEntry >= 0 && m_Result.m_vEntries[m_SelectedEntry].m_Kind == MapDiff::EEntryKind::SETTINGS;
 	if(!SettingsView)
@@ -1860,7 +2009,7 @@ void CMapCompare::Render(CEditor &Editor)
 	vec2 Mouse(Editor.Ui()->MouseX(), Editor.Ui()->MouseY());
 	if(!MapView())
 		m_Panning = false;
-	if(MapView() && !m_Panning && (m_aPanes[0].Inside(Mouse) || m_aPanes[1].Inside(Mouse)) && (Editor.Ui()->MouseButtonClicked(0) || Editor.Ui()->MouseButtonClicked(2)))
+	if(MapView() && Editor.Ui()->ActiveItem() == nullptr && !m_Panning && (m_aPanes[0].Inside(Mouse) || m_aPanes[1].Inside(Mouse)) && (Editor.Ui()->MouseButtonClicked(0) || Editor.Ui()->MouseButtonClicked(2)))
 	{
 		m_Panning = true;
 		m_LastMouse = Mouse;
@@ -1886,22 +2035,24 @@ void CMapCompare::Render(CEditor &Editor)
 	if(Editor.DoButton_Editor(&m_aButtonIds[14], "Show all", Hidden ? 0 : -1, &ShowAll, BUTTONFLAG_LEFT, "Restore all comparison visibility. Source editor visibility is unchanged."))
 		for(auto &State : m_vLayerStates)
 			State.m_Visible = true;
-	if(m_ShowLayers)
+	if(m_vNavigator.empty() && m_Section != SECTION_LAYERS)
+		Label(Editor, Navigator, m_Section == SECTION_ENVELOPES ? "No envelopes on either side." : "No differences in this section.", 10);
+	if(m_Section == SECTION_LAYERS)
 		RenderLayerTree(Editor, Navigator);
-	else
+	else if(!m_vNavigator.empty())
 	{
-		m_Navigator.SetActive(m_LayerTreeActive);
+		NavigatorList().SetActive(m_LayerTreeActive);
 		int NavSelected = -1;
 		for(int i = 0; i < (int)m_vNavigator.size(); ++i)
 			if(m_SelectedEntry >= 0 && m_vNavigator[i] == m_SelectedEntry)
 				NavSelected = i;
-		m_Navigator.DoStart(36, m_vNavigator.size(), 1, 3, NavSelected, &Navigator);
+		NavigatorList().DoStart(36, m_vNavigator.size(), 1, 3, NavSelected, &Navigator);
 		bool ToggleUnchanged = false;
 		for(int Index : m_vNavigator)
 		{
 			if(Index < 0)
 			{
-				auto Item = m_Navigator.DoSubheader();
+				auto Item = NavigatorList().DoSubheader();
 				if(Item.m_Visible)
 				{
 					Item.m_Rect.Margin(3, &Item.m_Rect);
@@ -1911,7 +2062,7 @@ void CMapCompare::Render(CEditor &Editor)
 				continue;
 			}
 			const auto &Entry = m_Result.m_vEntries[Index];
-			auto Item = m_Navigator.DoNextItem(&Entry);
+			auto Item = NavigatorList().DoNextItem(&Entry);
 			if(Item.m_Visible)
 			{
 				CUIRect Name, Count;
@@ -1924,11 +2075,12 @@ void CMapCompare::Render(CEditor &Editor)
 							Changes += Child.ChangeCount();
 				std::string RowLabel = EntryLabel(Entry);
 				if(Entry.m_Kind == MapDiff::EEntryKind::GROUP && !Entry.Changed() && Changes > 0)
-					RowLabel = "-/+ Group: " + Entry.m_Name + (Entry.m_Ambiguous ? " [?]" : "");
+					RowLabel = "-/+ Group: " + EntryName(Entry) + (Entry.m_Ambiguous ? " [?]" : "");
 				const ColorRGBA StatusColor = Entry.m_Before < 0 ? ADD_COLOR : Entry.m_After < 0 ? REMOVE_COLOR :
 										       Changes > 0               ? CHANGE_COLOR :
 														   ColorRGBA(0.75f, 0.75f, 0.75f, 1);
 				Label(Editor, Name, RowLabel, 10, StatusColor);
+				Editor.UpdateTooltip(&Entry, &Name, (RowLabel + ". " + SourceIndices(Entry)).c_str());
 				std::string Text = std::to_string(Changes) + " changes";
 				if(!LayerVisible(Index))
 					Text = "Hidden / " + Text;
@@ -1939,7 +2091,7 @@ void CMapCompare::Render(CEditor &Editor)
 				Label(Editor, Count, Text, 9);
 			}
 		}
-		int NewSelected = m_Navigator.DoEnd();
+		int NewSelected = NavigatorList().DoEnd();
 		if(NewSelected >= 0 && NewSelected != NavSelected && m_vNavigator[NewSelected] < 0)
 		{
 			const int Direction = NewSelected > NavSelected ? 1 : -1;
@@ -1954,7 +2106,7 @@ void CMapCompare::Render(CEditor &Editor)
 			m_UnchangedExpanded = !m_UnchangedExpanded;
 			RebuildNavigator(true);
 			if(m_vNavigator.size() * 36 <= Navigator.h)
-				m_Navigator.Reset();
+				NavigatorList().Reset();
 		}
 		else if(NewSelected >= 0 && NewSelected != NavSelected)
 			Select(m_vNavigator[NewSelected]);
