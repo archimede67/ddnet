@@ -1291,7 +1291,7 @@ void CMapCompare::RenderSettings(CEditor &Editor, CUIRect View)
 	Params.m_ForceShowScrollbar = true;
 	m_Settings.Begin(&View, &Params);
 	const float ColumnWidth = std::max(1.0f, (View.w - 8) / 2 - 43);
-	const bool Remeasured = Cache.m_SettingsWidth < 0 || (Editor.Ui()->ActiveItem() != &m_Divider && Cache.m_SettingsWidth != ColumnWidth);
+	const bool Remeasured = Cache.m_SettingsWidth < 0 || (Editor.Ui()->ActiveItem() != &Editor.m_ToolBoxDivider && Cache.m_SettingsWidth != ColumnWidth);
 	if(Remeasured)
 	{
 		Cache.m_SettingsWidth = ColumnWidth;
@@ -2030,17 +2030,18 @@ void CMapCompare::RenderLayerTree(CEditor &Editor, CUIRect View)
 	m_ScrollToLayer = false;
 }
 
-void CMapCompare::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar)
+void CMapCompare::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar, CUIRect Sidebar)
 {
 	Editor.Ui()->MapScreen();
-	View.Margin(6, &View);
-	auto Button = [&](int Id, const char *pText, float Width, int Checked = 0, const char *pTooltip = nullptr) {
+	CUIRect ToolbarTop, ToolbarBottom;
+	CEditor::SplitToolbarRows(Toolbar, ToolbarTop, ToolbarBottom);
+	auto Button = [&](CUIRect &Row, int Id, const char *pText, float Width, int Checked = 0, const char *pTooltip = nullptr) {
 		CUIRect Rect;
-		Toolbar.VSplitLeft(Width, &Rect, &Toolbar);
-		Rect.VMargin(2, &Rect);
+		Row.VSplitLeft(Width, &Rect, &Row);
+		Row.VSplitLeft(5.0f, nullptr, &Row);
 		return Editor.DoButton_Editor(&m_aButtonIds[Id], pText, Checked, &Rect, BUTTONFLAG_LEFT, pTooltip ? pTooltip : pText) != 0;
 	};
-	if(Button(0, "Back [Esc]", 76))
+	if(Button(ToolbarTop, 0, "Back", 45, 0, "[Esc] Return to editing."))
 		Editor.m_MapCompare.SelectMap(Editor, Editor.Map());
 	if(m_State == EState::CLOSING)
 	{
@@ -2062,12 +2063,12 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar)
 		Label(Editor, View, "Updating comparison to current map contents...", 14);
 		return;
 	}
-	if(Button(1, "Swap", 52))
+	if(Button(ToolbarTop, 1, "Swap", 45))
 	{
 		Editor.m_MapCompare.Open(Editor, m_apSources[1], m_apSources[0]);
 		return;
 	}
-	if(Button(2, m_ByGroup ? "By group" : "By layer", 74))
+	if(Button(ToolbarTop, 2, m_ByGroup ? "By group" : "By layer", 70))
 	{
 		m_ByGroup = !m_ByGroup;
 		const int FocusedChild = m_FocusEntry;
@@ -2083,7 +2084,7 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar)
 	const char *pContextLabel = m_Context == CONTEXT_OFF ? "Context: off" : m_Context == CONTEXT_MAP ? "Context: map" :
 									m_ByGroup                        ? "Context: group" :
 													   "Context: layer";
-	if(Button(3, pContextLabel, 84, m_Context != CONTEXT_OFF, "Cycle context: changes only, selected layer/group, full map. Changes stay emphasized."))
+	if(Button(ToolbarTop, 3, pContextLabel, 92, m_Context != CONTEXT_OFF, "Cycle context: changes only, selected layer/group, full map. Changes stay emphasized."))
 	{
 		m_Context = (m_Context + 1) % 3;
 		if(m_vChangedNavigator.empty())
@@ -2093,23 +2094,16 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar)
 		if(m_SelectedEntry < 0 && !m_vNavigator.empty() && m_vNavigator.front() >= 0)
 			Select(m_vNavigator.front());
 	}
-	if(Button(4, "Prev [P]", 65, m_vChangedNavigator.empty() ? -1 : 0, "Go to the previous difference, skipping unchanged items."))
+	if(Button(ToolbarBottom, 4, "Prev", 45, m_vChangedNavigator.empty() ? -1 : 0, "[P] Go to the previous difference, skipping unchanged items."))
 		Navigate(-1);
-	if(Button(5, "Next [N]", 65, m_vChangedNavigator.empty() ? -1 : 0, "Go to the next difference, skipping unchanged items."))
+	if(Button(ToolbarBottom, 5, "Next", 45, m_vChangedNavigator.empty() ? -1 : 0, "[N] Go to the next difference, skipping unchanged items."))
 		Navigate(1);
-	if(Button(6, "Fit [Home]", 76))
+	if(Button(ToolbarBottom, 6, "Fit", 40, 0, "[Home] Fit the selected difference."))
 		FitSelection();
-	Label(Editor, Toolbar, "READ ONLY", 11);
-	const float MinSidebar = CEditor::MIN_SIDEBAR_WIDTH;
-	const float MaxSidebar = std::max(MinSidebar, std::min({400.0f, View.w * 0.45f, View.w - 300.0f}));
-	m_SidebarWidth = std::clamp(m_SidebarWidth, MinSidebar, MaxSidebar);
-	CUIRect Sidebar, Navigator, Inspector{};
-	View.VSplitLeft(m_SidebarWidth, &Sidebar, &View);
-	m_Divider = {Sidebar.x + Sidebar.w - 2, Sidebar.y, 5, Sidebar.h};
-	Editor.DoEditorDragBar(Sidebar, &m_Divider, CEditor::EDragSide::RIGHT, &m_SidebarWidth, MinSidebar, MaxSidebar);
-	if(Editor.Ui()->ActiveItem() == &m_Divider)
+	Label(Editor, ToolbarBottom, "READ ONLY", 11);
+	CUIRect Navigator, Inspector{};
+	if(Editor.Ui()->ActiveItem() == &Editor.m_ToolBoxDivider)
 		m_Panning = false;
-	View.VMargin(4, &View);
 	const bool NarrowSidebar = Sidebar.w < 180;
 	CUIRect Tabs, aRows[2], aTabs[4];
 	Sidebar.HSplitTop(NarrowSidebar ? 96 : 48, &Tabs, &Navigator);
@@ -2425,7 +2419,7 @@ void CMapCompareTabs::Dispose(CEditor &Editor, CMapCompare *pDocument, bool Reme
 	{
 		pDocument->SaveView();
 		m_vClosed.push_back({{pDocument->m_apSources[0], pDocument->m_apSources[1]}, pDocument->m_SavedView,
-			pDocument->m_Center, pDocument->m_ParallaxOrigin, pDocument->m_Zoom, pDocument->m_SidebarWidth,
+			pDocument->m_Center, pDocument->m_ParallaxOrigin, pDocument->m_Zoom,
 			pDocument->m_Context, pDocument->m_Section, pDocument->m_EnvelopeChannels, pDocument->m_ByGroup, pDocument->m_UnchangedExpanded, pDocument->m_HasResult, pDocument->m_LayerTreeActive});
 		if(m_vClosed.size() > 10)
 			m_vClosed.erase(m_vClosed.begin());
@@ -2474,7 +2468,6 @@ void CMapCompareTabs::Reopen(CEditor &Editor)
 	pDocument->m_Center = Closed.m_Center;
 	pDocument->m_ParallaxOrigin = Closed.m_Origin;
 	pDocument->m_Zoom = Closed.m_Zoom;
-	pDocument->m_SidebarWidth = Closed.m_SidebarWidth;
 	pDocument->m_Context = Closed.m_Context;
 	pDocument->m_Section = Closed.m_Section;
 	pDocument->m_EnvelopeChannels = Closed.m_EnvelopeChannels;
@@ -2507,12 +2500,12 @@ void CMapCompareTabs::OnInput(CEditor &Editor, const IInput::CEvent &Event)
 		m_pSelected->OnInput(Editor, Event);
 }
 
-void CMapCompareTabs::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar)
+void CMapCompareTabs::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar, CUIRect Sidebar)
 {
 	if(m_Transition)
 		Label(Editor, View, "Release held keys and mouse buttons to switch tabs.", 14);
 	else if(m_pSelected)
-		m_pSelected->Render(Editor, View, Toolbar);
+		m_pSelected->Render(Editor, View, Toolbar, Sidebar);
 }
 
 void CMapCompareTabs::EndFrame(CEditor &Editor)

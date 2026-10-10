@@ -115,8 +115,6 @@ class CMapCompare
 		NUM_SECTIONS,
 	};
 	int m_Section = SECTION_CHANGES;
-	float m_SidebarWidth = 225.0f;
-	CUIRect m_Divider{}; // Stable address for the native drag bar's UI identity.
 	CSectionState m_aSectionStates[NUM_SECTIONS];
 	struct CLayerState
 	{
@@ -196,7 +194,7 @@ public:
 	void Close();
 	void OnInput(CEditor &Editor, const IInput::CEvent &Event);
 	void OnUpdate(CEditor &Editor);
-	void Render(CEditor &Editor, CUIRect View, CUIRect Toolbar);
+	void Render(CEditor &Editor, CUIRect View, CUIRect Toolbar, CUIRect Sidebar);
 };
 
 // Stable viewer ownership and a single worker shared by all comparison tabs.
@@ -217,7 +215,7 @@ class CMapCompareTabs
 		const CEditorMap *m_apSources[2];
 		CMapCompare::CSavedView m_View;
 		vec2 m_Center, m_Origin;
-		float m_Zoom, m_SidebarWidth;
+		float m_Zoom;
 		int m_Context, m_Section, m_EnvelopeChannels;
 		bool m_ByGroup, m_UnchangedExpanded, m_HasResult, m_LayerTreeActive;
 	};
@@ -240,7 +238,7 @@ public:
 	void Reopen(CEditor &Editor);
 	void OnUpdate(CEditor &Editor);
 	void OnInput(CEditor &Editor, const IInput::CEvent &Event);
-	void Render(CEditor &Editor, CUIRect View, CUIRect Toolbar);
+	void Render(CEditor &Editor, CUIRect View, CUIRect Toolbar, CUIRect Sidebar);
 	void EndFrame(CEditor &Editor);
 };
 #endif

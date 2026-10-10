@@ -440,6 +440,11 @@ void CEditor::DoMapTabs(CUIRect MapTabs)
 	}
 }
 
+void CEditor::SplitToolbarRows(CUIRect Toolbar, CUIRect &Top, CUIRect &Bottom)
+{
+	Toolbar.HSplitMid(&Top, &Bottom, 5.0f);
+}
+
 void CEditor::DoToolbarLayers(CUIRect ToolBar)
 {
 	const bool ModPressed = Input()->ModifierIsPressed();
@@ -478,7 +483,7 @@ void CEditor::DoToolbarLayers(CUIRect ToolBar)
 	CUIRect ToolbarTop, ToolbarBottom;
 	CUIRect Button;
 
-	ToolBar.HSplitMid(&ToolbarTop, &ToolbarBottom, 5.0f);
+	SplitToolbarRows(ToolBar, ToolbarTop, ToolbarBottom);
 
 	// top line buttons
 	{
@@ -820,7 +825,7 @@ void CEditor::DoToolbarLayers(CUIRect ToolBar)
 void CEditor::DoToolbarImages(CUIRect ToolBar)
 {
 	CUIRect ToolBarTop, ToolBarBottom;
-	ToolBar.HSplitMid(&ToolBarTop, &ToolBarBottom, 5.0f);
+	SplitToolbarRows(ToolBar, ToolBarTop, ToolBarBottom);
 
 	std::shared_ptr<CEditorImage> pSelectedImage = Map()->SelectedImage();
 	if(pSelectedImage != nullptr)
@@ -834,7 +839,7 @@ void CEditor::DoToolbarImages(CUIRect ToolBar)
 void CEditor::DoToolbarSounds(CUIRect ToolBar)
 {
 	CUIRect ToolBarTop, ToolBarBottom;
-	ToolBar.HSplitMid(&ToolBarTop, &ToolBarBottom, 5.0f);
+	SplitToolbarRows(ToolBar, ToolBarTop, ToolBarBottom);
 
 	std::shared_ptr<CEditorSound> pSelectedSound = Map()->SelectedSound();
 	if(pSelectedSound != nullptr)
@@ -3479,6 +3484,7 @@ void CEditor::ShowFileDialogError(const char *pFormat, ...)
 
 void CEditor::RenderModebar(CUIRect View)
 {
+	const bool ReadOnly = IsComparisonView();
 	CUIRect Mentions, IngameMoved, ModeButtons, ModeButton;
 	View.HSplitTop(12.0f, &Mentions, &View);
 	View.HSplitTop(12.0f, &IngameMoved, &View);
@@ -3515,30 +3521,30 @@ void CEditor::RenderModebar(CUIRect View)
 	{
 		ModeButtons.VSplitLeft(ButtonWidth, &ModeButton, &ModeButtons);
 		static int s_LayersButton = 0;
-		if(DoButton_FontIcon(&s_LayersButton, FontIcon::LAYER_GROUP, m_Mode == MODE_LAYERS, &ModeButton, BUTTONFLAG_LEFT, "Go to layers management.", IGraphics::CORNER_L))
+		if(DoButton_FontIcon(&s_LayersButton, FontIcon::LAYER_GROUP, ReadOnly ? -1 : m_Mode == MODE_LAYERS, &ModeButton, BUTTONFLAG_LEFT, "Go to layers management.", IGraphics::CORNER_L) && !ReadOnly)
 		{
 			m_Mode = MODE_LAYERS;
 		}
 
 		ModeButtons.VSplitLeft(ButtonWidth, &ModeButton, &ModeButtons);
 		static int s_ImagesButton = 0;
-		if(DoButton_FontIcon(&s_ImagesButton, FontIcon::IMAGE, m_Mode == MODE_IMAGES, &ModeButton, BUTTONFLAG_LEFT, "Go to images management.", IGraphics::CORNER_NONE))
+		if(DoButton_FontIcon(&s_ImagesButton, FontIcon::IMAGE, ReadOnly ? -1 : m_Mode == MODE_IMAGES, &ModeButton, BUTTONFLAG_LEFT, "Go to images management.", IGraphics::CORNER_NONE) && !ReadOnly)
 		{
 			m_Mode = MODE_IMAGES;
 		}
 
 		ModeButtons.VSplitLeft(ButtonWidth, &ModeButton, &ModeButtons);
 		static int s_SoundsButton = 0;
-		if(DoButton_FontIcon(&s_SoundsButton, FontIcon::MUSIC, m_Mode == MODE_SOUNDS, &ModeButton, BUTTONFLAG_LEFT, "Go to sounds management.", IGraphics::CORNER_R))
+		if(DoButton_FontIcon(&s_SoundsButton, FontIcon::MUSIC, ReadOnly ? -1 : m_Mode == MODE_SOUNDS, &ModeButton, BUTTONFLAG_LEFT, "Go to sounds management.", IGraphics::CORNER_R) && !ReadOnly)
 		{
 			m_Mode = MODE_SOUNDS;
 		}
 
-		if(Input()->KeyPress(KEY_LEFT) && m_Dialog == DIALOG_NONE && CLineInput::GetActiveInput() == nullptr)
+		if(!ReadOnly && Input()->KeyPress(KEY_LEFT) && m_Dialog == DIALOG_NONE && CLineInput::GetActiveInput() == nullptr)
 		{
 			m_Mode = (m_Mode + NUM_MODES - 1) % NUM_MODES;
 		}
-		else if(Input()->KeyPress(KEY_RIGHT) && m_Dialog == DIALOG_NONE && CLineInput::GetActiveInput() == nullptr)
+		else if(!ReadOnly && Input()->KeyPress(KEY_RIGHT) && m_Dialog == DIALOG_NONE && CLineInput::GetActiveInput() == nullptr)
 		{
 			m_Mode = (m_Mode + 1) % NUM_MODES;
 		}
@@ -3547,13 +3553,6 @@ void CEditor::RenderModebar(CUIRect View)
 
 void CEditor::RenderStatusbar(CUIRect View, CUIRect *pTooltipRect)
 {
-	if(IsComparisonView())
-	{
-		CUIRect Status;
-		View.VSplitRight(190, pTooltipRect, &Status);
-		Ui()->DoLabel(&Status, "Read-only comparison / Esc: back", 10, TEXTALIGN_MR);
-		return;
-	}
 	CUIRect Button;
 	View.VSplitRight(100.0f, &View, &Button);
 	if(DoButton_Editor(&m_QuickActionEnvelopes, m_QuickActionEnvelopes.Label(), m_QuickActionEnvelopes.Color(), &Button, BUTTONFLAG_LEFT, m_QuickActionEnvelopes.Description()))
@@ -3785,19 +3784,13 @@ void CEditor::Render()
 	if(!Comparison)
 		UpdateBrushPicker();
 
-	CUIRect MenuBar, ModeBar, ToolBar, StatusBar, ExtraEditor, ToolBox, CompareToolbar;
+	CUIRect MenuBar, ModeBar, ToolBar, StatusBar, ExtraEditor, ToolBox;
+	m_ToolBoxWidth = std::clamp(m_ToolBoxWidth, MIN_SIDEBAR_WIDTH, 400.0f);
 	if(Gui)
 	{
 		View.HSplitTop(20.0f, &MenuBar, &View);
 		View.HSplitTop(78.0f, &ToolBar, &View);
-		if(Comparison)
-		{
-			ToolBar.HSplitTop(26, nullptr, &CompareToolbar);
-			CompareToolbar.Margin(6, &CompareToolbar);
-			CompareToolbar.HSplitTop(23, &CompareToolbar, nullptr);
-		}
-		if(!Comparison)
-			View.VSplitLeft(m_ToolBoxWidth, &ToolBox, &View);
+		View.VSplitLeft(m_ToolBoxWidth, &ToolBox, &View);
 
 		View.HSplitBottom(16.0f, &View, &StatusBar);
 		if(!Comparison && !m_ShowPicker && m_ActiveExtraEditor != EXTRAEDITOR_NONE)
@@ -3855,11 +3848,11 @@ void CEditor::Render()
 		RenderBackground(MenuBar, IGraphics::CTextureHandle(), BackgroundScale, 0.0f);
 		MenuBar.Margin(2.0f, &MenuBar);
 
-		if(!Comparison)
-		{
-			RenderBackground(ToolBox, g_pData->m_aImages[IMAGE_BACKGROUND_NOISE].m_Id, BackgroundScale, BackgroundBrightness);
-			ToolBox.Margin(2.0f, &ToolBox);
-		}
+		RenderBackground(ToolBox, g_pData->m_aImages[IMAGE_BACKGROUND_NOISE].m_Id, BackgroundScale, BackgroundBrightness);
+		ToolBox.Margin(2.0f, &ToolBox);
+		ToolBox.VSplitRight(1.0f, &ToolBox, &m_ToolBoxDivider);
+		m_ToolBoxDivider.x -= 2.0f;
+		m_ToolBoxDivider.w += 4.0f;
 
 		// Groups manage their own low-level clipping, so foreground chrome is
 		// drawn after the world. Every interactive control is processed once.
@@ -3874,10 +3867,8 @@ void CEditor::Render()
 	const bool UiEnabled = Ui()->Enabled();
 	// Modal controls render later with input enabled; comparison controls and
 	// their scroll regions must not claim that same input underneath them.
-	if(Comparison && (m_Dialog != DIALOG_NONE || Ui()->IsPopupOpen()))
+	if(Comparison && (m_MapCompare.Transitioning() || m_Dialog != DIALOG_NONE || Ui()->IsPopupOpen()))
 		Ui()->SetEnabled(false);
-	if(Comparison)
-		m_MapCompare.Render(*this, View, CompareToolbar);
 
 	// do the toolbar
 	{
@@ -3886,8 +3877,16 @@ void CEditor::Render()
 		ToolBar.HSplitTop(5.0f, nullptr, &ToolBar);
 
 		if(Gui)
+		{
 			DoMapTabs(MapTabs);
-		if(!IsComparisonView())
+			// A tab click can begin a release barrier during this frame.
+			if(m_MapCompare.Transitioning())
+				Ui()->SetEnabled(false);
+			DoEditorDragBar(ToolBox, &m_ToolBoxDivider, EDragSide::RIGHT, &m_ToolBoxWidth);
+		}
+		if(Comparison)
+			m_MapCompare.Render(*this, View, ToolBar, ToolBox);
+		else if(!IsComparisonView())
 		{
 			if(m_Mode == MODE_LAYERS)
 				DoToolbarLayers(ToolBar);
@@ -3953,12 +3952,6 @@ void CEditor::Render()
 
 	if(Gui && !IsComparisonView())
 	{
-		CUIRect DragBar;
-		ToolBox.VSplitRight(1.0f, &ToolBox, &DragBar);
-		DragBar.x -= 2.0f;
-		DragBar.w += 4.0f;
-		DoEditorDragBar(ToolBox, &DragBar, EDragSide::RIGHT, &m_ToolBoxWidth);
-
 		if(m_Mode == MODE_LAYERS)
 			RenderLayers(ToolBox);
 		else if(m_Mode == MODE_IMAGES)
@@ -3976,13 +3969,7 @@ void CEditor::Render()
 	if(Gui)
 	{
 		RenderMenubar(MenuBar);
-		if(Comparison)
-		{
-			ModeBar.HSplitTop(20, &ModeBar, nullptr);
-			Ui()->DoLabel(&ModeBar, "Comparison", 10, TEXTALIGN_MC);
-		}
-		else if(!IsComparisonView())
-			RenderModebar(ModeBar);
+		RenderModebar(ModeBar);
 		if(!IsComparisonView() && !m_ShowPicker)
 		{
 			if(m_ActiveExtraEditor != EXTRAEDITOR_NONE)

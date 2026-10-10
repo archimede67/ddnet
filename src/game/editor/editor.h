@@ -406,6 +406,7 @@ public:
 	EExtraEditor m_ActiveExtraEditor = EXTRAEDITOR_NONE;
 	float m_aExtraEditorSplits[NUM_EXTRAEDITORS] = {250.0f, 250.0f, 250.0f};
 	float m_ToolBoxWidth = 100.0f;
+	CUIRect m_ToolBoxDivider{}; // One stable UI identity shared by every document.
 
 	bool m_ShowEnvelopePreview = false;
 	enum class EEnvelopePreview
@@ -607,6 +608,7 @@ public:
 	bool m_MapTabsRevealSelected = false;
 	void DoMapTabs(CUIRect MapTabs);
 
+	static void SplitToolbarRows(CUIRect Toolbar, CUIRect &Top, CUIRect &Bottom);
 	void DoToolbarLayers(CUIRect Toolbar);
 	void DoToolbarImages(CUIRect Toolbar);
 	void DoToolbarSounds(CUIRect Toolbar);

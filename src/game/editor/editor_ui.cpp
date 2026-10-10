@@ -129,7 +129,10 @@ int CEditor::DoButton_FontIcon(const void *pId, const char *pText, int Checked, 
 
 	TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
 	TextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_ONLY_ADVANCE_WIDTH | ETextRenderFlags::TEXT_RENDER_FLAG_NO_X_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_Y_BEARING);
-	Ui()->DoLabel(pRect, pText, FontSize, TEXTALIGN_MC);
+	SLabelProperties Props;
+	if(Checked < 0)
+		Props.SetColor(ColorRGBA(0.6f, 0.6f, 0.6f, 1));
+	Ui()->DoLabel(pRect, pText, FontSize, TEXTALIGN_MC, Props);
 	TextRender()->SetRenderFlags(0);
 	TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
 

@@ -61,8 +61,9 @@ ACCESSOR(TResult, CMapCompare, m_Result, MapDiff::CResult)
 ACCESSOR(TContext, CMapCompare, m_Context, int)
 ACCESSOR(TUnchangedExpanded, CMapCompare, m_UnchangedExpanded, bool)
 ACCESSOR(TSection, CMapCompare, m_Section, int)
-ACCESSOR(TSidebarWidth, CMapCompare, m_SidebarWidth, float)
-ACCESSOR(TDivider, CMapCompare, m_Divider, CUIRect)
+ACCESSOR(TDivider, CEditor, m_ToolBoxDivider, CUIRect)
+using TToolbarIdArray = char[17];
+ACCESSOR(TToolbarIds, CMapCompare, m_aButtonIds, TToolbarIdArray)
 ACCESSOR(TPanning, CMapCompare, m_Panning, bool)
 ACCESSOR(TToolboxWidth, CEditor, m_ToolBoxWidth, float)
 ACCESSOR(TPrompt, CEditor, m_Prompt, CPrompt)
@@ -266,7 +267,6 @@ class CSmokeEditor : public CEditor
 	void OpenComparison(CEditor &, const CEditorMap *pBefore, const CEditorMap *pAfter)
 	{
 		const bool Group = Compare().*Access(TGroup{});
-		const float Width = Compare().*Access(TSidebarWidth{});
 		Tabs().Open(*this, pBefore, pAfter);
 		auto *pDocument = Tabs().*Access(TPendingCompare{});
 		if(!pDocument)
@@ -274,17 +274,24 @@ class CSmokeEditor : public CEditor
 		if(pDocument)
 		{
 			pDocument->*Access(TGroup{}) = Group;
-			pDocument->*Access(TSidebarWidth{}) = Width;
 		}
 	}
 	vec2 SectionPosition(int Section)
 	{
-		const float Width = Compare().*Access(TSidebarWidth{});
+		const float Width = m_ToolBoxWidth - 5;
 		if(Width < 180)
-			return vec2(6 + (Width - 4) / 2, 104 + 24 * Section + 12);
-		return vec2(6 + (Width - 4) * (Section % 2 ? 0.75f : 0.25f), 104 + 24 * (Section / 2) + 12);
+			return vec2(2 + (Width - 4) / 2, 100 + 24 * Section + 12);
+		return vec2(2 + (Width - 4) * (Section % 2 ? 0.75f : 0.25f), 100 + 24 * (Section / 2) + 12);
 	}
-	float NavigatorTop() { return 104 + ((Compare().*Access(TSidebarWidth{})) < 180 ? 96 : 48); }
+	float NavigatorTop() { return 100 + (m_ToolBoxWidth - 5 < 180 ? 96 : 48); }
+	vec2 ToolbarPosition(int Id)
+	{
+		// Independent native shell oracle: rows start at 47/74, are 22 high,
+		// and successive controls are separated by 5 units.
+		const float aCenters[] = {22.5f, 72.5f, 135, 221, 22.5f, 72.5f, 120};
+		return vec2(m_ToolBoxWidth + 2 + aCenters[Id], Id < 4 ? 58 : 85);
+	}
+	vec2 ShowAllPosition() { return vec2(m_ToolBoxWidth < 185 ? m_ToolBoxWidth / 2 : m_ToolBoxWidth - 39, Ui()->Screen()->h - 14); }
 	void CloseComparison()
 	{
 		if(Tabs().Selected())
@@ -385,7 +392,8 @@ class CSmokeEditor : public CEditor
 	{
 		Do([this] {
 			m_TargetContext = (Compare().*Access(TContext{})) == 0 ? 2 : 0;
-			Ui()->OnCursorMove((240 - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (62 - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
+			const auto Position = ToolbarPosition(3);
+			Ui()->OnCursorMove((Position.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (Position.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
 		});
 		Delay();
 		for(int i = 0; i < 2; ++i)
@@ -736,8 +744,8 @@ class CSmokeEditor : public CEditor
 		Do([this] { CheckPixels(); Key(SDLK_HOME,true); });
 		Delay(2);
 		Do([this] { Key(SDLK_HOME,false); Check((Compare().*Access(TSelectedEntry{}))==m_SavedEntry,"Home fits without navigator selection change"); m_SavedCenter=Compare().*Access(TCenter{}); });
-		Click([] { return vec2(167, 62); });
-		Click([] { return vec2(167, 62); });
+		Click([this] { return ToolbarPosition(2); });
+		Click([this] { return ToolbarPosition(2); });
 		Do([this] { Check((Compare().*Access(TSelectedEntry{})) == m_SavedEntry, "group to layer returns to focused child"); });
 		ToggleMapContext();
 		Do([this] { for(int i=0;i<(int)Result().m_vEntries.size();++i) if(Result().m_vEntries[i].m_Name=="Unchanged") { (Compare().*Access(TSelect{}))(i); break; } });
@@ -1123,10 +1131,10 @@ class CSmokeEditor : public CEditor
 		Do([this, Camera] { SelectKind(MapDiff::EEntryKind::LAYER, "Focus"); Camera(); });
 		Delay();
 		Do([this] { ContextPixels(false, false); });
-		Click([] { return vec2(240, 62); });
+		Click([this] { return ToolbarPosition(3); });
 		Do([this] { Check((Compare().*Access(TContext{})) == 1, "context cycles to selected layer"); ContextPixels(true, false, false); });
 		Screenshot("selection-context-layer");
-		Click([] { return vec2(240, 62); });
+		Click([this] { return ToolbarPosition(3); });
 		Do([this] { ContextPixels(true, false); CheckCachedPane(); CheckContextBufferPixels(); });
 		Screenshot("full-map-context-layer");
 		Click([this] { return SectionPosition(1); });
@@ -1169,7 +1177,7 @@ class CSmokeEditor : public CEditor
 		DoubleClick([this] { return TreePosition("Selected"); });
 		Do([this] { Check(!std::get<1>(LayerState(Compare(), FindEntry("Selected"))) && (Compare().*Access(TCenter{})) == m_SavedCenter, "folding group preserves the panned inspection camera"); Check((Compare().*Access(TSelectedDetail{})) == m_SavedEntry, "folding group preserves selected child detail"); });
 		DoubleClick([this] { return TreePosition("Selected"); });
-		Click([this] { return vec2(190, Ui()->Screen()->h - 34); });
+		Click([this] { return ShowAllPosition(); });
 		Do([this, Camera] { SelectKind(MapDiff::EEntryKind::LAYER, "Focus"); Camera(); });
 		Delay();
 		Do([this] { ContextPixels(true, false); CheckCachedPane(); CheckSources("layer visibility controls"); });
@@ -1188,16 +1196,16 @@ class CSmokeEditor : public CEditor
 		Do([this, Camera] { SelectKind(MapDiff::EEntryKind::LAYER, "Focus"); Camera(); });
 		Delay();
 		Click([this] { return SectionPosition(0); });
-		Click([] { return vec2(167, 62); });
+		Click([this] { return ToolbarPosition(2); });
 		Do(Camera);
 		Delay();
 		Do([this] { ContextPixels(true, true); });
 		Screenshot("full-map-context-group");
-		Click([] { return vec2(240, 62); });
-		Click([] { return vec2(240, 62); });
+		Click([this] { return ToolbarPosition(3); });
+		Click([this] { return ToolbarPosition(3); });
 		Do([this] { Check((Compare().*Access(TContext{})) == 1, "context cycles to selected group"); ContextPixels(true, true, false); });
 		Screenshot("selection-context-group");
-		Click([] { return vec2(240, 62); });
+		Click([this] { return ToolbarPosition(3); });
 		for(const auto &[Center, Zoom] : {std::pair{vec2(50 * 32, 12 * 32), 20.0f}, std::pair{vec2(50 * 32, 12 * 32), 0.5f}, std::pair{vec2(10000, 10000), 1.0f}, std::pair{vec2(12 * 32, 10 * 32 + 16), 1.0f}})
 		{
 			Do([this, Center, Zoom] { Compare().*Access(TCenter{}) = Center; Compare().*Access(TZoom{}) = Zoom; });
@@ -1319,7 +1327,7 @@ class CSmokeEditor : public CEditor
 			Check((Compare().*Access(TChangedNavigator{})).size() == 5, "layer navigator separates group properties and child changes");
 			(Compare().*Access(TSelect{}))(Find("Navigation"));
 		});
-		Click([] { return vec2(240, 62); });
+		Click([this] { return ToolbarPosition(3); });
 		Do([this] {
 			const auto &Rows = Compare().*Access(TNavigator{});
 			Check(Rows.size() == 6 && Rows.back() == -1 && !(Compare().*Access(TUnchangedExpanded{})), "unchanged section starts collapsed after changed entries");
@@ -1335,7 +1343,7 @@ class CSmokeEditor : public CEditor
 		});
 		Screenshot("comparison-unchanged-section");
 		// Real toolbar and keyboard events must visit each difference exactly once.
-		Click([] { return vec2(391, 62); });
+		Click([this] { return ToolbarPosition(5); });
 		Do([Target] { Target("A", 1, 0); });
 		Press(SDLK_n);
 		Do([Target] { Target("A", 1, 1); });
@@ -1377,7 +1385,7 @@ class CSmokeEditor : public CEditor
 		Do([this, Find] { Check((Compare().*Access(TSelectedEntry{})) == Find("Added empty"), "End stops at the last real row before a collapsed header"); (Compare().*Access(TSelect{}))(Find("Navigation")); });
 		Press(SDLK_PAGEDOWN);
 		Do([this, Find] { Check((Compare().*Access(TSelectedEntry{})) == Find("Added empty"), "Page Down stops at the last real row before a collapsed header"); (Compare().*Access(TSelect{}))(Find("Navigation")); });
-		Click([] { return vec2(167, 62); });
+		Click([this] { return ToolbarPosition(2); });
 		Do([this] { Check((Compare().*Access(TChangedNavigator{})).size() == 2, "group navigator aggregates child changes"); });
 		Click([this] { return DetailPosition(2); });
 		Do([this, Target, Find] { Target("A", 1, 1); (Compare().*Access(TSelect{}))(Find("Navigation")); });
@@ -1392,7 +1400,7 @@ class CSmokeEditor : public CEditor
 		Do([this, Find] { (Compare().*Access(TSelect{}))(Find("Added empty")); });
 		Press(SDLK_p);
 		Do([Target] { Target("Q", 2, 0); });
-		Click([] { return vec2(167, 62); });
+		Click([this] { return ToolbarPosition(2); });
 		Do([this, Find] { Check((Compare().*Access(TSelectedEntry{})) == Find("Q"), "group to layer follows backwards-navigated child"); });
 		Do([this] { CheckSources("comparison navigation"); CloseComparison(); });
 		Delay();
@@ -1788,7 +1796,7 @@ class CSmokeEditor : public CEditor
 		Click([this] { const auto P = (Compare().*Access(TPanes{}))[0]; return vec2(P.x + 25, P.y + 34); });
 		Do([this] { Check((Compare().*Access(TEnvelopeChannels{})) == 0, "native envelope channel toggle affects paired graphs"); });
 		Screenshot("comparison-envelope-no-channels");
-		Click([] { return vec2(106, 62); });
+		Click([this] { return ToolbarPosition(1); });
 		WaitReady();
 		Do([this] { SelectKind(MapDiff::EEntryKind::ENVELOPE, "Removed"); Check((Compare().*Access(TEnvelopeChannels{})) == 15, "Swap resets envelope channel state"); });
 		Delay();
@@ -1892,7 +1900,7 @@ class CSmokeEditor : public CEditor
 			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
-		Click([] { return vec2(240, 62); });
+		Click([this] { return ToolbarPosition(3); });
 		Do([this] {
 			Check((Compare().*Access(TChangedNavigator{})).size() == 24, "scroll fixture overflows with changed layers");
 			Ui()->OnCursorMove((100 - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (300 - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
@@ -1942,10 +1950,10 @@ class CSmokeEditor : public CEditor
 		Do([this] { Key(SDLK_n, false); Check(std::get<1>(LayerState(Compare(), FindEntry("Scroll"))), "Next reveals the focused child's collapsed parent"); });
 		Click([this] { return TreePosition("Scroll", 1); });
 		Do([this] { CheckSources("scroll and tree navigation"); });
-		Click([] { return vec2(106, 62); });
+		Click([this] { return ToolbarPosition(1); });
 		WaitReady();
 		Do([this] { Check(std::get<0>(LayerState(Compare(), FindEntry("Scroll"))) && std::get<2>(LayerState(Compare(), FindEntry("Scroll"))) == 24, "Swap resets visibility without accumulating group counts"); });
-		Click([] { return vec2(106, 62); });
+		Click([this] { return ToolbarPosition(1); });
 		WaitReady();
 		Do([this] { Check(std::get<2>(LayerState(Compare(), FindEntry("Scroll"))) == 24, "repeated Swap retains exact aggregate counts"); CloseComparison(); });
 		Delay();
@@ -1969,7 +1977,7 @@ class CSmokeEditor : public CEditor
 			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
-		Click([] { return vec2(240, 62); });
+		Click([this] { return ToolbarPosition(3); });
 		Click([this] { return vec2(100, NavigatorTop() + 3 * 36 + 18); });
 		auto ScrollOnce = [this] {
 			Do([this] { Ui()->OnCursorMove((100 - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (300 - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); });
@@ -2142,9 +2150,9 @@ class CSmokeEditor : public CEditor
 		MeasureFrames(LocalMaps ? "local context off" : "dense context off");
 		if(LocalMaps)
 			Screenshot("performance-layer");
-		Click([] { return vec2(240, 62); });
+		Click([this] { return ToolbarPosition(3); });
 		MeasureFrames(LocalMaps ? "local selection context" : "dense selection context");
-		Click([] { return vec2(240, 62); });
+		Click([this] { return ToolbarPosition(3); });
 		MeasureFrames(LocalMaps ? "local context on" : "dense context on");
 		Click([this] { return SectionPosition(1); });
 		MeasureFrames(LocalMaps ? "local full context with layer tree" : "dense full context with layer tree");
@@ -2175,7 +2183,7 @@ class CSmokeEditor : public CEditor
 			Check((Compare().*Access(TZoom{})) <= 20.0f, "wheel cannot zoom out to an unbounded tile workload");
 		});
 		MeasureFrames(LocalMaps ? "local maximum zoom out" : "dense maximum zoom out");
-		Click([] { return vec2(167, 62); });
+		Click([this] { return ToolbarPosition(2); });
 		Do([this] { Check((Compare().*Access(TZoom{})) <= 20.0f, "large group fit stays at inspection scale"); });
 		MeasureFrames(LocalMaps ? "local group context on" : "dense group context on");
 		MeasureMotion(LocalMaps ? "local group full context pan/zoom" : "dense group full context pan/zoom");
@@ -2340,8 +2348,8 @@ class CSmokeEditor : public CEditor
 			for(int Index : Compare().*Access(TNavigator{}))
 				Check(Index < 0 || (Result().m_vEntries[Index].m_Kind != MapDiff::EEntryKind::ENVELOPE && Result().m_vEntries[Index].m_Kind != MapDiff::EEntryKind::SETTINGS), "Changes excludes dedicated resource sections");
 		});
-		Click([] { return vec2(240, 62); });
-		Click([] { return vec2(240, 62); });
+		Click([this] { return ToolbarPosition(3); });
+		Click([this] { return ToolbarPosition(3); });
 		Do([this] { Check((Compare().*Access(TCenter{})).x > 50000, "distant tile fit exercises far camera"); CheckSkyPixels(false); });
 		Screenshot("sections-distant-textured-sky");
 		auto Move = [this](vec2 P) { Ui()->OnCursorMove((P.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (P.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); };
@@ -2354,11 +2362,11 @@ class CSmokeEditor : public CEditor
 		Do([this] { CheckSkyPixels(false); SDL_Event E{}; E.type = SDL_MOUSEWHEEL; E.wheel.y = -1; SDL_PushEvent(&E); });
 		Delay();
 		Do([this] { CheckSkyPixels(false); });
-		Click([] { return vec2(240, 62); });
+		Click([this] { return ToolbarPosition(3); });
 		Do([this] { CheckSkyPixels(false, false); });
-		Click([] { return vec2(240, 62); });
+		Click([this] { return ToolbarPosition(3); });
 		Do([this] { CheckSkyPixels(false, false); });
-		Click([] { return vec2(240, 62); });
+		Click([this] { return ToolbarPosition(3); });
 		Do([this, pChangesState] { *pChangesState = {Compare().*Access(TCenter{}), Compare().*Access(TZoom{}), Compare().*Access(TSelectedDetail{}), Compare().*Access(TGroup{})}; });
 		Click([this] { return SectionPosition(1); });
 		Click([this] { return TreePosition("Sky tex"); });
@@ -2398,37 +2406,37 @@ class CSmokeEditor : public CEditor
 		Click([this] { return SectionPosition(0); });
 		Do([this, pChangesState] { Check(Result().m_vEntries[Compare().*Access(TSelectedEntry{})].m_Name == "Distant", "Changes restores its spatial selection"); Check(*pChangesState == std::tuple{Compare().*Access(TCenter{}), Compare().*Access(TZoom{}), Compare().*Access(TSelectedDetail{}), Compare().*Access(TGroup{})}, "different-entry round trip restores the pre-departure camera, detail and grouping"); m_SavedCenter = Compare().*Access(TCenter{}); m_SavedEntry = Compare().*Access(TSelectedEntry{}); });
 		auto Drag = [this, Move](float Target) {
-			Do([this, Move] { Move((Compare().*Access(TDivider{})).Center()); });
+			Do([this, Move] { Move((this->*Access(TDivider{})).Center()); });
 			Delay();
 			Do([this] { Check(CursorType(*this) == 2, "native divider hover has resize cursor"); Mouse(SDL_BUTTON_LEFT, true); });
 			Delay();
-			Do([this, Move, Target] { Move(vec2(Target, (Compare().*Access(TDivider{})).Center().y)); });
+			Do([this, Move, Target] { Move(vec2(Target, (this->*Access(TDivider{})).Center().y)); });
 			Delay();
 			Do([this, Move] { Move((Compare().*Access(TPanes{}))[1].Center()); });
 			Delay();
-			Do([this, Move, Target] { const float Zoom = Compare().*Access(TZoom{}); IInput::CEvent Event{}; Event.m_Key = KEY_MOUSE_WHEEL_UP; Event.m_Flags = IInput::FLAG_PRESS; Compare().OnInput(*this, Event); Check(Ui()->ActiveItem() == &(Compare().*Access(TDivider{})) && (Compare().*Access(TPanes{}))[1].Inside(vec2(Ui()->MouseX(), Ui()->MouseY())) && (Compare().*Access(TZoom{})) == Zoom, "held divider blocks canvas wheel zoom"); Move(vec2(Target, (Compare().*Access(TDivider{})).Center().y)); });
+			Do([this, Move, Target] { const float Zoom = Compare().*Access(TZoom{}); IInput::CEvent Event{}; Event.m_Key = KEY_MOUSE_WHEEL_UP; Event.m_Flags = IInput::FLAG_PRESS; Compare().OnInput(*this, Event); Check(Ui()->ActiveItem() == &(this->*Access(TDivider{})) && (Compare().*Access(TPanes{}))[1].Inside(vec2(Ui()->MouseX(), Ui()->MouseY())) && (Compare().*Access(TZoom{})) == Zoom, "held divider blocks canvas wheel zoom"); Move(vec2(Target, (this->*Access(TDivider{})).Center().y)); });
 			Delay();
 			Do([this] { Check(!(Compare().*Access(TPanning{})) && (Compare().*Access(TCenter{})) == m_SavedCenter && (Compare().*Access(TSelectedEntry{})) == m_SavedEntry, "divider drag preserves selection and never pans canvas"); Mouse(SDL_BUTTON_LEFT, false); });
 			Delay();
 		};
 		Drag(950);
-		Do([this] { Check((Compare().*Access(TSidebarWidth{})) == 400 && (Compare().*Access(TPanes{}))[0].w >= 200, "wide divider clamps to usable paired canvases"); Graphics()->Resize(800, 600, 0); OnWindowResize(); });
+		Do([this] { Check(m_ToolBoxWidth == 400 && (Compare().*Access(TPanes{}))[0].x == 400, "comparison uses the native maximum and content boundary"); Graphics()->Resize(800, 600, 0); OnWindowResize(); });
 		Delay();
-		Do([this] { Check((Compare().*Access(TSidebarWidth{})) <= 355 && (Compare().*Access(TPanes{}))[0].w >= 200, "window shrink reclamps shared sidebar width"); });
+		Do([this] { Check(m_ToolBoxWidth == 400 && (Compare().*Access(TPanes{}))[0].w == 196, "800-wide comparison preserves the native maximum and paired canvas geometry"); });
 		Screenshot("sections-resized-800");
 		Drag(10);
-		Do([this] { Check((Compare().*Access(TSidebarWidth{})) == 100, "narrow divider keeps section buttons usable"); });
+		Do([this] { Check((m_ToolBoxWidth) == 100, "narrow divider keeps section buttons usable"); });
 		Screenshot("sections-narrow-800");
 		auto ReadNarrowState = [this] { return std::tuple{Compare().*Access(TCenter{}), Compare().*Access(TZoom{}), Compare().*Access(TSelectedEntry{}), Compare().*Access(TSelectedDetail{}), Compare().*Access(TGroup{})}; };
 		auto pNarrowChanges = std::make_shared<decltype(ReadNarrowState())>();
 		auto pNarrowLayers = std::make_shared<decltype(ReadNarrowState())>();
 		Do([pNarrowChanges, ReadNarrowState] { *pNarrowChanges = ReadNarrowState(); });
 		Click([this] { return SectionPosition(2); });
-		Do([this] { Check((Compare().*Access(TSection{})) == 2 && (Compare().*Access(TSidebarWidth{})) == 100, "Envelopes remains usable at minimum sidebar width"); });
+		Do([this] { Check((Compare().*Access(TSection{})) == 2 && (m_ToolBoxWidth) == 100, "Envelopes remains usable at minimum sidebar width"); });
 		Click([this] { return SectionPosition(3); });
-		Do([this] { Check((Compare().*Access(TSection{})) == 3 && (Compare().*Access(TSidebarWidth{})) == 100, "Server settings remains usable at minimum sidebar width"); });
+		Do([this] { Check((Compare().*Access(TSection{})) == 3 && (m_ToolBoxWidth) == 100, "Server settings remains usable at minimum sidebar width"); });
 		Click([this] { return SectionPosition(1); });
-		Do([this] { Check((Compare().*Access(TSection{})) == 1 && (Compare().*Access(TSidebarWidth{})) == 100, "Layers remains usable at minimum sidebar width"); });
+		Do([this] { Check((Compare().*Access(TSection{})) == 1 && (m_ToolBoxWidth) == 100, "Layers remains usable at minimum sidebar width"); });
 		Click([this] { return TreePosition("Sky"); });
 		Do([this, pNarrowLayers, ReadNarrowState] { Check((Compare().*Access(TSelectedEntry{})) == FindEntry("Sky"), "minimum-width tree label selects its group"); *pNarrowLayers = ReadNarrowState(); });
 		DoubleClick([this] { return TreePosition("Sky"); });
@@ -2437,36 +2445,38 @@ class CSmokeEditor : public CEditor
 		Do([this, pNarrowLayers, ReadNarrowState] { Check(std::get<1>(LayerState(Compare(), FindEntry("Sky"))) && ReadNarrowState() == *pNarrowLayers, "minimum-width group expand preserves selection and camera"); });
 		Click([this] { return TreePosition("Sky tex", 1); });
 		Do([this, pNarrowLayers, ReadNarrowState] { Check(!std::get<0>(LayerState(Compare(), FindEntry("Sky tex"))) && ReadNarrowState() == *pNarrowLayers, "minimum-width layer eye preserves selection and camera"); });
-		Click([this] { return vec2(6 + (Compare().*Access(TSidebarWidth{})) / 2, Ui()->Screen()->h - 34); });
+		Click([this] { return ShowAllPosition(); });
 		Do([this, pNarrowLayers, ReadNarrowState] {
 			bool AllVisible = true;
 			for(int Index = 0; Index < (int)Result().m_vEntries.size(); ++Index)
 				if(Result().m_vEntries[Index].m_Kind == MapDiff::EEntryKind::GROUP || Result().m_vEntries[Index].m_Kind == MapDiff::EEntryKind::LAYER)
 					AllVisible &= std::get<0>(LayerState(Compare(), Index));
-			Check(AllVisible && ReadNarrowState() == *pNarrowLayers && (Compare().*Access(TSidebarWidth{})) == 100, "minimum-width Show all restores comparison visibility and preserves selection and camera");
+			Check(AllVisible && ReadNarrowState() == *pNarrowLayers && (m_ToolBoxWidth) == 100, "minimum-width Show all restores comparison visibility and preserves selection and camera");
 			CheckSources("minimum-width layer controls");
 		});
 		Screenshot("sections-narrow-tree-800");
 		Click([this] { return SectionPosition(0); });
-		Do([this, pNarrowChanges, ReadNarrowState] { Check((Compare().*Access(TSection{})) == 0 && (Compare().*Access(TSidebarWidth{})) == 100 && ReadNarrowState() == *pNarrowChanges, "minimum-width Changes return restores selection and camera"); m_SavedCenter = Compare().*Access(TCenter{}); m_SavedEntry = Compare().*Access(TSelectedEntry{}); });
+		Do([this, pNarrowChanges, ReadNarrowState] { Check((Compare().*Access(TSection{})) == 0 && (m_ToolBoxWidth) == 100 && ReadNarrowState() == *pNarrowChanges, "minimum-width Changes return restores selection and camera"); m_SavedCenter = Compare().*Access(TCenter{}); m_SavedEntry = Compare().*Access(TSelectedEntry{}); });
 		Drag(230);
-		Do([this, Move] { Move((Compare().*Access(TDivider{})).Center()); m_SavedScroll = this->*Access(TToolboxWidth{}); });
+		Do([this, Move] { Move((this->*Access(TDivider{})).Center()); m_SavedScroll = this->*Access(TToolboxWidth{}); });
 		Delay();
 		Do([this] { Mouse(SDL_BUTTON_LEFT, true); });
 		Delay();
-		Do([this, Move] { Move((Compare().*Access(TDivider{})).Center() + vec2(40, 0)); });
+		Do([this, Move] { Move((this->*Access(TDivider{})).Center() + vec2(40, 0)); });
 		Delay();
-		Do([this] { Key(SDLK_ESCAPE, true); });
+		Do([this] { m_SavedScroll = m_ToolBoxWidth; Key(SDLK_ESCAPE, true); });
 		Delay();
-		Do([this] { Check(Tabs().Transitioning(), "leaving during divider drag waits for release"); Mouse(SDL_BUTTON_LEFT, false); Key(SDLK_ESCAPE, false); });
+		Do([this, Move] { Check(Tabs().Transitioning(), "leaving during divider drag waits for release"); Move((this->*Access(TDivider{})).Center() + vec2(80, 0)); });
+		Delay();
+		Do([this] { Check(m_ToolBoxWidth == m_SavedScroll, "tab-switch release barrier freezes the shared divider"); Mouse(SDL_BUTTON_LEFT, false); Key(SDLK_ESCAPE, false); });
 		Delay();
 		auto pExtraState = std::make_shared<std::pair<EExtraEditor, float>>();
 		Do([this, Move, pExtraState] {
-			Check(!Compare().Active() && m_ToolBoxWidth == m_SavedScroll, "held comparison divider never resizes normal editor toolbox");
+			Check(!Compare().Active() && m_ToolBoxWidth == m_SavedScroll, "returning to a map retains the latest shared width after the release barrier");
 			CheckSources("sections resize and projection");
 			*pExtraState = {m_ActiveExtraEditor, m_aExtraEditorSplits[EXTRAEDITOR_HISTORY]};
 			m_ActiveExtraEditor = EXTRAEDITOR_HISTORY;
-			Move(vec2(m_ToolBoxWidth - 0.5f, 180));
+			Move(vec2(m_ToolBoxWidth - 2.5f, 180));
 		});
 		Delay();
 		Do([this] { Mouse(SDL_BUTTON_LEFT, true); });
@@ -2523,7 +2533,7 @@ class CSmokeEditor : public CEditor
 		Click([this] { return SectionPosition(1); });
 		Do([this] { Check((Compare().*Access(TNavigator{})).empty() && (Compare().*Access(TSelectedEntry{})) == -1, "empty layer section clears selection"); });
 		Screenshot("sections-empty-layers");
-		Do([this] { CloseComparison(); Compare().*Access(TSidebarWidth{}) = 225; Graphics()->Resize(1280, 800, 0); OnWindowResize(); });
+		Do([this] { CloseComparison(); m_ToolBoxWidth = 225; Graphics()->Resize(1280, 800, 0); OnWindowResize(); });
 		Delay();
 	}
 	void SectionReviewSteps()
@@ -2537,6 +2547,9 @@ class CSmokeEditor : public CEditor
 				pMap->m_MapViewState.m_WorldOffset = vec2(0, 0);
 				for(int Index = 0; Index < 1000; ++Index)
 					pMap->m_vSettings.emplace_back(("tune command " + std::to_string(Index) + " repeated wrapped words repeated wrapped words repeated wrapped words repeated wrapped words repeated wrapped words").c_str());
+				if(Side)
+					for(int Index : {20, 900})
+						str_copy(pMap->m_vSettings[Index].m_aCommand, "tune changed command after");
 				auto pGroup = pMap->NewGroup();
 				str_copy(pGroup->m_aName, "Review");
 				auto pTall = std::make_shared<CLayerQuads>(pMap.get());
@@ -2624,17 +2637,17 @@ class CSmokeEditor : public CEditor
 		Do([this, CheckMatching] { Check(SelectedDetail(Compare())[1] == 4, "duplicate layer matching row selected"); CheckMatching("Ambiguous duplicate content match"); });
 		Click([this] { return SectionPosition(3); });
 		auto Move = [this](vec2 P) { Ui()->OnCursorMove((P.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (P.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); };
-		Do([this, Move] { Compare().*Access(TSidebarWidth{}) = 100; Graphics()->Resize(800, 600, 0); OnWindowResize(); });
+		Do([this, Move] { m_ToolBoxWidth = 100; Graphics()->Resize(800, 600, 0); OnWindowResize(); });
 		Delay();
-		Do([this, Move] { m_SavedScroll = (Compare().*Access(TSettings{})).*Access(TContentSize{}); Check(m_SavedScroll > 30000, "large settings fixture has wrapped command rows"); Move((Compare().*Access(TDivider{})).Center()); });
+		Do([this, Move] { m_SavedScroll = (Compare().*Access(TSettings{})).*Access(TContentSize{}); Check(m_SavedScroll > 30000, "large settings fixture has wrapped command rows"); Move((this->*Access(TDivider{})).Center()); });
 		Delay();
 		Do([this] { Mouse(SDL_BUTTON_LEFT, true); });
 		Delay();
 		for(int Pixel = 0; Pixel < 20; ++Pixel)
 		{
-			Do([this, Move, Pixel] { Move(vec2(240 + Pixel * 5, (Compare().*Access(TDivider{})).Center().y)); });
+			Do([this, Move, Pixel] { Move(vec2(240 + Pixel * 5, (this->*Access(TDivider{})).Center().y)); });
 			Delay(2);
-			Do([this] { Check(Ui()->ActiveItem() == &(Compare().*Access(TDivider{})) && ((Compare().*Access(TSettings{})).*Access(TContentSize{})) == m_SavedScroll, "continuous settings resize retains measured row heights"); });
+			Do([this] { Check(Ui()->ActiveItem() == &(this->*Access(TDivider{})) && ((Compare().*Access(TSettings{})).*Access(TContentSize{})) == m_SavedScroll, "continuous settings resize retains measured row heights"); });
 		}
 		Do([this] {
 			CImageInfo Image;
@@ -2654,7 +2667,24 @@ class CSmokeEditor : public CEditor
 		Delay();
 		Do([this] { Check(((Compare().*Access(TSettings{})).*Access(TContentSize{})) > m_SavedScroll, "settings remeasure to the narrower columns on divider release"); m_SavedScroll = (Compare().*Access(TSettings{})).*Access(TContentSize{}); });
 		Delay();
-		Do([this] { Check(((Compare().*Access(TSettings{})).*Access(TContentSize{})) == m_SavedScroll, "released settings geometry remains cached"); CheckSources("section review regression"); CloseComparison(); Compare().*Access(TSidebarWidth{}) = 225; Graphics()->Resize(1280, 800, 0); OnWindowResize(); });
+		Do([this] { Check(((Compare().*Access(TSettings{})).*Access(TContentSize{})) == m_SavedScroll, "released settings geometry remains cached"); (Compare().*Access(TSelectDetail{}))(0); });
+		Delay(25);
+		auto ReadSettingsView = [this] { return std::tuple{Compare().*Access(TSection{}), Compare().*Access(TSelectedEntry{}), Compare().*Access(TSelectedDetail{}), Compare().*Access(TCenter{}), Compare().*Access(TZoom{}), (Compare().*Access(TSettings{})).*Access(TScrollPos{})}; };
+		auto pSettingsView = std::make_shared<decltype(ReadSettingsView())>();
+		auto pSettingsCaptures = std::make_shared<uint64_t>();
+		Do([this, ReadSettingsView, pSettingsView, pSettingsCaptures] { *pSettingsView = ReadSettingsView(); *pSettingsCaptures = m_CaptureCount; Check(std::get<5>(*pSettingsView) > 500, "long settings fixture retains a nonzero scroll preference"); Tabs().SelectMap(*this, Map()); });
+		Delay();
+		DragSidebar(100);
+		Do([this] { OpenComparison(*this, m_pBefore, m_pAfter); });
+		WaitReady();
+		Delay(25);
+		Do([this, ReadSettingsView, pSettingsView, pSettingsCaptures] { Check(ReadSettingsView() == *pSettingsView && m_CaptureCount == *pSettingsCaptures, "settings return retains selection, camera and scroll preference without capture after another tab resizes"); Check(((Compare().*Access(TSettings{})).*Access(TContentSize{})) < m_SavedScroll, "returning settings remeasure for the width changed in another tab"); m_SavedScroll = (Compare().*Access(TSettings{})).*Access(TContentSize{}); });
+		Delay();
+		Do([this] { Check(((Compare().*Access(TSettings{})).*Access(TContentSize{})) == m_SavedScroll, "settings reflow after a tab switch remains cached"); Key(SDLK_n, true); });
+		Delay();
+		Do([this] { Key(SDLK_n, false); });
+		Delay(25);
+		Do([this, pSettingsCaptures] { const auto Detail = SelectedDetail(Compare()); const auto &Entry = Result().m_vEntries[Detail[0]]; Check(Detail[1] == 0 && std::any_of(Entry.m_vSettings.begin(), Entry.m_vSettings.end(), [&](const auto &Row) { return Row.m_After == 900 && Row.m_Property == Detail[2]; }) && ((Compare().*Access(TSettings{})).*Access(TScrollPos{})) > m_SavedScroll * 0.7f, "native N reveals the distant changed setting after shared-width reflow"); Check(m_CaptureCount == *pSettingsCaptures, "settings reflow and distant navigation require no new snapshot"); CheckSources("section review regression"); CloseComparison(); m_ToolBoxWidth = 225; Graphics()->Resize(1280, 800, 0); OnWindowResize(); });
 		Delay();
 	}
 	void Shortcut(SDL_Keycode K, bool Shift = false)
@@ -2749,6 +2779,7 @@ class CSmokeEditor : public CEditor
 			F->m_AC = Tabs().Selected();
 			Check(F->m_AC != F->m_AB && Result().ChangeCount() == 0, "duplicate filenames keep distinct comparison documents");
 			Compare().*Access(TCenter{}) = vec2(-100, 20);
+			m_ToolBoxWidth = 310;
 			Tabs().Open(*this, F->m_A, F->m_B);
 		});
 		WaitReady();
@@ -2756,6 +2787,8 @@ class CSmokeEditor : public CEditor
 			Check(Tabs().Selected() == F->m_AB && SnapshotIdentity(Compare()) != F->m_Snapshot, "activation coalesces hidden changes into one new snapshot");
 			Check((Compare().*Access(TCapturedRevisions{}))[1] == F->m_B->m_ContentRevision, "published result matches latest source revision");
 			Check((Compare().*Access(TCenter{})) == vec2(123, 456) && (Compare().*Access(TZoom{})) == 3.25f && !std::get<0>(LayerState(Compare(), FindEntry("Bookmark"))), "refresh preserves camera and object visibility");
+			Check(m_ToolBoxWidth == 310, "automatic refresh preserves the distinct shared editor width");
+			m_ToolBoxWidth = 225;
 			Check(Result().m_vEntries[Compare().*Access(TSelectedEntry{})].m_Name == "Bookmark", "refresh restores object selection by identity");
 			F->m_Snapshot = SnapshotIdentity(Compare());
 			Tabs().SelectMap(*this, F->m_B);
@@ -2786,6 +2819,58 @@ class CSmokeEditor : public CEditor
 		Shortcut(SDLK_F4, true);
 		WaitReady();
 		Do([this, F] { F->m_AB = Tabs().Selected(); Check((Compare().*Access(TCenter{})) == vec2(123,456) && !std::get<0>(LayerState(Compare(), FindEntry("Bookmark"))), "reopen retains inspection preferences and live source identities"); });
+		Do([this, F] { Tabs().SelectMap(*this, F->m_B); });
+		Delay();
+		DragSidebar(150);
+		Click([this, F] { return ComparisonTabPoint(F->m_AB); });
+		WaitReady();
+		Do([this, F] { Check(std::abs(m_ToolBoxWidth - 150) < 0.01f, "map resize reaches comparison A through its native tab"); Tabs().SelectMap(*this, F->m_B); });
+		Delay();
+		auto MoveDivider = [this](float Offset) { const auto Point = (this->*Access(TDivider{})).Center() + vec2(Offset, 0); Ui()->OnCursorMove((Point.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (Point.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); };
+		auto pHeldMapWidth = std::make_shared<float>();
+		Do([MoveDivider] { MoveDivider(0); });
+		Delay();
+		Do([this] { Mouse(SDL_BUTTON_LEFT, true); });
+		Delay();
+		Do([MoveDivider] { MoveDivider(20); });
+		Delay();
+		Do([this, F, pHeldMapWidth] { Check(!Tabs().Active() && Ui()->ActiveItem() == &(this->*Access(TDivider{})) && m_ToolBoxWidth > 165, "native map divider is dragging before comparison selection"); *pHeldMapWidth = m_ToolBoxWidth; Tabs().Open(*this, F->m_A, F->m_B); });
+		Delay();
+		Do([this, MoveDivider] { Check(Tabs().Transitioning(), "held map divider keeps comparison selection behind the release barrier"); MoveDivider(80); });
+		Delay();
+		Do([this, pHeldMapWidth] { Check(m_ToolBoxWidth == *pHeldMapWidth, "map-to-comparison release barrier freezes shared width"); Mouse(SDL_BUTTON_LEFT, false); });
+		WaitReady();
+		Do([MoveDivider] { MoveDivider(40); });
+		Delay();
+		Do([this, F, pHeldMapWidth] { Check(Tabs().Selected() == F->m_AB && m_ToolBoxWidth == *pHeldMapWidth && Ui()->ActiveItem() != &(this->*Access(TDivider{})) && !(Compare().*Access(TPanning{})), "released map divider reaches comparison A without transferring its drag"); });
+		DragSidebar(185);
+		auto pCaptures = std::make_shared<uint64_t>();
+		Do([this, pCaptures] { *pCaptures = m_CaptureCount; });
+		Click([this, F] { return ComparisonTabPoint(F->m_AC); });
+		WaitReady();
+		Do([this, F, pCaptures] { Check(Tabs().Selected() == F->m_AC && std::abs(m_ToolBoxWidth - 185) < 0.01f && m_CaptureCount == *pCaptures && (Compare().*Access(TCenter{})) == vec2(-100, 20), "comparison B reuses the latest width and its own camera without capture"); });
+		DragSidebar(245);
+		Do([this] { const auto Point = (this->*Access(TDivider{})).Center(); Ui()->OnCursorMove((Point.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (Point.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); });
+		Delay();
+		Do([this] { Mouse(SDL_BUTTON_LEFT, true); });
+		Delay();
+		Shortcut(SDLK_F4);
+		Do([this] { Check(Tabs().Transitioning(), "closing comparison with held divider waits for release"); Ui()->OnCursorMove(80, 0); });
+		Delay();
+		Do([this] { Check(std::abs(m_ToolBoxWidth - 245) < 0.01f, "closing release barrier blocks continued shared-divider movement"); Mouse(SDL_BUTTON_LEFT, false); });
+		Delay();
+		Do([this] { Check(!Tabs().Active() && std::abs(m_ToolBoxWidth - 245) < 0.01f, "closing comparison B returns its latest width to the map"); });
+		DragSidebar(155);
+		Shortcut(SDLK_F4, true);
+		WaitReady();
+		Do([this, F] { F->m_AC = Tabs().Selected(); Check(std::abs(m_ToolBoxWidth - 155) < 0.01f && (Compare().*Access(TCenter{})) == vec2(-100, 20), "reopened comparison uses latest editor width and retains its own camera"); Tabs().Open(*this, F->m_A, F->m_B); });
+		WaitReady();
+		Do([this] { Check(std::abs(m_ToolBoxWidth - 155) < 0.01f && (Compare().*Access(TCenter{})) == vec2(123, 456), "revisiting comparison A preserves shared width and independent camera"); CloseComparison(); });
+		Delay();
+		Shortcut(SDLK_F4, true);
+		WaitReady();
+		Do([this, F] { F->m_AB = Tabs().Selected(); Check(std::abs(m_ToolBoxWidth - 155) < 0.01f, "both reopened comparisons use the latest shared width"); m_ToolBoxWidth = 225; });
+		Delay();
 		// Exercise the same trackers used by held editor gestures, then switch via
 		// native Ctrl+Tab before releasing the mouse. Undo must restore the source.
 		for(int Mode = 0; Mode < 4; ++Mode)
@@ -3354,6 +3439,93 @@ class CSmokeEditor : public CEditor
 		Expected.Free();
 	}
 
+	void DragSidebar(float Width)
+	{
+		auto Move = [this](vec2 Point) { Ui()->OnCursorMove((Point.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (Point.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); };
+		Do([this, Move] { Move((this->*Access(TDivider{})).Center()); });
+		Delay();
+		Do([this] { Mouse(SDL_BUTTON_LEFT, true); });
+		Delay();
+		Do([this, Move, Width] { Move(vec2(Width - 0.5f, (this->*Access(TDivider{})).Center().y)); });
+		Delay();
+		Do([this] { Check(Ui()->ActiveItem() == &(this->*Access(TDivider{})), "map and comparison drags use the same editor-owned divider identity"); Mouse(SDL_BUTTON_LEFT, false); });
+		Delay();
+		Do([this, Width] { Check(std::abs(m_ToolBoxWidth - Width) < 0.01f, "native drag sets shared width to " + std::to_string(Width) + "; actual=" + std::to_string(m_ToolBoxWidth)); });
+	}
+	void ToolbarGeometrySteps(bool Comparison)
+	{
+		auto Move = [this](vec2 Point) { Ui()->OnCursorMove((Point.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (Point.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); };
+		Do([this, Comparison] {
+			const auto &Divider = this->*Access(TDivider{});
+			Check(Divider.x == m_ToolBoxWidth - 5 && Divider.y == 100 && Divider.w == 5 && Divider.h == Ui()->Screen()->h - 102, "native shell sidebar boundaries match for every document");
+			CImageInfo Image;
+			static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Image);
+			Check(Image.m_pData != nullptr, "mode icon framebuffer is available");
+			if(Image.m_pData)
+				for(int Mode = 0; Mode < 3; ++Mode)
+				{
+					const float Center = 2 + (m_ToolBoxWidth - 5) * (Mode + 0.5f) / 3;
+					float Brightest = 0;
+					int Glyphs = 0;
+					for(float Y = 78; Y < 93; ++Y)
+						for(float X = Center - 7; X < Center + 7; ++X)
+						{
+							const auto Color = Image.PixelColor(X / Ui()->Screen()->w * Image.m_Width, Y / Ui()->Screen()->h * Image.m_Height);
+							Brightest = std::max(Brightest, Color.r);
+							Glyphs += Color.r > 0.4f;
+						}
+					Check(Glyphs > 3 && (Comparison ? Brightest <= 0.62f : Brightest > 0.8f), Comparison ? "disabled native mode glyph is visible and grey" : "enabled native mode glyph stays bright");
+				}
+			if(Comparison && Image.m_pData)
+				for(int Action = 0; Action < 3; ++Action)
+				{
+					const float Center = Ui()->Screen()->w - 52 - Action * 110;
+					int Glyphs = 0;
+					float Brightest = 0;
+					for(float Y = Ui()->Screen()->h - 13; Y < Ui()->Screen()->h - 3; ++Y)
+						for(float X = Center - 35; X < Center + 35; ++X)
+						{
+							const auto Color = Image.PixelColor(X / Ui()->Screen()->w * Image.m_Width, Y / Ui()->Screen()->h * Image.m_Height);
+							Glyphs += Color.r > 0.4f;
+							Brightest = std::max(Brightest, Color.r);
+						}
+					Check(Glyphs > 10 && Brightest <= 0.62f, "native disabled status label is visible and grey at position " + std::to_string(Action));
+				}
+			Image.Free();
+			if(Comparison)
+			{
+				const auto &Panes = Compare().*Access(TPanes{});
+				Check(Panes[0].x == m_ToolBoxWidth && Panes[0].y == 168 && Panes[1].x + Panes[1].w == Ui()->Screen()->w, "comparison content uses native toolbar and sidebar boundaries");
+			}
+		});
+		for(int Row = 0; Row < 2; ++Row)
+		{
+			auto pId = std::make_shared<const void *>(nullptr);
+			Do([this, Move, Row] { Move(vec2(m_ToolBoxWidth + 22, Row ? 85 : 58)); });
+			Delay();
+			Do([this, Row, Comparison, pId] { *pId = Ui()->HotItem(); Check(*pId != nullptr && (!Comparison || *pId == &(Compare().*Access(TToolbarIds{}))[Row ? 4 : 0]), "native row center reaches its toolbar control"); });
+			for(float Offset : {-0.5f, 0.5f, 21.5f, 22.5f})
+			{
+				Do([this, Move, Row, Offset] { Move(vec2(m_ToolBoxWidth + 22, (Row ? 74 : 47) + Offset)); });
+				Delay(2);
+				Do([this, Offset, pId] { Check((Ui()->HotItem() == *pId) == (Offset > 0 && Offset < 22), "toolbar has native 22-high rows with exact 47/74 origins"); });
+			}
+		}
+		if(Comparison)
+			for(int Id = 0; Id < 7; ++Id)
+			{
+				Do([this, Move, Id] { Move(ToolbarPosition(Id)); });
+				Delay(2);
+				Do([this, Id] { Check(Ui()->HotItem() == &(Compare().*Access(TToolbarIds{}))[Id], "comparison toolbar action is reachable inside the shell: " + std::to_string(Id)); });
+				if(Id != 3 && Id != 6)
+				{
+					Do([this, Move, Id] { const float aWidths[] = {45, 45, 70, 92, 45, 45, 40}; Move(ToolbarPosition(Id) + vec2(aWidths[Id] / 2 + 2.5f, 0)); });
+					Delay(2);
+					Do([this, Id] { const auto &Ids = Compare().*Access(TToolbarIds{}); Check(Ui()->HotItem() != &Ids[Id] && Ui()->HotItem() != &Ids[Id + 1], "comparison toolbar retains native five-unit button gaps"); });
+				}
+			}
+	}
+
 	void ChromePolishSteps()
 	{
 		auto Press = [this](int KeyCode) { Do([this, KeyCode] { Key(KeyCode, true); }); Delay(); Do([this, KeyCode] { Key(KeyCode, false); }); Delay(); };
@@ -3413,8 +3585,14 @@ class CSmokeEditor : public CEditor
 		{
 			Do([this, Width] { Graphics()->Resize(Width, Width == 800 ? 600 : 800, 0); OnWindowResize(); MapView()->Zoom()->SetValueInstant(Width == 800 ? 150 : 100); Map()->m_MapViewState.m_WorldOffset += vec2(100, 100); });
 			Delay();
-			Do([CheckChrome] { CheckChrome(); });
-			Screenshot("polish-map-chrome-" + std::to_string(Width));
+			for(int Sidebar : {100, 400})
+			{
+				Do([this, Sidebar] { m_ToolBoxWidth = Sidebar; });
+				Delay();
+				ToolbarGeometrySteps(false);
+				Do([CheckChrome] { CheckChrome(); });
+				Screenshot("polish-map-chrome-" + std::to_string(Width) + "-sidebar-" + std::to_string(Sidebar));
+			}
 		}
 		Do([this] { m_GuiActive = false; });
 		Delay();
@@ -3425,9 +3603,17 @@ class CSmokeEditor : public CEditor
 		{
 			Do([this, Width] { Graphics()->Resize(Width, Width == 800 ? 600 : 800, 0); OnWindowResize(); SelectKind(MapDiff::EEntryKind::LAYER); Compare().*Access(TContext{}) = 2; Compare().*Access(TCenter{}) += vec2(100, 100); Compare().*Access(TZoom{}) *= 1.5f; });
 			Delay();
-			Do([CheckChrome] { CheckChrome(); });
-			Screenshot("polish-comparison-chrome-" + std::to_string(Width));
+			for(int Sidebar : {100, 400})
+			{
+				Do([this, Sidebar] { m_ToolBoxWidth = Sidebar; });
+				Delay();
+				ToolbarGeometrySteps(true);
+				Do([CheckChrome] { CheckChrome(); });
+				Screenshot("polish-comparison-chrome-" + std::to_string(Width) + "-sidebar-" + std::to_string(Sidebar));
+			}
 		}
+		Do([this] { m_ToolBoxWidth = 225; });
+		Delay();
 		Do([this, CheckChrome] {
 			CheckChrome();
 			for(auto *pAction : {&m_QuickActionSave, &m_QuickActionSaveAs, &m_QuickActionSaveCopy, &m_QuickActionAppendMap, &m_QuickActionMapDetails, &m_QuickActionTestMapLocally, &m_QuickActionAddGroup, &m_QuickActionToggleGrid, &m_QuickActionEnvelopes})
@@ -3438,6 +3624,28 @@ class CSmokeEditor : public CEditor
 			Check(m_Dialog == DIALOG_NONE && !Ui()->IsPopupOpen(), "disabled callbacks open no editing dialogs");
 			CheckSources("disabled comparison callbacks");
 		});
+		auto pEditingState = std::make_shared<std::pair<int, EExtraEditor>>();
+		Do([this, pEditingState] { *pEditingState = {m_Mode, m_ActiveExtraEditor}; m_Mode = MODE_SOUNDS; m_ActiveExtraEditor = EXTRAEDITOR_HISTORY; });
+		auto CheckEditingState = [this] { Check(m_Mode == MODE_SOUNDS && m_ActiveExtraEditor == EXTRAEDITOR_HISTORY, "individual disabled shell control preserves non-default mode and extra editor"); };
+		for(int Mode = 0; Mode < 3; ++Mode)
+		{
+			Click([this, Mode] { return vec2(2 + (m_ToolBoxWidth - 5) * (Mode + 0.5f) / 3, 85); });
+			Do(CheckEditingState);
+		}
+		for(int Arrow : {SDLK_LEFT, SDLK_RIGHT})
+		{
+			Press(Arrow);
+			Do(CheckEditingState);
+		}
+		for(int Action = 0; Action < 3; ++Action)
+		{
+			Click([this, Action] { return vec2(Ui()->Screen()->w - 52 - Action * 110, Ui()->Screen()->h - 8); });
+			Do(CheckEditingState);
+		}
+		Press(SDLK_ESCAPE);
+		Do([this, CheckEditingState] { Check(!Tabs().Active(), "disabled shell checks return to the normal map"); CheckEditingState(); CheckSources("disabled native shell controls after returning to map"); });
+		Do([this, pEditingState] { m_Mode = pEditingState->first; m_ActiveExtraEditor = pEditingState->second; OpenComparison(*this, m_pBefore, m_pAfter); });
+		WaitReady();
 		Click([this] { return SectionPosition(3); });
 		Do([this] { CheckWrappedInlineText(); });
 		Screenshot("polish-inline-wrapped-800");
@@ -3578,7 +3786,7 @@ class CSmokeEditor : public CEditor
 		});
 		WaitReady();
 		auto ReadState = [this] {
-			return std::tuple{Compare().*Access(TSection{}), Compare().*Access(TSelectedEntry{}), Compare().*Access(TSelectedDetail{}), Compare().*Access(TFocusEntry{}), Compare().*Access(TTreeActive{}), Compare().*Access(TEnvelopeChannels{}), Compare().*Access(TCenter{}), Compare().*Access(TZoom{}), Compare().*Access(TSidebarWidth{}),
+			return std::tuple{Compare().*Access(TSection{}), Compare().*Access(TSelectedEntry{}), Compare().*Access(TSelectedDetail{}), Compare().*Access(TFocusEntry{}), Compare().*Access(TTreeActive{}), Compare().*Access(TEnvelopeChannels{}), Compare().*Access(TCenter{}), Compare().*Access(TZoom{}), m_ToolBoxWidth,
 				(Compare().*Access(TSettings{})).*Access(TScrollPos{}), (Compare().*Access(TLayerTree{})).*Access(TScrollPos{}), ((Compare().*Access(TNavLists{}))[Compare().*Access(TSection{})].*Access(TListScroll{})).*Access(TScrollPos{}), ((Compare().*Access(TDetails{})).*Access(TListScroll{})).*Access(TScrollPos{}), (Compare().*Access(TValues{})).*Access(TScrollPos{}), Maps().size()};
 		};
 		auto pState = std::make_shared<decltype(ReadState())>();
@@ -3614,12 +3822,37 @@ class CSmokeEditor : public CEditor
 				}
 				if(Modal < 2)
 				{
+					Do([this, Move] { Move((this->*Access(TDivider{})).Center()); });
+					Delay();
+					Do([this] { Mouse(SDL_BUTTON_LEFT, true); });
+					Delay();
+					Do([this, Move] { Move((this->*Access(TDivider{})).Center() + vec2(30, 0)); });
+					Delay();
+					Do([this] { Mouse(SDL_BUTTON_LEFT, false); });
+					Delay();
+					Do([this, ReadState, pState] { Check(ReadState() == *pState, "modal prevents the shared divider from resizing any document"); });
 					Press(SDLK_DOWN);
 					Press(SDLK_END);
 					Shortcut(SDLK_n);
 					Press(SDLK_p);
 					Press(SDLK_n);
 					Do([this, pState, ReadState] { Check(ReadState() == *pState, "modal keyboard owns arrows, navigation and global shortcuts"); });
+				}
+				if(Modal == 2)
+				{
+					Do([this, Move] { Move((this->*Access(TDivider{})).Center()); });
+					Delay();
+					Do([this] { Mouse(SDL_BUTTON_LEFT, true); });
+					Delay();
+					Do([this, Move] { Move((this->*Access(TDivider{})).Center() + vec2(60, 0)); });
+					Delay();
+					Do([this, pState, ReadState] { Check(ReadState() == *pState && Ui()->ActiveItem() != &(this->*Access(TDivider{})), "outside-popup divider press and held movement do not start a resize"); Mouse(SDL_BUTTON_LEFT, false); });
+					Delay();
+					Do([this, Move] { Check(!Ui()->IsPopupOpen(), "outside-popup divider release dismisses the menu"); Move((this->*Access(TDivider{})).Center() + vec2(90, 0)); });
+					Delay();
+					Do([this, pState, ReadState] { Check(ReadState() == *pState && Ui()->ActiveItem() != &(this->*Access(TDivider{})), "dismissed popup leaves no active divider drag or changed width"); });
+					Click([] { return vec2(150, 10); });
+					Do([this] { Check(Ui()->IsPopupOpen(), "popup reopens for underlying content-input checks"); });
 				}
 				Do([this, Section, Move] {
 					if(Section == 2)
@@ -3659,10 +3892,21 @@ class CSmokeEditor : public CEditor
 
 	void Setup()
 	{
+		Do([this] { m_ToolBoxWidth = 225; });
 		Delay(10);
 		if(Storage()->FileExists("maps/perf-before.map", IStorage::TYPE_SAVE) && Storage()->FileExists("maps/perf-after.map", IStorage::TYPE_SAVE))
 		{
 			PerformanceSteps(true);
+			Do([this] { m_Log << "RESULT failures=" << m_Failures << " steps=" << m_vSteps.size() << std::endl; Client()->Quit(); });
+			return;
+		}
+		if(std::getenv("DDNET_MAP_COMPARE_SHARED_SHELL"))
+		{
+			ChromePolishSteps();
+			ModalOwnershipSteps();
+			TabLifecycleSteps();
+			SectionAndSkySteps();
+			SectionReviewSteps();
 			Do([this] { m_Log << "RESULT failures=" << m_Failures << " steps=" << m_vSteps.size() << std::endl; Client()->Quit(); });
 			return;
 		}
@@ -3699,7 +3943,7 @@ class CSmokeEditor : public CEditor
 			if(Fixture == 0)
 			{
 				Screenshot("comparison-equal");
-				Click([] { return vec2(240, 62); });
+				Click([this] { return ToolbarPosition(3); });
 				Do([this] {
 					Check((Compare().*Access(TUnchangedExpanded{})) && (Compare().*Access(TSelectedEntry{})) >= 0, "equal maps open unchanged section with a real selection");
 					const int Selected = Compare().*Access(TSelectedEntry{});
@@ -3737,13 +3981,13 @@ class CSmokeEditor : public CEditor
 			Delay();
 			if(Fixture == 0)
 				Screenshot("comparison-quads");
-			Click([] { return vec2(167, 62); }); // By group toolbar button.
+			Click([this] { return ToolbarPosition(2); }); // By group toolbar button.
 			Do([this] { Check(Compare().*Access(TGroup{}),"By group button"); SelectKind(MapDiff::EEntryKind::GROUP,"Smoke"); });
 			Delay();
 			Screenshot("comparison-" + std::to_string(Fixture) + "-group");
 			ToggleMapContext();
 			Do([this] { Check(Compare().*Access(TContext{}), "context toggle actual=" + std::to_string(Compare().*Access(TContext{})) + " target=" + std::to_string(m_TargetContext)); });
-			Click([] { return vec2(106, 62); });
+			Click([this] { return ToolbarPosition(1); });
 			WaitReady();
 			Do([this] { Check((Compare().*Access(TSources{}))[0]==m_pAfter,"Swap button"); SelectKind(MapDiff::EEntryKind::GROUP,"Smoke"); });
 			Delay();
