@@ -60,6 +60,7 @@ class CMapCompare
 		vec2 m_Center = vec2(0, 0);
 		float m_Zoom = 4;
 		bool m_ByGroup = false;
+		vec2 m_Origin = vec2(0, 0);
 	};
 	struct CDetailBookmark
 	{
@@ -127,6 +128,10 @@ class CMapCompare
 	bool m_ScrollToLayer = false;
 	bool m_LayerTreeActive = true;
 	bool m_Panning = false;
+	bool m_Dragged = false;
+	bool m_ClickReleased = false;
+	int m_PanButton = 0, m_PanSide = 0;
+	vec2 m_PressMouse = vec2(0, 0);
 	vec2 m_LastMouse = vec2(0, 0);
 	vec2 m_Center = vec2(0, 0);
 	vec2 m_ParallaxOrigin = vec2(0, 0);
@@ -141,6 +146,9 @@ class CMapCompare
 		int m_Kind; // 0: property, 1: tile, 2: object field, 3: issue, 4: order/structure
 		int m_Index;
 	};
+	int m_PickSide = -1;
+	vec2 m_PickMouse = vec2(0, 0);
+	CDetail m_PickedDetail{-1, -1, -1};
 	std::vector<CDetail> m_vDetails;
 	std::vector<MapDiff::CPropertyChange> m_vValueRows;
 	int m_ValueRowsEntry = -2;
@@ -173,7 +181,10 @@ class CMapCompare
 	void RevealLayerSelection();
 	void RenderLayerTree(CEditor &Editor, CUIRect View);
 	void Select(int Entry);
+	void Select(int Entry, bool Fit);
 	void SelectDetail(int Detail);
+	void SelectDetail(int Detail, bool Fit);
+	void SelectPickedDetail();
 	bool MapView() const;
 	void RebuildDetails();
 	bool IsDifference(const CDetail &Detail) const;

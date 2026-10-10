@@ -1146,7 +1146,12 @@ class CSmokeEditor : public CEditor
 		});
 		WaitReady();
 		auto Camera = [this] { Compare().*Access(TCenter{}) = vec2(12 * 32, 10 * 32 + 16); Compare().*Access(TZoom{}) = 1.0f; };
-		Do([this, Camera] { SelectKind(MapDiff::EEntryKind::LAYER, "Focus"); Camera(); });
+		Do([this, Camera] {
+			SelectKind(MapDiff::EEntryKind::LAYER, "Focus");
+			Camera();
+			// Previous interaction fixtures may leave the cursor over a sampled tile.
+			Ui()->OnCursorMove((4 - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (4 - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
+		});
 		Delay();
 		Do([this] { ContextPixels(false, false); });
 		Click([this] { return ToolbarPosition(3); });
@@ -1185,8 +1190,10 @@ class CSmokeEditor : public CEditor
 			m_SavedCenter = Compare().*Access(TCenter{});
 			const auto Pos = (Compare().*Access(TPanes{}))[0].Center();
 			Ui()->OnCursorMove((Pos.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (Pos.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
-			Mouse(SDL_BUTTON_LEFT, true);
 		});
+		// Let the shared UI retire the inspector row's hot item before pressing.
+		Delay();
+		Do([this] { Check(Ui()->HotItem() == nullptr && Ui()->ActiveItem() == nullptr, "fold pan starts in the canvas without a UI item"); Mouse(SDL_BUTTON_LEFT, true); });
 		Delay();
 		Do([this] { Ui()->OnCursorMove(80, 45); });
 		Delay();
@@ -2242,7 +2249,34 @@ class CSmokeEditor : public CEditor
 		});
 		Delay();
 		Screenshot("reported-1AndOnLyLife-neutral-context");
-		Do([this] { Compare().*Access(TContext{}) = 1; });
+		if(std::getenv("DDNET_MAP_COMPARE_PICK"))
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				auto pTileIndex = std::make_shared<int>(-1);
+				Click([this, Side, pTileIndex] {
+					const auto &Entry = Result().m_vEntries[Compare().*Access(TSelectedEntry{})];
+					for(int t = 0; t < (int)Entry.m_vTiles.size(); ++t)
+					{
+						const auto &Tile = Entry.m_vTiles[t];
+						if(Tile.m_X >= 854 && Tile.m_X <= 875 && Tile.m_Y >= 43 && Tile.m_Y <= 50 && (Side ? Tile.m_After.m_Index : Tile.m_Before.m_Index))
+						{
+							*pTileIndex = t;
+							return (Compare().*Access(TPanes{}))[Side].Center() + (vec2(Tile.m_X * 32 + 16, Tile.m_Y * 32 + 16) - (Compare().*Access(TCenter{}))) / (Compare().*Access(TZoom{}));
+						}
+					}
+					Check(false, "real map has a visible changed tile to click");
+					return (Compare().*Access(TPanes{}))[Side].Center();
+				});
+				Do([this, pTileIndex] {
+					Check(SelectedDetail(Compare()) == std::array{Compare().*Access(TSelectedEntry{}), 1, *pTileIndex}, "real map canvas click selects the exact tile change");
+					Check((Compare().*Access(TZoom{})) == 2 && (Compare().*Access(TCenter{})) == vec2(865 * 32, 47 * 32), "real map canvas click keeps its inspection camera");
+				});
+			}
+		Do([this] {
+			Compare().*Access(TContext{}) = 1;
+			// The direct reference render below excludes the editor cursor.
+			Ui()->OnCursorMove((4 - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (4 - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
+		});
 		Delay();
 		Do([this] {
 			CImageInfo Actual, Reference;
@@ -2319,6 +2353,314 @@ class CSmokeEditor : public CEditor
 			Actual.Free();
 			Reference.Free();
 			CheckSources("reported map tint");
+			CloseComparison();
+		});
+		Delay();
+	}
+	void PickingSteps()
+	{
+		Do([this] {
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				auto pMap = std::make_unique<CEditorMap>(this);
+				pMap->CreateDefault();
+				str_copy(pMap->m_aDisplayName, Side ? "Pick After" : "Pick Before");
+				WhiteImage(*pMap, "pick", true);
+				auto pEnv = pMap->NewEnvelope(CEnvelope::EType::POSITION);
+				pEnv->m_vPoints.clear();
+				pEnv->AddPoint(CFixedTime(0), {16 * 1024, 0, 45 * 1024, 0});
+				auto pGroup = pMap->NewGroup();
+				str_copy(pGroup->m_aName, "Pick group");
+				pGroup->m_OffsetX = 32;
+				pGroup->m_OffsetY = Side * 16;
+				for(const char *pName : {"Pick tiles", "Top tiles"})
+				{
+					auto pTiles = std::make_shared<CLayerTiles>(pMap.get(), 16, 16);
+					str_copy(pTiles->m_aName, pName);
+					pTiles->m_Image = 0;
+					pTiles->m_pTiles[4 + 2 * 16].m_Index = Side + 1;
+					if(str_comp(pName, "Pick tiles") == 0)
+					{
+						for(int Y = 0; Y < 12; ++Y)
+							pTiles->m_pTiles[1 + Y * 16].m_Index = Side + 1;
+						pTiles->m_pTiles[2 + 2 * 16].m_Index = 1;
+						pTiles->m_pTiles[(Side ? 8 : 6) + 2 * 16].m_Index = 1;
+					}
+					pGroup->AddLayer(pTiles);
+				}
+				auto pQuads = std::make_shared<CLayerQuads>(pMap.get());
+				str_copy(pQuads->m_aName, "Pick quads");
+				pQuads->m_Image = 0;
+				pQuads->NewQuad(80, 176, 32, 32);
+				auto *pQuad = pQuads->NewQuad(224, 176, 32, 32);
+				pQuad->m_PosEnv = 0;
+				pQuad->m_aColors[0].r = Side ? 128 : 255;
+				pGroup->AddLayer(pQuads);
+				auto pSounds = std::make_shared<CLayerSounds>(pMap.get());
+				str_copy(pSounds->m_aName, "Pick sounds");
+				for(int n = 0; n < 2; ++n)
+				{
+					auto *pSource = pSounds->NewSource(144 + n * 80, 240);
+					pSource->m_PosEnv = 0;
+					pSource->m_TimeDelay = Side;
+					pSource->m_Shape.m_Type = n ? CSoundShape::SHAPE_RECTANGLE : CSoundShape::SHAPE_CIRCLE;
+					if(n)
+					{
+						pSource->m_Shape.m_Rectangle.m_Width = 40 * 1024;
+						pSource->m_Shape.m_Rectangle.m_Height = 24 * 1024;
+					}
+					else
+						pSource->m_Shape.m_Circle.m_Radius = 20;
+				}
+				pGroup->AddLayer(pSounds);
+				auto pOther = pMap->NewGroup();
+				str_copy(pOther->m_aName, "Other");
+				pOther->m_ParallaxX = 50;
+				pOther->m_ParallaxY = 0;
+				pOther->m_OffsetX = 32;
+				pOther->m_OffsetY = 48;
+				pOther->m_UseClipping = 1;
+				pOther->m_ClipW = 400;
+				pOther->m_ClipH = 400;
+				auto pContext = std::make_shared<CLayerTiles>(pMap.get(), 16, 16);
+				str_copy(pContext->m_aName, "Context");
+				pContext->m_Image = 0;
+				pContext->m_pTiles[8 + 2 * 16].m_Index = Side + 1;
+				pContext->m_pTiles[12 + 2 * 16].m_Index = Side + 1;
+				pOther->AddLayer(pContext);
+				(Side ? m_pAfter : m_pBefore) = pMap.get();
+				Maps().push_back(std::move(pMap));
+			}
+			CaptureSources();
+			OpenComparison(*this, m_pBefore, m_pAfter);
+		});
+		WaitReady();
+		auto Prepare = [this](const char *pName, int Context = 1, bool Group = false) {
+			Do([this, pName, Context, Group] {
+				Compare().*Access(TGroup{}) = Group;
+				Compare().*Access(TTreeActive{}) = true;
+				SelectKind(Group ? MapDiff::EEntryKind::GROUP : MapDiff::EEntryKind::LAYER, pName);
+				Compare().*Access(TContext{}) = Context;
+				Compare().*Access(TCenter{}) = vec2(192, 192);
+				Compare().*Access(TOrigin{}) = vec2(0, 0);
+				Compare().*Access(TZoom{}) = 2;
+			});
+			Delay();
+		};
+		auto Point = [this](vec2 World, int Side) {
+			return (Compare().*Access(TPanes{}))[Side].Center() + (World - vec2(224, 192 + Side * 16)) / 2;
+		};
+		auto TileTarget = [this](const char *pName, int X, int Y) {
+			const auto Detail = SelectedDetail(Compare());
+			const bool Found = Detail[0] == FindEntry(pName) && Detail[1] == 1;
+			Check(Found, std::string("canvas selects tile entry ") + pName);
+			if(Found)
+			{
+				const auto &Tile = Result().m_vEntries[Detail[0]].m_vTiles[Detail[2]];
+				Check(Tile.m_X == X && Tile.m_Y == Y, "canvas selects the exact tile coordinates");
+			}
+			Check((Compare().*Access(TFocusEntry{})) == FindEntry(pName) && !(Compare().*Access(TTreeActive{})), "canvas selection transfers keyboard focus to its detail");
+		};
+		for(int Context = 0; Context < 3; ++Context)
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				Prepare("Pick tiles", Context);
+				Click([Point, Side] { return Point(vec2(144, 80), Side); });
+				Do([this, TileTarget] { TileTarget("Pick tiles", 4, 2); Check((Compare().*Access(TCenter{})) == vec2(192, 192) && (Compare().*Access(TZoom{})) == 2, "canvas click does not fit or pan the view"); });
+			}
+		for(int Side = 0; Side < 2; ++Side)
+		{
+			Prepare("Pick tiles", 0);
+			Click([Point, Side] { return Point(vec2((Side ? 8 : 6) * 32 + 16, 80), Side); });
+			Do([TileTarget, Side] { TileTarget("Pick tiles", Side ? 8 : 6, 2); });
+			Click([Point, Side] { return Point(vec2((Side ? 6 : 8) * 32 + 16, 80), Side); });
+			Do([TileTarget, Side] { TileTarget("Pick tiles", Side ? 8 : 6, 2); });
+			Click([Point, Side] { return Point(vec2(80, 80), Side); });
+			Do([TileTarget, Side] { TileTarget("Pick tiles", Side ? 8 : 6, 2); });
+		}
+		Prepare("Pick tiles");
+		Click([Point] { return Point(vec2(48, 368), 0); });
+		Delay(15);
+		Do([this, TileTarget] {
+			TileTarget("Pick tiles", 1, 11);
+			const auto &Scroll = (Compare().*Access(TDetails{})).*Access(TListScroll{});
+			Check((Scroll.*Access(TScrollPos{})) > 0 && (Scroll.*Access(TScrollRect{})).Inside(DetailPosition(Compare().*Access(TSelectedDetail{}))), "canvas scrolls a distant inspector row into view");
+		});
+		Prepare("Pick group", 2, true);
+		Click([Point] { return Point(vec2(144, 80), 1); });
+		Do([this, TileTarget] { TileTarget("Top tiles", 4, 2); Check((Compare().*Access(TSelectedEntry{})) == FindEntry("Pick group"), "group mode keeps parent navigator and child detail"); SetLayerVisible(Compare(), FindEntry("Top tiles"), false); });
+		Click([Point] { return Point(vec2(144, 80), 0); });
+		Do([TileTarget] { TileTarget("Pick tiles", 4, 2); });
+		Click([this] { return SectionPosition(1); });
+		DoubleClick([this] { return TreePosition("Pick group"); });
+		Prepare("Pick tiles", 2);
+		Do([this] { Check(!std::get<1>(LayerState(Compare(), FindEntry("Pick group"))), "canvas tree fixture starts with a collapsed parent"); });
+		Click([Point] { return Point(vec2(144, 80), 1); });
+		Delay(15);
+		Do([this, TileTarget] {
+			TileTarget("Pick tiles", 4, 2);
+			Check(std::get<1>(LayerState(Compare(), FindEntry("Pick group"))), "canvas pick expands its collapsed parent");
+			Check(((Compare().*Access(TLayerTree{})).*Access(TScrollRect{})).Inside(TreePosition("Pick tiles")), "canvas pick reveals its native tree row");
+		});
+		// A changed context group uses a different parallax projection and game-space clip.
+		Prepare("Pick tiles", 2);
+		Click([this] { return (Compare().*Access(TPanes{}))[0].Center() + vec2(144, 32) / 2; });
+		Do([this, TileTarget] {
+			TileTarget("Context", 8, 2);
+			Check((Compare().*Access(TCenter{})) == vec2(0, 0) && (Compare().*Access(TOrigin{})) == vec2(192, 192) && (Compare().*Access(TZoom{})) == 2, "context pick rebases parallax without moving the clicked group");
+		});
+		Click([this] { return SectionPosition(0); });
+		Do([this] { Check((Compare().*Access(TCenter{})) == vec2(192, 192) && (Compare().*Access(TOrigin{})) == vec2(0, 0), "returning to Changes restores its independent camera origin"); });
+		Click([this] { return SectionPosition(1); });
+		Do([this] { Check((Compare().*Access(TCenter{})) == vec2(0, 0) && (Compare().*Access(TOrigin{})) == vec2(192, 192), "returning to Layers restores its rebased camera origin"); });
+		Prepare("Pick tiles", 2);
+		auto pSelection = std::make_shared<std::array<int, 3>>();
+		Do([this, pSelection] { *pSelection = SelectedDetail(Compare()); });
+		Click([this] { return (Compare().*Access(TPanes{}))[0].Center() + vec2(272, 32) / 2; });
+		Do([this, pSelection] { Check(SelectedDetail(Compare()) == *pSelection, "game-space clipped tile cannot be picked"); SetLayerVisible(Compare(), FindEntry("Other"), false); });
+		Click([this] { return (Compare().*Access(TPanes{}))[0].Center() + vec2(144, 32) / 2; });
+		Do([this, pSelection] { Check(SelectedDetail(Compare()) == *pSelection, "hidden context group cannot be picked"); });
+		for(int Side = 0; Side < 2; ++Side)
+		{
+			Prepare("Pick quads");
+			Click([Point, Side] { return Point(vec2(240, 176), Side); });
+			Do([this] { Check(SelectedDetail(Compare()) == std::array{FindEntry("Pick quads"), 2, 0}, "canvas picks envelope-transformed changed quad"); });
+			Prepare("Pick quads");
+			Do([this, pSelection] { *pSelection = SelectedDetail(Compare()); });
+			Click([Point, Side] { return Point(vec2(256, 192), Side); });
+			Do([this, pSelection] { Check(SelectedDetail(Compare()) == *pSelection && (Compare().*Access(TTreeActive{})), "empty corner of rotated quad bounds is not a hit"); });
+			Click([Point, Side] { return Point(vec2(240, 176) - vec2(std::sqrt(512.0f), std::sqrt(512.0f)) + vec2(7, 7), Side); });
+			Do([this] { Check(SelectedDetail(Compare()) == std::array{FindEntry("Pick quads"), 2, 0} && !(Compare().*Access(TTreeActive{})), "visible plus or minus glyph selects a rotated quad outside its geometry"); });
+			Prepare("Pick sounds");
+			Click([Point, Side] { return Point(vec2(160, 240), Side); });
+			Do([this] { Check(SelectedDetail(Compare()) == std::array{FindEntry("Pick sounds"), 2, 0}, "canvas picks envelope-transformed circle sound"); });
+			Click([Point, Side] { return Point(vec2(240, 240), Side); });
+			Do([this] { Check(SelectedDetail(Compare()) == std::array{FindEntry("Pick sounds"), 2, 1}, "canvas picks rectangle sound"); });
+			Click([Point, Side] { return Point(vec2(176, 256), Side); });
+			Do([this] { Check(SelectedDetail(Compare()) == std::array{FindEntry("Pick sounds"), 2, 1}, "empty corner of sound circle bounds is not a hit"); });
+		}
+		// Real held gestures: jitter is a click; left/middle drags and interrupted presses aren't.
+		for(int Gesture = 0; Gesture < 6; ++Gesture)
+		{
+			Prepare("Pick tiles");
+			Do([this, Point, pSelection] { *pSelection = SelectedDetail(Compare()); const auto P = Point(vec2(144, 80), 0); Ui()->OnCursorMove((P.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (P.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); });
+			Delay();
+			Do([this, Gesture] { Mouse(Gesture == 2 ? SDL_BUTTON_MIDDLE : SDL_BUTTON_LEFT, true); });
+			Delay();
+			Do([this, Gesture] {
+				if(Gesture <= 2)
+					Ui()->OnCursorMove((Gesture ? 20 : 1) * Graphics()->WindowWidth() / Ui()->Screen()->w, 0);
+				else if(Gesture == 3)
+					m_Dialog = DIALOG_FILE;
+				else if(Gesture == 4)
+				{
+					IInput::CEvent Event{};
+					Event.m_Key = KEY_MOUSE_WHEEL_UP;
+					Event.m_Flags = IInput::FLAG_PRESS;
+					Compare().OnInput(*this, Event);
+				}
+				else
+				{
+					SDL_Event Event{};
+					Event.type = SDL_WINDOWEVENT;
+					Event.window.event = SDL_WINDOWEVENT_FOCUS_LOST;
+					SDL_PushEvent(&Event);
+				}
+			});
+			Delay();
+			Do([this, Gesture] { Mouse(Gesture == 2 ? SDL_BUTTON_MIDDLE : SDL_BUTTON_LEFT, false); });
+			Delay();
+			Do([this, Gesture, pSelection, TileTarget] {
+				m_Dialog = DIALOG_NONE;
+				if(Gesture == 5)
+				{
+					SDL_Event Event{};
+					Event.type = SDL_WINDOWEVENT;
+					Event.window.event = SDL_WINDOWEVENT_FOCUS_GAINED;
+					SDL_PushEvent(&Event);
+				}
+				if(Gesture == 0)
+				{
+					TileTarget("Pick tiles", 4, 2);
+					Check((Compare().*Access(TCenter{})) == vec2(192, 192), "click jitter does not pan");
+				}
+				else
+				{
+					Check(SelectedDetail(Compare()) == *pSelection, "drag or interrupted click leaves selection unchanged");
+					if(Gesture <= 2)
+						Check(distance(Compare().*Access(TCenter{}), vec2(152, 192)) < 0.1f, "left and middle drag retain linked panning");
+				}
+			});
+		}
+		Prepare("Pick tiles", 2);
+		Click([Point] { return Point(vec2(144, 80), 1); });
+		Screenshot("canvas-picked-tile");
+		Do([this] { CheckSources("canvas picking"); CloseComparison(); });
+		Delay();
+		Do([this] {
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				auto *pMap = Side ? m_pAfter : m_pBefore;
+				auto pGroup = pMap->m_vpGroups[2];
+				auto pMarkers = std::make_shared<CLayerQuads>(pMap);
+				str_copy(pMarkers->m_aName, "Markers");
+				pMarkers->m_Image = 0;
+				for(int n = 0; n < 2; ++n)
+					pMarkers->NewQuad(176 + n * 16, 144, 48, 48)->m_aColors[0].r = Side ? 128 : 255;
+				pGroup->AddLayer(pMarkers);
+				auto pGhost = std::make_shared<CLayerQuads>(pMap);
+				str_copy(pGhost->m_aName, "Ghost");
+				pGhost->m_Image = 0;
+				auto pColor = pMap->NewEnvelope(CEnvelope::EType::COLOR);
+				for(auto &Point : pColor->m_vPoints)
+					Point.m_aValues[3] = 0;
+				for(int n = 0; n < 2; ++n)
+				{
+					auto *pQuad = pGhost->NewQuad(240 + n * 80, 176, 48, 48);
+					pQuad->m_aColors[0].r = Side ? 128 : 255;
+					if(n)
+						for(auto &Color : pQuad->m_aColors)
+							Color.a = 0;
+					else
+						pQuad->m_ColorEnv = pMap->m_vpEnvelopes.size() - 1;
+				}
+				pGroup->AddLayer(pGhost);
+				auto pDense = std::make_shared<CLayerQuads>(pMap);
+				str_copy(pDense->m_aName, "Dense");
+				pDense->m_Image = 0;
+				for(int n = 0; n < 4096; ++n)
+					pDense->NewQuad(240, 176, 32, 32)->m_aColors[0].r = Side ? 128 : 255;
+				pGroup->AddLayer(pDense);
+			}
+			CaptureSources();
+			OpenComparison(*this, m_pBefore, m_pAfter);
+		});
+		WaitReady();
+		Do([this] { SetLayerVisible(Compare(), FindEntry("Dense"), false); });
+		Prepare("Markers");
+		Click([Point] { return Point(vec2(200, 144), 1); });
+		Do([this] { Check(SelectedDetail(Compare()) == std::array{FindEntry("Markers"), 2, 0}, "earlier quad marker is picked above later quad geometry"); });
+		Prepare("Pick tiles", 2);
+		Do([this, pSelection] { *pSelection = SelectedDetail(Compare()); SetLayerVisible(Compare(), FindEntry("Pick quads"), false); });
+		for(int n = 0; n < 2; ++n)
+		{
+			Click([Point, n] { return Point(vec2(240 + n * 80, 176), 0); });
+			Do([this, pSelection] { Check(SelectedDetail(Compare()) == *pSelection, "invisible context quad does not steal a canvas click"); });
+		}
+		Prepare("Ghost");
+		Click([Point] { return Point(vec2(264, 176), 1); });
+		Do([this] { Check(SelectedDetail(Compare()) == std::array{FindEntry("Ghost"), 2, 0} && !(Compare().*Access(TTreeActive{})), "invisible selected quad retains its visible pickable marker"); SetLayerVisible(Compare(), FindEntry("Dense"), true); });
+		Prepare("Dense");
+		Do([this, Point] { const auto P = Point(vec2(240, 176), 0); Ui()->OnCursorMove((P.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (P.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); });
+		Delay();
+		Do([this] { Mouse(SDL_BUTTON_LEFT, true); });
+		Delay();
+		Do([this] { m_MeasureRender = true; Mouse(SDL_BUTTON_LEFT, false); });
+		Do([this] { m_Log << "TIMING dense 4096-object click frame_ms=" << m_LastRenderMs << std::endl; m_MeasureRender = false; });
+		Do([this] {
+			const auto Detail = SelectedDetail(Compare());
+			Check(Detail[0] == FindEntry("Dense") && Detail[1] == 2 && Result().m_vEntries[Detail[0]].m_vObjects[Detail[2]].m_Before == 4095, "dense overlap selects the last drawn changed quad");
+			CheckSources("picking review cases");
 			CloseComparison();
 		});
 		Delay();
@@ -4294,6 +4636,15 @@ class CSmokeEditor : public CEditor
 	{
 		Do([this] { m_ToolBoxWidth = 225; });
 		Delay(10);
+		if(std::getenv("DDNET_MAP_COMPARE_PICK"))
+		{
+			if(Storage()->FileExists("maps/perf-before.map", IStorage::TYPE_SAVE))
+				LocalTintSteps();
+			else
+				PickingSteps();
+			Do([this] { m_Log << "RESULT failures=" << m_Failures << " steps=" << m_vSteps.size() << std::endl; Client()->Quit(); });
+			return;
+		}
 		if(std::getenv("DDNET_MAP_COMPARE_TINT"))
 		{
 			if(Storage()->FileExists("maps/perf-before.map", IStorage::TYPE_SAVE))
@@ -4335,6 +4686,7 @@ class CSmokeEditor : public CEditor
 		}
 		RegressionSteps();
 		UnchangedTintSteps();
+		PickingSteps();
 		FitRegressionSteps();
 		FullContextSteps();
 		NavigationSteps();
@@ -4486,7 +4838,7 @@ public:
 			++m_Step;
 			m_StepFrames = 0;
 		}
-		if(m_StepFrames > 600 || m_Frames > 12000)
+		if(m_StepFrames > 600 || m_Frames > 14000)
 		{
 			Check(false, "timeout step " + std::to_string(m_Step) + " state " + std::to_string(State()));
 			m_Log << "RESULT timeout" << std::endl;

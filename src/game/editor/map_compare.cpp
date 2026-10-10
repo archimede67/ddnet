@@ -74,22 +74,40 @@ namespace
 			return nullptr;
 		return &Snapshot.m_vGroups[Group].m_vLayers[Index];
 	}
+	std::array<vec2, 4> QuadPoints(const CEditorMap &Map, const CQuad &Quad)
+	{
+		CFixedEnvelopeEval Eval(Map);
+		ColorRGBA Offset(0, 0, 0, 0);
+		Eval.EnvelopeEval(Quad.m_PosEnvOffset, Quad.m_PosEnv, Offset, 3);
+		const vec2 Center(Quad.m_aPoints[4].x / 1024.0f, Quad.m_aPoints[4].y / 1024.0f);
+		const float Angle = Offset.b * pi / 180.0f;
+		std::array<vec2, 4> Points;
+		for(int p = 0; p < 4; ++p)
+		{
+			const vec2 Relative = vec2(Quad.m_aPoints[p].x / 1024.0f, Quad.m_aPoints[p].y / 1024.0f) - Center;
+			Points[p] = Center + vec2(Relative.x * std::cos(Angle) - Relative.y * std::sin(Angle), Relative.x * std::sin(Angle) + Relative.y * std::cos(Angle)) + vec2(Offset.r, Offset.g);
+		}
+		return Points;
+	}
+	bool InTriangle(vec2 Point, vec2 A, vec2 B, vec2 C)
+	{
+		const auto Cross = [](vec2 U, vec2 V) { return (double)U.x * V.y - (double)U.y * V.x; };
+		const double Area = Cross(B - A, C - A);
+		if(Area == 0)
+			return false;
+		const double U = Cross(Point - A, C - A) / Area;
+		const double V = Cross(B - A, Point - A) / Area;
+		return U >= 0 && V >= 0 && U + V <= 1;
+	}
 	std::array<float, 4> ObjectBounds(const CEditorMap &Map, const ::CLayer &Layer, int Index, std::array<float, 4> Bounds)
 	{
 		CFixedEnvelopeEval Eval(Map);
 		ColorRGBA Offset(0, 0, 0, 0);
 		if(Layer.m_Type == LAYERTYPE_QUADS)
 		{
-			const auto &Quad = static_cast<const CLayerQuads &>(Layer).m_vQuads[Index];
-			Eval.EnvelopeEval(Quad.m_PosEnvOffset, Quad.m_PosEnv, Offset, 3);
-			vec2 Center(Quad.m_aPoints[4].x / 1024.0f, Quad.m_aPoints[4].y / 1024.0f);
-			const float Angle = Offset.b * pi / 180.0f;
 			Bounds = {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest()};
-			for(int p = 0; p < 4; ++p)
+			for(const vec2 Point : QuadPoints(Map, static_cast<const CLayerQuads &>(Layer).m_vQuads[Index]))
 			{
-				vec2 Point(Quad.m_aPoints[p].x / 1024.0f, Quad.m_aPoints[p].y / 1024.0f);
-				vec2 Relative = Point - Center;
-				Point = Center + vec2(Relative.x * std::cos(Angle) - Relative.y * std::sin(Angle), Relative.x * std::sin(Angle) + Relative.y * std::cos(Angle));
 				Bounds[0] = std::min(Bounds[0], Point.x);
 				Bounds[1] = std::min(Bounds[1], Point.y);
 				Bounds[2] = std::max(Bounds[2], Point.x);
@@ -188,17 +206,31 @@ namespace
 		else
 			pGraphics->QuadsEnd();
 	}
-	void MarkerLines(CEditor &Editor, float X, float Y, float W, float H, int Side, float Zoom)
+	std::array<IGraphics::CLineItem, 6> MarkerGeometry(float X, float Y, float W, float H, float Zoom)
 	{
 		W = std::max(W, 2.0f * Zoom);
 		H = std::max(H, 2.0f * Zoom);
 		const float Size = std::min(10.0f * Zoom, 10.0f);
-		IGraphics::CLineItem aLines[] = {
-			{X, Y, X + W, Y}, {X + W, Y, X + W, Y + H},
+		return {{{X, Y, X + W, Y}, {X + W, Y, X + W, Y + H},
 			{X + W, Y + H, X, Y + H}, {X, Y + H, X, Y},
 			{X + 2, Y + 2 + Size / 2, X + 2 + Size, Y + 2 + Size / 2},
-			{X + 2 + Size / 2, Y + 2, X + 2 + Size / 2, Y + 2 + Size}};
-		Editor.Graphics()->LinesDraw(aLines, Side == 0 ? 5 : 6);
+			{X + 2 + Size / 2, Y + 2, X + 2 + Size / 2, Y + 2 + Size}}};
+	}
+	bool OnMarker(vec2 Point, const std::array<float, 4> &B, int Side, float Zoom)
+	{
+		const auto Lines = MarkerGeometry(B[0], B[1], B[2] - B[0], B[3] - B[1], Zoom);
+		for(int n = 0; n < (Side ? 6 : 5); ++n)
+		{
+			vec2 Closest;
+			if(closest_point_on_line(vec2(Lines[n].m_X0, Lines[n].m_Y0), vec2(Lines[n].m_X1, Lines[n].m_Y1), Point, Closest) && distance(Closest, Point) <= 2 * Zoom)
+				return true;
+		}
+		return false;
+	}
+	void MarkerLines(CEditor &Editor, float X, float Y, float W, float H, int Side, float Zoom)
+	{
+		const auto Lines = MarkerGeometry(X, Y, W, H, Zoom);
+		Editor.Graphics()->LinesDraw(Lines.data(), Side == 0 ? 5 : 6);
 	}
 	void Marker(CEditor &Editor, float X, float Y, float W, float H, int Side, float Zoom, ColorRGBA Color)
 	{
@@ -349,6 +381,8 @@ void CMapCompare::CancelWork()
 }
 void CMapCompare::ReleaseBuffers()
 {
+	m_Panning = false;
+	m_PickSide = -1;
 	m_pRenderCache.reset();
 	m_pObjectViewCache.reset();
 	m_Settings.Reset();
@@ -448,6 +482,8 @@ void CMapCompare::Close()
 }
 void CMapCompare::OnInput(CEditor &Editor, const IInput::CEvent &Event)
 {
+	if(m_Panning && Event.m_Key == KEY_MOUSE_1 && (Event.m_Flags & IInput::FLAG_RELEASE))
+		m_ClickReleased = true;
 	// Dialog input is handled by the shared shell before navigation reaches us.
 	if(Editor.m_Dialog == DIALOG_NONE && !Editor.Ui()->IsPopupOpen() && !Editor.Input()->ModifierIsPressed() && !Editor.Input()->AltIsPressed() && (Event.m_Flags & IInput::FLAG_PRESS))
 	{
@@ -460,11 +496,13 @@ void CMapCompare::OnInput(CEditor &Editor, const IInput::CEvent &Event)
 		{
 			if(Event.m_Key == KEY_N || Event.m_Key == KEY_P)
 			{
+				m_Panning = false;
 				Navigate(Event.m_Key == KEY_N ? 1 : -1);
 				return;
 			}
 			if(Event.m_Key == KEY_HOME)
 			{
+				m_Panning = false;
 				FitSelection();
 				return;
 			}
@@ -476,7 +514,10 @@ void CMapCompare::OnInput(CEditor &Editor, const IInput::CEvent &Event)
 				if(Event.m_Key == KEY_MOUSE_WHEEL_DOWN)
 					m_Zoom = std::min(MAX_ZOOM, m_Zoom * 1.2f);
 				if(Event.m_Key == KEY_MOUSE_WHEEL_UP || Event.m_Key == KEY_MOUSE_WHEEL_DOWN)
+				{
+					m_Panning = false;
 					return;
+				}
 			}
 		}
 	}
@@ -549,7 +590,7 @@ void CMapCompare::SaveView()
 	const bool ByGroup = m_ByGroup;
 	for(int i = 0; i < NUM_SECTIONS; ++i)
 	{
-		const CSectionState State = i == m_Section ? CSectionState{SelectedEntry, SelectedDetail, m_Center, m_Zoom, ByGroup} : m_aSectionStates[i];
+		const CSectionState State = i == m_Section ? CSectionState{SelectedEntry, SelectedDetail, m_Center, m_Zoom, ByGroup, m_ParallaxOrigin} : m_aSectionStates[i];
 		m_SavedView.m_aSections[i] = Get(State.m_Entry);
 		m_SavedView.m_aStates[i] = State;
 		m_SavedView.m_aNavigators[i] = m_aNavigators[i];
@@ -752,7 +793,7 @@ void CMapCompare::SetSection(int Section)
 {
 	if(Section == m_Section)
 		return;
-	m_aSectionStates[m_Section] = {m_SelectedEntry, m_SelectedDetail, m_Center, m_Zoom, m_ByGroup};
+	m_aSectionStates[m_Section] = {m_SelectedEntry, m_SelectedDetail, m_Center, m_Zoom, m_ByGroup, m_ParallaxOrigin};
 	const int PreviousEntry = m_SelectedEntry;
 	const int PreviousDetail = m_SelectedDetail;
 	const vec2 Center = m_Center;
@@ -795,6 +836,7 @@ void CMapCompare::SetSection(int Section)
 	{
 		m_Center = Saved.m_Center;
 		m_Zoom = Saved.m_Zoom;
+		m_ParallaxOrigin = Saved.m_Origin;
 		m_FitAfterSettings = false;
 	}
 	if(Entry >= 0 && Entry == Saved.m_Entry && Section == SECTION_SETTINGS)
@@ -879,6 +921,10 @@ void CMapCompare::RevealLayerSelection()
 }
 void CMapCompare::Select(int Entry)
 {
+	Select(Entry, true);
+}
+void CMapCompare::Select(int Entry, bool Fit)
+{
 	// Leaving the full-height settings view changes the available map height.
 	// Fit once more after layout, using the new map pane dimensions.
 	m_FitAfterSettings = m_SelectedEntry >= 0 && m_Result.m_vEntries[m_SelectedEntry].m_Kind == MapDiff::EEntryKind::SETTINGS && Entry >= 0 &&
@@ -895,13 +941,18 @@ void CMapCompare::Select(int Entry)
 	m_Values.Reset();
 	m_ValueRowsEntry = m_ValueRowsDetail = -2;
 	RebuildDetails();
-	FitSelection();
+	if(Fit)
+		FitSelection();
 }
 bool CMapCompare::MapView() const
 {
 	return m_SelectedEntry >= 0 && (m_Result.m_vEntries[m_SelectedEntry].m_Kind == MapDiff::EEntryKind::LAYER || m_Result.m_vEntries[m_SelectedEntry].m_Kind == MapDiff::EEntryKind::GROUP);
 }
 void CMapCompare::SelectDetail(int Detail)
+{
+	SelectDetail(Detail, true);
+}
+void CMapCompare::SelectDetail(int Detail, bool Fit)
 {
 	if(Detail < 0 || Detail >= (int)m_vDetails.size())
 		return;
@@ -911,8 +962,35 @@ void CMapCompare::SelectDetail(int Detail)
 	m_Details.ScrollToSelected();
 	NavigatorList().ScrollToSelected();
 	m_ScrollToSetting = true;
-	FitSelection();
+	if(Fit)
+		FitSelection();
 	RevealLayerSelection();
+}
+void CMapCompare::SelectPickedDetail()
+{
+	if(m_PickedDetail.m_Entry < 0)
+		return;
+	const int Entry = m_ByGroup ? m_Result.m_vEntries[m_PickedDetail.m_Entry].m_Parent : m_PickedDetail.m_Entry;
+	if(Entry != m_SelectedEntry)
+	{
+		const auto &Previous = m_Result.m_vEntries[m_SelectedEntry];
+		const auto &Next = m_Result.m_vEntries[Entry];
+		if(m_Context == CONTEXT_MAP && (Previous.m_BeforeGroup != Next.m_BeforeGroup || Previous.m_AfterGroup != Next.m_AfterGroup))
+		{
+			// The clicked context group becomes the inspection group. Rebase at
+			// the current camera so it stays under the pointer on both sides.
+			m_ParallaxOrigin += m_Center;
+			m_Center = vec2(0, 0);
+		}
+		Select(Entry, false);
+	}
+	for(int d = 0; d < (int)m_vDetails.size(); ++d)
+		if(m_vDetails[d].m_Entry == m_PickedDetail.m_Entry && m_vDetails[d].m_Kind == m_PickedDetail.m_Kind && m_vDetails[d].m_Index == m_PickedDetail.m_Index)
+		{
+			SelectDetail(d, false);
+			m_LayerTreeActive = false;
+			break;
+		}
 }
 void CMapCompare::RebuildDetails()
 {
@@ -1683,6 +1761,23 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 			}
 			if(Clip.w <= 0 || Clip.h <= 0)
 				continue;
+			const bool Picking = m_PickSide == Side && Clip.Inside(m_PickMouse);
+			const vec2 PickWorld = Picking ? GroupCenter + (m_PickMouse - Pane.Center()) * m_Zoom : vec2(0, 0);
+			std::vector<int> vObjectDetails;
+			if(Picking && !Entry.m_vObjects.empty())
+			{
+				vObjectDetails.assign(pLayer->m_vObjects.size(), -1);
+				for(int o = 0; o < (int)Entry.m_vObjects.size(); ++o)
+				{
+					const int Index = Side ? Entry.m_vObjects[o].m_After : Entry.m_vObjects[o].m_Before;
+					if(Index >= 0)
+						vObjectDetails[Index] = o;
+				}
+			}
+			auto PickObject = [&](int Object) {
+				if(!vObjectDetails.empty() && vObjectDetails[Object] >= 0)
+					m_PickedDetail = {i, 2, vObjectDetails[Object]};
+			};
 			const vec2 VisibleStart = TopLeft + (Clip.TopLeft() - Pane.TopLeft()) * m_Zoom;
 			const CScreenRect Visible(VisibleStart, VisibleStart + Clip.Size() * m_Zoom);
 			Editor.Ui()->ClipEnable(&Clip);
@@ -1693,6 +1788,13 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 			const bool AddedOrRemovedLayer = Focused && (Entry.m_Before < 0 || Entry.m_After < 0);
 			if(SourceLayer.m_Type == LAYERTYPE_TILES)
 			{
+				if(Picking)
+				{
+					const int X = std::floor(PickWorld.x / 32), Y = std::floor(PickWorld.y / 32);
+					const auto It = std::lower_bound(Entry.m_vTiles.begin(), Entry.m_vTiles.end(), std::make_pair(Y, X), [](const auto &Cell, auto Position) { return std::make_pair(Cell.m_Y, Cell.m_X) < Position; });
+					if(It != Entry.m_vTiles.end() && It->m_X == X && It->m_Y == Y && !((Side ? It->m_After : It->m_Before) == MapDiff::CTile{}))
+						m_PickedDetail = {i, 1, (int)(It - Entry.m_vTiles.begin())};
+				}
 				const auto &Tiles = static_cast<const CLayerTiles &>(SourceLayer);
 				IGraphics::CTextureHandle Texture;
 				switch(pLayer->m_Kind)
@@ -1766,6 +1868,7 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 				}
 				std::vector<CQuad> vVisibleQuads;
 				std::vector<std::array<float, 4>> vMarkers;
+				int MarkerHit = -1;
 				m_pRenderCache->VisibleObjects(Map, SourceLayer, *pLayer, Visible, [&](size_t q, const auto &B) {
 					if(!ContextPass && !vChanged[q])
 						return;
@@ -1780,6 +1883,20 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 						}
 						else
 							Color.a = (int)(Color.a * (Focused ? SELECTED_CONTEXT_ALPHA : MAP_CONTEXT_ALPHA));
+					}
+					if(Picking && !vObjectDetails.empty() && vObjectDetails[q] >= 0)
+					{
+						if(PickWorld.x >= B[0] && PickWorld.x <= B[2] && PickWorld.y >= B[1] && PickWorld.y <= B[3])
+						{
+							ColorRGBA Color(1, 1, 1, 1);
+							Envelope.EnvelopeEval(Quad.m_ColorEnvOffset, Quad.m_ColorEnv, Color, 4);
+							const auto Points = QuadPoints(Map, Quad);
+							if(Color.a > 0 && std::any_of(std::begin(Quad.m_aColors), std::end(Quad.m_aColors), [](const auto &C) { return C.a > 0; }) &&
+								(InTriangle(PickWorld, Points[0], Points[1], Points[3]) || InTriangle(PickWorld, Points[0], Points[2], Points[3])))
+								PickObject(q);
+						}
+						if(!ContextPass && OnMarker(PickWorld, B, Side, m_Zoom))
+							MarkerHit = q;
 					}
 					vVisibleQuads.push_back(Quad);
 					if(vChanged[q])
@@ -1797,6 +1914,9 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 				}
 				if(!vMarkers.empty())
 				{
+					// Markers are submitted above every quad in this layer.
+					if(MarkerHit >= 0)
+						PickObject(MarkerHit);
 					pGraphics->TextureClear();
 					pGraphics->LinesBegin();
 					pGraphics->SetColor(Highlight);
@@ -1823,6 +1943,17 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 					ColorRGBA Offset(0, 0, 0, 0);
 					Envelope.EnvelopeEval(Source.m_PosEnvOffset, Source.m_PosEnv, Offset, 2);
 					vec2 Position(Source.m_Position.x / 1024.0f + Offset.r, Source.m_Position.y / 1024.0f + Offset.g);
+					if(Picking && vChanged[s])
+					{
+						const vec2 Delta = PickWorld - Position;
+						bool Hit = std::abs(Delta.x) <= 8 && std::abs(Delta.y) <= 8;
+						if(Source.m_Shape.m_Type == CSoundShape::SHAPE_CIRCLE)
+							Hit |= length(Delta) <= Source.m_Shape.m_Circle.m_Radius;
+						else if(Source.m_Shape.m_Type == CSoundShape::SHAPE_RECTANGLE)
+							Hit |= std::abs(Delta.x) <= Source.m_Shape.m_Rectangle.m_Width / 2048.0f && std::abs(Delta.y) <= Source.m_Shape.m_Rectangle.m_Height / 2048.0f;
+						if(Hit)
+							PickObject(s);
+					}
 					pGraphics->TextureClear();
 					pGraphics->QuadsBegin();
 					pGraphics->SetColor(vChanged[s] ? Highlight.Multiply(ColorRGBA(1, 1, 1, 0.25f)) : ColorRGBA(0.6f, 0.7f, 0.9f, 0.15f));
@@ -2149,20 +2280,38 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar, CUIRect
 			Editor.Ui()->DoToolTip(&m_aSourceHeadingIds[Side], &Name, m_aSourceTooltips[Side].c_str(), 600.0f);
 	}
 	vec2 Mouse(Editor.Ui()->MouseX(), Editor.Ui()->MouseY());
-	const bool Interactive = Editor.m_Dialog == DIALOG_NONE && !Editor.Ui()->IsPopupOpen();
-	if(!MapView() || !Interactive)
+	const bool Interactive = Editor.Ui()->Enabled() && Editor.m_Dialog == DIALOG_NONE && !Editor.Ui()->IsPopupOpen();
+	m_PickSide = -1;
+	m_PickedDetail = {-1, -1, -1};
+	if(!MapView() || !Interactive || Editor.Ui()->ActiveItem() != nullptr)
 		m_Panning = false;
 	if(Interactive && MapView() && Editor.Ui()->ActiveItem() == nullptr && !m_Panning && (m_aPanes[0].Inside(Mouse) || m_aPanes[1].Inside(Mouse)) && (Editor.Ui()->MouseButtonClicked(0) || Editor.Ui()->MouseButtonClicked(2)))
 	{
 		m_Panning = true;
-		m_LastMouse = Mouse;
+		m_PanButton = Editor.Ui()->MouseButtonClicked(0) ? 0 : 2;
+		m_ClickReleased = false;
+		m_PanSide = m_aPanes[0].Inside(Mouse) ? 0 : 1;
+		m_Dragged = m_PanButton != 0;
+		m_PressMouse = m_LastMouse = Mouse;
 	}
 	if(m_Panning)
 	{
-		m_Center -= (Mouse - m_LastMouse) * m_Zoom;
-		m_LastMouse = Mouse;
-		if(!Editor.Ui()->MouseButton(0) && !Editor.Ui()->MouseButton(2))
+		m_Dragged |= distance(Mouse, m_PressMouse) > 3.0f || Editor.Ui()->MouseButton(1) || Editor.Ui()->MouseButton(m_PanButton == 0 ? 2 : 0);
+		if(m_Dragged)
+		{
+			m_Center -= (Mouse - m_LastMouse) * m_Zoom;
+			m_LastMouse = Mouse;
+		}
+		if(!Editor.Ui()->MouseButton(m_PanButton))
+		{
+			// Focus loss clears button state without a release event.
+			if(!m_Dragged && m_ClickReleased && m_aPanes[m_PanSide].Inside(Mouse))
+			{
+				m_PickSide = m_PanSide;
+				m_PickMouse = Mouse;
+			}
 			m_Panning = false;
+		}
 	}
 	CUIRect VisibilityBar, ShowAll;
 	Navigator.HSplitBottom(NarrowSidebar ? 42 : 24, &Navigator, &VisibilityBar);
@@ -2286,13 +2435,15 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar, CUIRect
 		{
 			RenderPane(Editor, m_aPanes[0], 0);
 			RenderPane(Editor, m_aPanes[1], 1);
+			SelectPickedDetail();
+			m_PickSide = -1;
 		}
 		if(Inspector.h > 0)
 			RenderInspector(Editor, Inspector);
 	}
 	if(!Editor.m_aTooltip[0])
 	{
-		const std::string Summary = m_Result.ChangeCount() == 0 ? "No differences in map content. Enable context to inspect matching layers." : std::to_string(m_Result.ChangeCount()) + " changes. - red: Before   + green: After   [?]: uncertain pairing." + (MapView() ? " Drag a canvas to pan; wheel to zoom." : "");
+		const std::string Summary = m_Result.ChangeCount() == 0 ? "No differences in map content. Enable context to inspect matching layers." : std::to_string(m_Result.ChangeCount()) + " changes. - red: Before   + green: After   [?]: uncertain pairing." + (MapView() ? " Click a change to inspect; drag to pan; wheel to zoom." : "");
 		str_copy(Editor.m_aTooltip, Summary.c_str());
 	}
 }
