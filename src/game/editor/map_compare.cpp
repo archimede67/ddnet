@@ -1688,7 +1688,9 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 			Editor.Ui()->ClipEnable(&Clip);
 			pGraphics->MapScreen(CScreenRect(FullTopLeft, FullTopLeft + Editor.Ui()->Screen()->Size() * m_Zoom));
 			pGraphics->BlendNormal();
-			const bool WholeLayer = Focused && (Entry.m_Before < 0 || Entry.m_After < 0 || Entry.m_Reordered || !Entry.m_vProperties.empty() || Selected.m_Reordered || (Selected.m_Kind == MapDiff::EEntryKind::GROUP && !Selected.m_vProperties.empty()));
+			// Layer/group properties and draw order are inspected separately. They
+			// must not turn unchanged cells or objects into additions/deletions.
+			const bool AddedOrRemovedLayer = Focused && (Entry.m_Before < 0 || Entry.m_After < 0);
 			if(SourceLayer.m_Type == LAYERTYPE_TILES)
 			{
 				const auto &Tiles = static_cast<const CLayerTiles &>(SourceLayer);
@@ -1718,14 +1720,14 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 					Editor.Ui()->ClipDisable();
 					continue;
 				}
-				if(WholeLayer)
+				if(AddedOrRemovedLayer)
 					m_pRenderCache->Draw(Editor, *pLayer, Visible, Color.Multiply(Highlight), Texture.IsValid());
 				std::vector<MapDiff::CCell> vVisibleChanges;
 				if(Focused)
 					ForVisibleCells(Entry.m_vTiles, Visible, [&](const auto &Change) {
 						vVisibleChanges.push_back({Change.m_X, Change.m_Y, Side == 0 ? Change.m_Before : Change.m_After});
 					});
-				if(!WholeLayer)
+				if(!AddedOrRemovedLayer)
 					DrawTiles(Editor, vVisibleChanges, Visible, Color.Multiply(Highlight));
 				pGraphics->TextureClear();
 				pGraphics->LinesBegin();
@@ -1734,13 +1736,13 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 					if(!(Cell.m_Tile == MapDiff::CTile{}))
 						MarkerLines(Editor, Cell.m_X * 32.0f, Cell.m_Y * 32.0f, 32, 32, Side, m_Zoom);
 				pGraphics->LinesEnd();
-				if(WholeLayer)
+				if(AddedOrRemovedLayer)
 					Marker(Editor, 0, 0, pLayer->m_Width * 32.0f, pLayer->m_Height * 32.0f, Side, m_Zoom, Highlight);
 				// Source overlay functions are read-only and include number, delay,
 				// force, max speed and direction. Restrict them to visible content.
-				if(Focused && m_Zoom <= 4 && (m_Context || WholeLayer || !vVisibleChanges.empty()))
+				if(Focused && m_Zoom <= 4 && (m_Context || AddedOrRemovedLayer || !vVisibleChanges.empty()))
 				{
-					const auto &Cells = m_Context || WholeLayer ? pLayer->m_vCells : vVisibleChanges;
+					const auto &Cells = m_Context || AddedOrRemovedLayer ? pLayer->m_vCells : vVisibleChanges;
 					ForVisibleCells(Cells, Visible, [&](const auto &Cell) {
 						vec2 Pos(Cell.m_X * 32.0f, Cell.m_Y * 32.0f);
 						if(!Visible.Inside(Pos) || pLayer->m_Kind == MapDiff::ELayerKind::TILES || pLayer->m_Kind == MapDiff::ELayerKind::GAME || pLayer->m_Kind == MapDiff::ELayerKind::FRONT)
@@ -1755,7 +1757,7 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 			else if(SourceLayer.m_Type == LAYERTYPE_QUADS)
 			{
 				const auto &Quads = static_cast<const CLayerQuads &>(SourceLayer);
-				std::vector<bool> vChanged(Quads.m_vQuads.size(), !ContextPass && WholeLayer);
+				std::vector<bool> vChanged(Quads.m_vQuads.size(), !ContextPass && AddedOrRemovedLayer);
 				for(const auto &Change : Entry.m_vObjects)
 				{
 					int Index = Side == 0 ? Change.m_Before : Change.m_After;
@@ -1806,7 +1808,7 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 			else if(!ContextPass && SourceLayer.m_Type == LAYERTYPE_SOUNDS)
 			{
 				const auto &Sounds = static_cast<const CLayerSounds &>(SourceLayer);
-				std::vector<bool> vChanged(Sounds.m_vSources.size(), WholeLayer);
+				std::vector<bool> vChanged(Sounds.m_vSources.size(), AddedOrRemovedLayer);
 				for(const auto &Change : Entry.m_vObjects)
 				{
 					int Index = Side == 0 ? Change.m_Before : Change.m_After;
@@ -1843,9 +1845,13 @@ void CMapCompare::RenderPane(CEditor &Editor, CUIRect Pane, int Side)
 	const int Focus = m_SelectedDetail >= 0 ? m_vDetails[m_SelectedDetail].m_Entry : m_SelectedEntry;
 	const auto FocusKind = m_Result.m_vEntries[Focus].m_Kind;
 	const bool SpatialFocus = FocusKind == MapDiff::EEntryKind::LAYER || FocusKind == MapDiff::EEntryKind::GROUP;
-	const char *pNotice = SpatialFocus && !LayerVisible(Focus)                                             ? "Selection hidden. Use Layers or Show all." :
-			      SpatialFocus && m_Context == CONTEXT_OFF && m_vLayerStates[Focus].m_Changes == 0 ? "Enable Context to see unchanged content." :
-														 nullptr;
+	const bool HasContentChanges = m_Context == CONTEXT_OFF && std::any_of(vLayers.begin(), vLayers.end(), [&](int Index) {
+		const auto &Entry = m_Result.m_vEntries[Index];
+		return InSelection(Index) && (Entry.m_Before < 0 || Entry.m_After < 0 || !Entry.m_vTiles.empty() || !Entry.m_vObjects.empty());
+	});
+	const char *pNotice = SpatialFocus && !LayerVisible(Focus)                           ? "Selection hidden. Use Layers or Show all." :
+			      SpatialFocus && m_Context == CONTEXT_OFF && !HasContentChanges ? "Enable Context to see unchanged content." :
+											       nullptr;
 	if(pNotice)
 	{
 		CUIRect Notice = Pane;

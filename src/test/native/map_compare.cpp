@@ -191,9 +191,15 @@ struct CStateAccess
 };
 template struct CStateAccess<&CMapCompare::m_State>;
 std::array<int, 3> SelectedDetail(CMapCompare &);
+bool HasDetail(CMapCompare &, int, int);
 template<auto Member>
 struct CDetailAccess
 {
+	friend bool HasDetail(CMapCompare &Obj, int Entry, int Kind)
+	{
+		const auto &Details = Obj.*Member;
+		return std::any_of(Details.begin(), Details.end(), [&](const auto &Detail) { return Detail.m_Entry == Entry && Detail.m_Kind == Kind; });
+	}
 	friend std::array<int, 3> SelectedDetail(CMapCompare &Obj)
 	{
 		const int Index = Obj.*Access(TSelectedDetail{});
@@ -794,7 +800,7 @@ class CSmokeEditor : public CEditor
 				auto pFar = std::make_shared<CLayerTiles>(pMap.get(), 2048, 1024);
 				str_copy(pFar->m_aName, Side ? "Changed" : "Original");
 				pFar->m_Image = 0;
-				pFar->m_pTiles[2000 + 900 * 2048].m_Index = 1;
+				pFar->m_pTiles[2000 + 900 * 2048].m_Index = Side ? 2 : 1;
 				pGroup->AddLayer(pFar);
 				(Side ? m_pAfter : m_pBefore) = pMap.get();
 				Maps().push_back(std::move(pMap));
@@ -804,6 +810,10 @@ class CSmokeEditor : public CEditor
 		});
 		WaitReady();
 		auto SelectGroup = [this] {
+			Check(std::any_of(Result().m_vEntries.begin(), Result().m_vEntries.end(), [](const auto &Entry) {
+				return std::any_of(Entry.m_vTiles.begin(), Entry.m_vTiles.end(), [](const auto &Tile) { return Tile.m_X == 2000 && Tile.m_Y == 900 && Tile.m_Before.m_Index == 1 && Tile.m_After.m_Index == 2; });
+			}),
+				"fit fixture contains a real distant tile replacement");
 			for(int i = 0; i < (int)Result().m_vEntries.size(); ++i)
 				if(Result().m_vEntries[i].m_Kind == MapDiff::EEntryKind::GROUP && Result().m_vEntries[i].m_Name == "Fit test")
 					(Compare().*Access(TSelect{}))(i);
@@ -2069,6 +2079,250 @@ class CSmokeEditor : public CEditor
 			return true;
 		});
 	}
+	void UnchangedTintSteps()
+	{
+		Do([this] {
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				auto pMap = std::make_unique<CEditorMap>(this);
+				str_copy(pMap->m_aDisplayName, Side ? "Tint After" : "Tint Before");
+				WhiteImage(*pMap, "white", true);
+				auto pGroup = pMap->NewGroup();
+				str_copy(pGroup->m_aName, "Tint group");
+				pGroup->m_ClipX = Side; // Persisted property; clipping is disabled.
+				auto pTiles = std::make_shared<CLayerTiles>(pMap.get(), Side ? 10 : 12, 12);
+				str_copy(pTiles->m_aName, "Tiles");
+				pTiles->m_Image = 0;
+				pTiles->m_pTiles[2 + 2 * pTiles->m_Width].m_Index = 1;
+				pTiles->m_pTiles[4 + 2 * pTiles->m_Width].m_Index = Side ? 2 : 1;
+				if(!Side)
+					pTiles->m_pTiles[11 + 2 * pTiles->m_Width].m_Index = 1;
+				pGroup->AddLayer(pTiles);
+				auto pMetadata = std::make_shared<CLayerTiles>(pMap.get(), 12, 12);
+				str_copy(pMetadata->m_aName, "Metadata");
+				pMetadata->m_Image = 0;
+				pMetadata->m_Flags = Side ? LAYERFLAG_DETAIL : 0;
+				pMetadata->m_pTiles[6 + 8 * 12].m_Index = 1;
+				pGroup->AddLayer(pMetadata);
+				if(Side)
+					std::swap(pGroup->m_vpLayers[0], pGroup->m_vpLayers[1]);
+				auto pQuads = std::make_shared<CLayerQuads>(pMap.get());
+				str_copy(pQuads->m_aName, "Quads");
+				pQuads->m_Flags = Side ? LAYERFLAG_DETAIL : 0;
+				pQuads->m_Image = 0;
+				pQuads->NewQuad(80, 144, 32, 32);
+				pQuads->NewQuad(144, 144, 32, 32)->m_aPoints[4].x += Side * 1024;
+				pGroup->AddLayer(pQuads);
+				auto pSounds = std::make_shared<CLayerSounds>(pMap.get());
+				str_copy(pSounds->m_aName, "Sounds");
+				pSounds->m_Flags = Side ? LAYERFLAG_DETAIL : 0;
+				pSounds->NewSource(80, 208)->m_Shape.m_Circle.m_Radius = 20;
+				pSounds->NewSource(144, 208)->m_Shape.m_Circle.m_Radius = 20;
+				pSounds->m_vSources.back().m_TimeDelay = Side;
+				pGroup->AddLayer(pSounds);
+				if(Side)
+				{
+					auto pAdded = std::make_shared<CLayerQuads>(pMap.get());
+					str_copy(pAdded->m_aName, "Added");
+					pAdded->m_Image = 0;
+					pAdded->NewQuad(80, 272, 32, 32);
+					pGroup->AddLayer(pAdded);
+				}
+				else
+				{
+					auto pRemoved = std::make_shared<CLayerTiles>(pMap.get(), 12, 12);
+					str_copy(pRemoved->m_aName, "Removed");
+					pRemoved->m_Image = 0;
+					pRemoved->m_pTiles[2 + 8 * 12].m_Index = 1;
+					pGroup->AddLayer(pRemoved);
+				}
+				str_copy(pMap->NewGroup()->m_aName, "Other");
+				if(Side)
+					std::swap(pMap->m_vpGroups[0], pMap->m_vpGroups[1]);
+				(Side ? m_pAfter : m_pBefore) = pMap.get();
+				Maps().push_back(std::move(pMap));
+			}
+			CaptureSources();
+			OpenComparison(*this, m_pBefore, m_pAfter);
+		});
+		WaitReady();
+		Do([this] {
+			const auto &Tiles = Result().m_vEntries[FindEntry("Tiles")];
+			Check(Tiles.m_vTiles.size() == 2 && !Tiles.m_vProperties.empty(), "resize has two real cell changes and independent dimensions");
+			Check(std::any_of(Result().m_vEntries.begin(), Result().m_vEntries.end(), [](const auto &Entry) { return Entry.m_Reordered; }), "tint fixture includes layer draw-order changes");
+			Check(Result().m_vEntries[FindEntry("Tint group")].m_Reordered, "tint fixture includes a reordered matched group");
+			Check(Result().m_vEntries[FindEntry("Removed")].m_After < 0 && Result().m_vEntries[FindEntry("Added")].m_Before < 0, "tint fixture includes wholly removed and added layers");
+		});
+		for(bool Group : {false, true})
+		{
+			if(Group)
+				Click([this] { return ToolbarPosition(2); });
+			Do([this, Group] { Check((Compare().*Access(TGroup{})) == Group, "tint checks use the requested navigation mode"); });
+			for(const char *pName : {"Tiles", "Quads", "Sounds", "Metadata", "Removed", "Added"})
+				for(int Context = 0; Context < 3; ++Context)
+				{
+					Do([this, Group, pName, Context] {
+						SelectKind(Group ? MapDiff::EEntryKind::GROUP : MapDiff::EEntryKind::LAYER, Group ? "Tint group" : pName);
+						if(Group)
+							Check(HasDetail(Compare(), FindEntry("Tiles"), 0) && HasDetail(Compare(), FindEntry("Tiles"), 4), "group inspector retains child resize and reorder details");
+						Compare().*Access(TContext{}) = Context;
+						Compare().*Access(TCenter{}) = vec2(192, 160);
+						Compare().*Access(TOrigin{}) = vec2(0, 0);
+						Compare().*Access(TZoom{}) = 1;
+					});
+					Delay();
+					Do([this, Group, pName, Context] {
+						CImageInfo Image;
+						static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Image);
+						Check(Image.m_pData != nullptr, "unchanged tint framebuffer available");
+						if(!Image.m_pData)
+							return;
+						const ColorRGBA Background(0.08f, 0.09f, 0.11f, 1);
+						auto Over = [&](ColorRGBA Color, float Alpha) { return ColorRGBA(mix(Background.r, Color.r, Alpha), mix(Background.g, Color.g, Alpha), mix(Background.b, Color.b, Alpha), 1); };
+						for(int Side = 0; Side < 2; ++Side)
+						{
+							const auto Pane = (Compare().*Access(TPanes{}))[Side];
+							auto Sample = [&](vec2 World, ColorRGBA Expected, const char *pWhat) {
+								const vec2 Point = Pane.Center() + World - vec2(192, 160);
+								Check(Pane.Inside(Point), "tint sample is inside pane");
+								if(!Pane.Inside(Point))
+									return;
+								const auto Actual = Image.PixelColor(Point.x / Ui()->Screen()->w * Image.m_Width, Point.y / Ui()->Screen()->h * Image.m_Height);
+								Check(std::abs(Actual.r - Expected.r) < 0.015f && std::abs(Actual.g - Expected.g) < 0.015f && std::abs(Actual.b - Expected.b) < 0.015f, std::string(pWhat) + " " + pName + " side=" + std::to_string(Side) + " context=" + std::to_string(Context) + " group=" + std::to_string(Group));
+							};
+							const ColorRGBA Highlight = Side ? ColorRGBA(0.25f, 1, 0.45f, 1) : ColorRGBA(1, 0.3f, 0.3f, 1);
+							const bool Sound = str_comp(pName, "Sounds") == 0;
+							if(str_comp(pName, "Removed") == 0 || str_comp(pName, "Added") == 0)
+							{
+								const bool Present = (Side == 0) == (str_comp(pName, "Removed") == 0);
+								const ColorRGBA Expected = Group || Present ? Highlight : Context == 2 ? Over(ColorRGBA(1, 1, 1, 1), 0.25f) :
+																	 Background;
+								Sample(vec2(80, 272), Expected, "whole layer additions/removals remain tinted");
+							}
+							else if(str_comp(pName, "Metadata") == 0)
+								Sample(vec2(208, 272), Context ? Over(ColorRGBA(1, 1, 1, 1), 0.65f) : Background, "property-only content stays neutral");
+							else
+							{
+								const float Y = Sound ? 208 : str_comp(pName, "Quads") == 0 ? 144 :
+															      80;
+								const float Offset = Sound ? 10 : 0;
+								Sample(vec2(80 + Offset, Y), Context ? Over(Sound ? ColorRGBA(0.6f, 0.7f, 0.9f, 1) : ColorRGBA(1, 1, 1, 1), Sound ? 0.15f : 0.65f) : Background, "unchanged content has no diff tint");
+								Sample(vec2(144 + Offset, Y), Sound ? Over(Highlight, 0.25f) : Highlight, "actual changed content retains diff tint");
+								if(str_comp(pName, "Tiles") == 0)
+									Sample(vec2(368, 80), Side ? Background : Highlight, "cropped tile is removed only on the Before side");
+							}
+						}
+						Image.Free();
+					});
+				}
+		}
+		Screenshot("unchanged-tint-group-context");
+		Do([this] { CheckSources("unchanged tint rendering"); CloseComparison(); });
+		Delay();
+	}
+	void LocalTintSteps()
+	{
+		Do([this] {
+			Check(Load("maps/perf-before.map", IStorage::TYPE_SAVE), "load reported Before map");
+			m_pBefore = Map();
+			Check(Load("maps/perf-after.map", IStorage::TYPE_SAVE), "load reported After map");
+			m_pAfter = Map();
+			CaptureSources();
+			OpenComparison(*this, m_pBefore, m_pAfter);
+		});
+		WaitReady();
+		Do([this] {
+			SelectKind(MapDiff::EEntryKind::LAYER, "Game");
+			const auto &Entry = Result().m_vEntries[Compare().*Access(TSelectedEntry{})];
+			Check(std::any_of(Entry.m_vProperties.begin(), Entry.m_vProperties.end(), [](const auto &Property) { return Property.m_Name == "Width (tiles)" && Property.m_Before == "999" && Property.m_After == "955"; }), "reported Game layer resize999to955 reproduced");
+			Compare().*Access(TContext{}) = 2;
+			Compare().*Access(TCenter{}) = vec2(865 * 32, 47 * 32);
+			Compare().*Access(TOrigin{}) = vec2(0, 0);
+			Compare().*Access(TZoom{}) = 2;
+		});
+		Delay();
+		Screenshot("reported-1AndOnLyLife-neutral-context");
+		Do([this] { Compare().*Access(TContext{}) = 1; });
+		Delay();
+		Do([this] {
+			CImageInfo Actual, Reference;
+			auto *pGraphics = static_cast<CGraphics_Threaded *>(Graphics());
+			pGraphics->ReadFramebuffer(Actual);
+			auto &Entry = (Compare().*Access(TResult{})).m_vEntries[Compare().*Access(TSelectedEntry{})];
+			// Independent positive controls: the two passes below must not pass
+			// merely because both rendered blank panes.
+			int SharedX = -1, SharedY = -1;
+			for(int Y = 43; Y <= 50 && SharedX < 0; ++Y)
+				for(int X = 854; X <= 869; ++X)
+				{
+					const auto &A = m_pBefore->m_pGameLayer->m_pTiles[Y * m_pBefore->m_pGameLayer->m_Width + X];
+					const auto &B = m_pAfter->m_pGameLayer->m_pTiles[Y * m_pAfter->m_pGameLayer->m_Width + X];
+					if(A.m_Index && A.m_Index == B.m_Index && A.m_Flags == B.m_Flags && std::none_of(Entry.m_vTiles.begin(), Entry.m_vTiles.end(), [&](const auto &Tile) { return Tile.m_X == X && Tile.m_Y == Y; }))
+					{
+						SharedX = X;
+						SharedY = Y;
+						break;
+					}
+				}
+			Check(SharedX >= 0, "reported viewport contains an unchanged occupied cell");
+			Check(std::any_of(Entry.m_vTiles.begin(), Entry.m_vTiles.end(), [](const auto &Tile) { return Tile.m_X == 870 && Tile.m_Y == 47; }), "reported viewport contains the real change at870,47");
+			if(Actual.m_pData && SharedX >= 0)
+				for(int Side = 0; Side < 2; ++Side)
+				{
+					const auto Changed = std::find_if(Entry.m_vTiles.begin(), Entry.m_vTiles.end(), [Side](const auto &Tile) {
+						return Tile.m_X >= 854 && Tile.m_X <= 875 && Tile.m_Y >= 43 && Tile.m_Y <= 50 && (Side ? Tile.m_After.m_Index : Tile.m_Before.m_Index);
+					});
+					Check(Changed != Entry.m_vTiles.end(), "reported viewport contains an occupied changed cell side=" + std::to_string(Side));
+					for(bool IsChange : {false, true})
+					{
+						if(IsChange && Changed == Entry.m_vTiles.end())
+							continue;
+						const auto &Pane = (Compare().*Access(TPanes{}))[Side];
+						const vec2 World = IsChange ? vec2(Changed->m_X * 32, Changed->m_Y * 32) : vec2(SharedX * 32, SharedY * 32);
+						const float Zoom = Compare().*Access(TZoom{});
+						const vec2 Start = Pane.Center() + (World - (Compare().*Access(TCenter{}))) / Zoom;
+						const float Scale = Actual.m_Height / Ui()->Screen()->h;
+						const ColorRGBA Highlight = Side ? ColorRGBA(0.25f, 1, 0.45f, 1) : ColorRGBA(1, 0.3f, 0.3f, 1);
+						int Pixels = 0;
+						for(int Y = std::ceil(Start.y * Scale); Y < (Start.y + 32 / Zoom) * Scale; ++Y)
+							for(int X = std::ceil(Start.x * Scale); X < (Start.x + 32 / Zoom) * Scale; ++X)
+							{
+								const auto Color = Actual.PixelColor(X, Y);
+								Pixels += IsChange ? std::abs(Color.r - Highlight.r) < 0.08f && std::abs(Color.g - Highlight.g) < 0.08f && std::abs(Color.b - Highlight.b) < 0.08f : std::abs(Color.r - 0.08f) > 0.05f || std::abs(Color.g - 0.09f) > 0.05f || std::abs(Color.b - 0.11f) > 0.05f;
+							}
+						Check(Pixels > 3, std::string(IsChange ? "reported changed cell has visible diff marks" : "reported unchanged occupied cell really renders") + " side=" + std::to_string(Side) + " pixels=" + std::to_string(Pixels));
+					}
+				}
+			const auto Properties = std::move(Entry.m_vProperties);
+			const bool Reordered = Entry.m_Reordered;
+			Entry.m_vProperties.clear();
+			Entry.m_Reordered = false;
+			for(int Side = 0; Side < 2; ++Side)
+				(Compare().*Access(TRenderPane{}))(*this, (Compare().*Access(TPanes{}))[Side], Side);
+			pGraphics->ReadFramebuffer(Reference);
+			Entry.m_vProperties = Properties;
+			Entry.m_Reordered = Reordered;
+			Check(Actual.m_pData && Reference.m_pData, "reported map comparison framebuffer available");
+			if(Actual.m_pData && Reference.m_pData)
+				for(const auto &Pane : Compare().*Access(TPanes{}))
+				{
+					int Differences = 0;
+					for(float Y = Pane.y + 4; Y < Pane.y + Pane.h - 4; Y += 3)
+						for(float X = Pane.x + 4; X < Pane.x + Pane.w - 4; X += 3)
+						{
+							const auto A = Actual.PixelColor(X / Ui()->Screen()->w * Actual.m_Width, Y / Ui()->Screen()->h * Actual.m_Height);
+							const auto B = Reference.PixelColor(X / Ui()->Screen()->w * Reference.m_Width, Y / Ui()->Screen()->h * Reference.m_Height);
+							Differences += std::abs(A.r - B.r) > 0.012f || std::abs(A.g - B.g) > 0.012f || std::abs(A.b - B.b) > 0.012f;
+						}
+					Check(Differences == 0, "reported map colors are independent of resize metadata; mismatched pixels=" + std::to_string(Differences));
+				}
+			Actual.Free();
+			Reference.Free();
+			CheckSources("reported map tint");
+			CloseComparison();
+		});
+		Delay();
+	}
 	void PerformanceSteps(bool LocalMaps)
 	{
 		Do([this, LocalMaps] {
@@ -2097,7 +2351,7 @@ class CSmokeEditor : public CEditor
 				(Side ? m_pAfter : m_pBefore) = pMap;
 			}
 			this->*Access(TSelectedMap{}) = Maps().size() - 2;
-			// A layer property edit exercises whole-layer drawing even with context off.
+			// Property edits remain inspectable without tinting unchanged content.
 			std::shared_ptr<CLayerTiles> pLargest;
 			std::shared_ptr<CLayerGroup> pLargestGroup;
 			size_t MostTiles = 0;
@@ -4040,6 +4294,15 @@ class CSmokeEditor : public CEditor
 	{
 		Do([this] { m_ToolBoxWidth = 225; });
 		Delay(10);
+		if(std::getenv("DDNET_MAP_COMPARE_TINT"))
+		{
+			if(Storage()->FileExists("maps/perf-before.map", IStorage::TYPE_SAVE))
+				LocalTintSteps();
+			else
+				UnchangedTintSteps();
+			Do([this] { m_Log << "RESULT failures=" << m_Failures << " steps=" << m_vSteps.size() << std::endl; Client()->Quit(); });
+			return;
+		}
 		if(Storage()->FileExists("maps/perf-before.map", IStorage::TYPE_SAVE) && Storage()->FileExists("maps/perf-after.map", IStorage::TYPE_SAVE))
 		{
 			PerformanceSteps(true);
@@ -4071,6 +4334,7 @@ class CSmokeEditor : public CEditor
 			return;
 		}
 		RegressionSteps();
+		UnchangedTintSteps();
 		FitRegressionSteps();
 		FullContextSteps();
 		NavigationSteps();
@@ -4222,7 +4486,7 @@ public:
 			++m_Step;
 			m_StepFrames = 0;
 		}
-		if(m_StepFrames > 600 || m_Frames > 10000)
+		if(m_StepFrames > 600 || m_Frames > 12000)
 		{
 			Check(false, "timeout step " + std::to_string(m_Step) + " state " + std::to_string(State()));
 			m_Log << "RESULT timeout" << std::endl;
