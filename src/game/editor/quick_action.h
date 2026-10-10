@@ -40,10 +40,14 @@ public:
 	}
 
 	// code to run when the action is triggered
-	void Call() const { m_pfnCallback(); }
+	void Call() const
+	{
+		if(!Disabled())
+			m_pfnCallback();
+	}
 
 	// bool that indicates if the action can be performed not or not
-	bool Disabled() { return m_pfnDisabledCallback(); }
+	bool Disabled() const { return m_pfnDisabledCallback(); }
 
 	// bool that indicates if the action is currently running
 	// only applies to actions that can be turned on or off like proof borders
@@ -51,7 +55,7 @@ public:
 
 	// color "enum" that represents the state of the quick actions button
 	// used as Checked argument for DoButton_Editor()
-	int Color() { return m_pfnColorCallback(); }
+	int Color() { return Disabled() ? -1 : m_pfnColorCallback(); }
 
 	const char *Label() const { return m_pLabel; }
 

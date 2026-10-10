@@ -363,6 +363,115 @@ TEST(MapDiff, SettingsAlignmentBudgetAndCancellation)
 	EXPECT_EQ(Large.m_vEntries[1].m_vSettings[25000].m_Before, -1);
 }
 
+TEST(MapDiff, SettingsInlineByteRanges)
+{
+	struct CCase
+	{
+		std::string m_Before, m_After;
+		std::vector<std::string> m_aChanged[2];
+	};
+	const CCase aCases[] = {
+		{"sv_pauseable 1", "sv_pauseable 0", {{"1"}, {"0"}}},
+		{"cmd A keep B tail", "cmd X keep Y tail", {{"A", "B"}, {"X", "Y"}}},
+		{"sv_name café 世界🙂 fin", "sv_name cafè 世間🙃 fin", {{"é", "界🙂"}, {"è", "間🙃"}}},
+		{"same🙂", "same🙂", {{}, {}}},
+		{"cmd tail", "cmd new tail", {{}, {"new "}}},
+		{"cmd old tail", "cmd tail", {{"old "}, {}}},
+		{"", "世🙂", {{}, {"世🙂"}}},
+		{"世🙂", "", {{"世🙂"}, {}}},
+		{"", "", {{}, {}}},
+		{"\xE1\x80x", "\xE1\x81y", {{"\x80x"}, {"\x81y"}}},
+	};
+	for(const auto &Case : aCases)
+	{
+		auto Before = Map(), After = Map();
+		Before.m_vSettings = {Case.m_Before};
+		After.m_vSettings = {Case.m_After};
+		const auto Result = MapDiff::Compare(Before, After);
+		ASSERT_EQ(Result.m_vEntries[1].m_vSettings.size(), 1u);
+		const auto &Row = Result.m_vEntries[1].m_vSettings[0];
+		std::string aNeutral[2];
+		for(int Side = 0; Side < 2; ++Side)
+		{
+			const auto &Text = Side ? Case.m_After : Case.m_Before;
+			SCOPED_TRACE(Text);
+			ASSERT_EQ(Row.m_avChanged[Side].size(), Case.m_aChanged[Side].size());
+			size_t End = 0;
+			for(size_t i = 0; i < Row.m_avChanged[Side].size(); ++i)
+			{
+				const auto &Range = Row.m_avChanged[Side][i];
+				ASSERT_GE(Range.m_Start, End);
+				ASSERT_GT(Range.m_End, Range.m_Start);
+				ASSERT_LE(Range.m_End, Text.size());
+				EXPECT_EQ(Text.substr(Range.m_Start, Range.m_End - Range.m_Start), Case.m_aChanged[Side][i]);
+				EXPECT_EQ(Range.m_Start, Text.find(Case.m_aChanged[Side][i], End));
+				aNeutral[Side] += Text.substr(End, Range.m_Start - End);
+				End = Range.m_End;
+			}
+			aNeutral[Side] += Text.substr(End);
+		}
+		EXPECT_EQ(aNeutral[0], aNeutral[1]);
+	}
+	// An absent row is distinct from a present empty command even when neither
+	// contains a glyph that can be highlighted.
+	auto Before = Map(), After = Map();
+	Before.m_vSettings = {"", "(absent)", "世🙂"};
+	const auto Removed = MapDiff::Compare(Before, After);
+	const auto Added = MapDiff::Compare(After, Before);
+	for(int i = 0; i < 3; ++i)
+	{
+		const auto &Old = Removed.m_vEntries[1].m_vSettings[i];
+		const auto &New = Added.m_vEntries[1].m_vSettings[i];
+		EXPECT_EQ(Old.m_After, -1);
+		EXPECT_EQ(New.m_Before, -1);
+		EXPECT_GE(Old.m_Property, 0);
+		EXPECT_GE(New.m_Property, 0);
+		EXPECT_EQ(Old.m_avChanged[0].size(), i ? 1u : 0u);
+		EXPECT_EQ(New.m_avChanged[1].size(), i ? 1u : 0u);
+		if(i)
+		{
+			EXPECT_EQ(Old.m_avChanged[0][0].m_Start, 0);
+			EXPECT_EQ(Old.m_avChanged[0][0].m_End, Before.m_vSettings[i].size());
+		}
+	}
+}
+
+TEST(MapDiff, SettingsInlineAggregateBudgetAndLongLineCancellation)
+{
+	auto Before = Map(), After = Map();
+	const std::string Old = "prefix " + std::string(100, 'A') + " keep " + std::string(100, 'B') + " suffix";
+	const std::string New = "prefix " + std::string(100, 'X') + " keep " + std::string(100, 'Y') + " suffix";
+	Before.m_vSettings.assign(2000, Old);
+	After.m_vSettings.assign(2000, New);
+	int Polls = 0;
+	const auto Result = MapDiff::Compare(Before, After, [&] { ++Polls; return false; });
+	const auto &Rows = Result.m_vEntries[1].m_vSettings;
+	ASSERT_EQ(Rows.size(), 2000u);
+	EXPECT_EQ(Rows.front().m_avChanged[0].size(), 2u);
+	ASSERT_EQ(Rows.back().m_avChanged[0].size(), 1u);
+	EXPECT_EQ(Rows.back().m_avChanged[0][0].m_Start, 7);
+	EXPECT_EQ(Rows.back().m_avChanged[0][0].m_End, Old.size() - 7);
+	EXPECT_LT(Polls, 5000); // A whole-result budget, not a fresh budget per row.
+	Before.m_vSettings = {"prefix " + std::string(100000, 'A') + " suffix"};
+	After.m_vSettings = {"prefix " + std::string(100000, 'X') + " suffix"};
+	const auto Long = MapDiff::Compare(Before, After);
+	ASSERT_EQ(Long.m_vEntries[1].m_vSettings[0].m_avChanged[0].size(), 1u);
+	EXPECT_EQ(Long.m_vEntries[1].m_vSettings[0].m_avChanged[0][0].m_Start, 7);
+	EXPECT_EQ(Long.m_vEntries[1].m_vSettings[0].m_avChanged[0][0].m_End, 100007);
+	Before.m_vSettings = {std::string(100000, 'A') + "1"};
+	After.m_vSettings = {std::string(100000, 'A') + "0"};
+	Polls = 0;
+	const auto Cancelled = MapDiff::Compare(Before, After, [&] { return ++Polls == 8; });
+	EXPECT_TRUE(Cancelled.m_Cancelled);
+	EXPECT_TRUE(Cancelled.m_vEntries.empty());
+	Before.m_vSettings.assign(2000, "\xE1\x80x");
+	After.m_vSettings.assign(2000, "\xE1\x81y");
+	Polls = 0;
+	const auto CancelledMalformed = MapDiff::Compare(Before, After, [&] { return ++Polls == 8; });
+	EXPECT_TRUE(CancelledMalformed.m_Cancelled);
+	EXPECT_TRUE(CancelledMalformed.m_vEntries.empty());
+}
+
 TEST(MapDiff, GroupAdditionRemovalPropertiesAndOrder)
 {
 	auto Before = Map();

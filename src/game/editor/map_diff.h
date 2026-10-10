@@ -129,12 +129,19 @@ namespace MapDiff
 		bool m_Reordered = false;
 		bool m_Positional = false; // Conservative ordered-span fallback, not identity.
 	};
+	struct CTextRange
+	{
+		// Half-open UTF-8 byte offsets, always on codepoint boundaries.
+		int m_Start;
+		int m_End;
+	};
 	struct CSettingRow
 	{
 		// Zero-based source lines; -1 denotes an absent side, never command text.
 		int m_Before = -1;
 		int m_After = -1;
 		int m_Property = -1; // Changed rows refer to their exact property detail.
+		std::vector<CTextRange> m_avChanged[2];
 	};
 	enum class EEntryKind
 	{

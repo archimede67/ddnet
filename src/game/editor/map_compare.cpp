@@ -448,8 +448,8 @@ void CMapCompare::Close()
 }
 void CMapCompare::OnInput(CEditor &Editor, const IInput::CEvent &Event)
 {
-	// Text, editing shortcuts, and editor components receive no events.
-	if(!Editor.Ui()->IsPopupOpen() && (Event.m_Flags & IInput::FLAG_PRESS))
+	// Dialog input is handled by the shared shell before navigation reaches us.
+	if(Editor.m_Dialog == DIALOG_NONE && !Editor.Ui()->IsPopupOpen() && !Editor.Input()->ModifierIsPressed() && !Editor.Input()->AltIsPressed() && (Event.m_Flags & IInput::FLAG_PRESS))
 	{
 		if(Event.m_Key == KEY_ESCAPE)
 		{
@@ -1135,7 +1135,7 @@ void CMapCompare::RenderSelector(CEditor &Editor, CUIRect View)
 		for(int i = 0; i < (int)Editor.m_vpMaps.size(); ++i)
 			if(Editor.m_vpMaps[i].get() == m_apSources[Side])
 				Selected = i;
-		m_aPairLists[Side].SetActive(!Editor.Ui()->IsPopupOpen());
+		m_aPairLists[Side].SetActive(Editor.m_Dialog == DIALOG_NONE && !Editor.Ui()->IsPopupOpen());
 		m_aPairLists[Side].DoStart(42, Editor.m_vpMaps.size(), 1, 3, Selected, &aSides[Side]);
 		for(const auto &pMap : Editor.m_vpMaps)
 		{
@@ -1166,7 +1166,7 @@ void CMapCompare::RenderInspector(CEditor &Editor, CUIRect View)
 	CUIRect List, Values;
 	View.VSplitLeft(std::min(270.0f, View.w * 0.34f), &List, &Values);
 	Values.VMargin(5, &Values);
-	m_Details.SetActive(!m_LayerTreeActive && !Editor.Ui()->IsPopupOpen());
+	m_Details.SetActive(!m_LayerTreeActive && Editor.m_Dialog == DIALOG_NONE && !Editor.Ui()->IsPopupOpen());
 	m_Details.DoStart(19, m_vDetails.size(), 1, 3, m_SelectedDetail, &List);
 	for(const auto &Detail : m_vDetails)
 	{
@@ -1283,7 +1283,7 @@ void CMapCompare::RenderSettings(CEditor &Editor, CUIRect View)
 		Label(Editor, View, "No server settings on either side.");
 		return;
 	}
-	if(Editor.Ui()->MouseButtonClicked(0) && View.Inside(vec2(Editor.Ui()->MouseX(), Editor.Ui()->MouseY())))
+	if(Editor.m_Dialog == DIALOG_NONE && !Editor.Ui()->IsPopupOpen() && Editor.Ui()->MouseButtonClicked(0) && View.Inside(vec2(Editor.Ui()->MouseX(), Editor.Ui()->MouseY())))
 		m_LayerTreeActive = false;
 	const CUIRect Clip = View;
 	CScrollRegionParams Params;
@@ -1353,9 +1353,17 @@ void CMapCompare::RenderSettings(CEditor &Editor, CUIRect View)
 			Number.h = 12; // Source line numbers align with the first wrapped line.
 			const ColorRGBA Color = Changed ? (Side == 0 ? REMOVE_COLOR : ADD_COLOR) : ColorRGBA(0.76f, 0.78f, 0.8f, 1);
 			Label(Editor, Number, Line < 0 ? "-" : std::to_string(Line + 1), 9, Color);
-			Editor.TextRender()->TextColor(Line < 0 ? ColorRGBA(0.5f, 0.5f, 0.5f, 1) : Color);
+			Editor.TextRender()->TextColor(Line < 0 ? ColorRGBA(0.5f, 0.5f, 0.5f, 1) : ColorRGBA(0.76f, 0.78f, 0.8f, 1));
 			// Keep wrapping and cached row heights together during divider drags.
-			Editor.TextRender()->Text(Text.x, Text.y, 10, Line < 0 ? "[no line]" : m_pData->m_aSnapshots[Side].m_vSettings[Line].c_str(), Cache.m_SettingsWidth);
+			// TextEx mutates color splits, so the immutable worker result is copied
+			// into a fresh cursor. One draw retains whole-command kerning/wrapping.
+			CTextCursor Cursor;
+			Cursor.SetPosition(vec2(Text.x, Text.y));
+			Cursor.m_FontSize = 10;
+			Cursor.m_LineWidth = Cache.m_SettingsWidth;
+			for(const auto &Range : Setting.m_avChanged[Side])
+				Cursor.m_vColorSplits.emplace_back(Range.m_Start, Range.m_End - Range.m_Start, Color);
+			Editor.TextRender()->TextEx(&Cursor, Line < 0 ? "[no line]" : m_pData->m_aSnapshots[Side].m_vSettings[Line].c_str());
 			Editor.TextRender()->TextColor(ColorRGBA(1, 1, 1, 1));
 			Editor.Ui()->ClipDisable();
 		}
@@ -1363,7 +1371,7 @@ void CMapCompare::RenderSettings(CEditor &Editor, CUIRect View)
 	m_Settings.End();
 	if(Remeasured && !m_Settings.ContentOverflows())
 		m_Settings.Reset();
-	if(!m_LayerTreeActive && !Editor.Ui()->IsPopupOpen())
+	if(!m_LayerTreeActive && Editor.m_Dialog == DIALOG_NONE && !Editor.Ui()->IsPopupOpen())
 	{
 		if(Editor.Ui()->ConsumeHotkey(CUi::HOTKEY_DOWN))
 			Navigate(1);
@@ -1564,7 +1572,7 @@ void CMapCompare::RenderEnvelope(CEditor &Editor, CUIRect Pane, int Side)
 											     aColors[c],
 				IGraphics::CORNER_NONE, 0);
 			const float Distance = distance(Mouse, P);
-			if(Plot.m_vChanged[Index] && Editor.Ui()->MouseButtonClicked(0) && Pane.Inside(Mouse) && Distance < HitDistance)
+			if(Editor.m_Dialog == DIALOG_NONE && !Editor.Ui()->IsPopupOpen() && Plot.m_vChanged[Index] && Editor.Ui()->MouseButtonClicked(0) && Pane.Inside(Mouse) && Distance < HitDistance)
 			{
 				HitPoint = Index;
 				HitDistance = Distance;
@@ -1859,7 +1867,7 @@ void CMapCompare::RenderLayerTree(CEditor &Editor, CUIRect View)
 			vRows.push_back(i);
 	}
 	bool FoldChanged = false;
-	if(m_LayerTreeActive && !vRows.empty() && !Editor.Ui()->IsPopupOpen() && !Editor.Input()->ModifierIsPressed() && !Editor.Input()->ShiftIsPressed() && !Editor.Input()->AltIsPressed())
+	if(m_LayerTreeActive && !vRows.empty() && Editor.m_Dialog == DIALOG_NONE && !Editor.Ui()->IsPopupOpen() && !Editor.Input()->ModifierIsPressed() && !Editor.Input()->ShiftIsPressed() && !Editor.Input()->AltIsPressed())
 	{
 		const auto It = std::find(vRows.begin(), vRows.end(), m_FocusEntry);
 		int Row = It == vRows.end() ? -1 : It - vRows.begin();
@@ -2022,12 +2030,10 @@ void CMapCompare::RenderLayerTree(CEditor &Editor, CUIRect View)
 	m_ScrollToLayer = false;
 }
 
-void CMapCompare::Render(CEditor &Editor, CUIRect View)
+void CMapCompare::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar)
 {
 	Editor.Ui()->MapScreen();
 	View.Margin(6, &View);
-	CUIRect Toolbar;
-	View.HSplitTop(23, &Toolbar, &View);
 	auto Button = [&](int Id, const char *pText, float Width, int Checked = 0, const char *pTooltip = nullptr) {
 		CUIRect Rect;
 		Toolbar.VSplitLeft(Width, &Rect, &Toolbar);
@@ -2094,8 +2100,8 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View)
 	if(Button(6, "Fit [Home]", 76))
 		FitSelection();
 	Label(Editor, Toolbar, "READ ONLY", 11);
-	const float MaxSidebar = std::max(120.0f, std::min({400.0f, View.w * 0.45f, View.w - 300.0f}));
-	const float MinSidebar = std::min(160.0f, MaxSidebar);
+	const float MinSidebar = CEditor::MIN_SIDEBAR_WIDTH;
+	const float MaxSidebar = std::max(MinSidebar, std::min({400.0f, View.w * 0.45f, View.w - 300.0f}));
 	m_SidebarWidth = std::clamp(m_SidebarWidth, MinSidebar, MaxSidebar);
 	CUIRect Sidebar, Navigator, Inspector{};
 	View.VSplitLeft(m_SidebarWidth, &Sidebar, &View);
@@ -2104,14 +2110,26 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View)
 	if(Editor.Ui()->ActiveItem() == &m_Divider)
 		m_Panning = false;
 	View.VMargin(4, &View);
+	const bool NarrowSidebar = Sidebar.w < 180;
 	CUIRect Tabs, aRows[2], aTabs[4];
-	Sidebar.HSplitTop(48, &Tabs, &Navigator);
+	Sidebar.HSplitTop(NarrowSidebar ? 96 : 48, &Tabs, &Navigator);
 	Tabs.VSplitRight(4, &Tabs, nullptr);
-	Tabs.HSplitMid(&aRows[0], &aRows[1], 3);
-	for(int Row = 0; Row < 2; ++Row)
+	if(NarrowSidebar)
 	{
-		aRows[Row].HMargin(2, &aRows[Row]);
-		aRows[Row].VSplitMid(&aTabs[Row * 2], &aTabs[Row * 2 + 1], 3);
+		for(auto &Tab : aTabs)
+		{
+			Tabs.HSplitTop(24, &Tab, &Tabs);
+			Tab.HMargin(2, &Tab);
+		}
+	}
+	else
+	{
+		Tabs.HSplitMid(&aRows[0], &aRows[1], 3);
+		for(int Row = 0; Row < 2; ++Row)
+		{
+			aRows[Row].HMargin(2, &aRows[Row]);
+			aRows[Row].VSplitMid(&aTabs[Row * 2], &aTabs[Row * 2 + 1], 3);
+		}
 	}
 	const char *apSections[] = {"Changes", "Layers", "Envelopes", "Server settings"};
 	const char *apTips[] = {"Browse map, image, sound and layer differences.", "Inspect layers and comparison visibility.", "Inspect all envelopes, including unchanged ones.", "Inspect ordered server commands, including unchanged ones."};
@@ -2137,9 +2155,10 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View)
 		Label(Editor, Path, m_apSources[Side]->m_aFilename[0] ? m_apSources[Side]->m_aFilename : "No saved path", 10);
 	}
 	vec2 Mouse(Editor.Ui()->MouseX(), Editor.Ui()->MouseY());
-	if(!MapView())
+	const bool Interactive = Editor.m_Dialog == DIALOG_NONE && !Editor.Ui()->IsPopupOpen();
+	if(!MapView() || !Interactive)
 		m_Panning = false;
-	if(MapView() && Editor.Ui()->ActiveItem() == nullptr && !m_Panning && (m_aPanes[0].Inside(Mouse) || m_aPanes[1].Inside(Mouse)) && (Editor.Ui()->MouseButtonClicked(0) || Editor.Ui()->MouseButtonClicked(2)))
+	if(Interactive && MapView() && Editor.Ui()->ActiveItem() == nullptr && !m_Panning && (m_aPanes[0].Inside(Mouse) || m_aPanes[1].Inside(Mouse)) && (Editor.Ui()->MouseButtonClicked(0) || Editor.Ui()->MouseButtonClicked(2)))
 	{
 		m_Panning = true;
 		m_LastMouse = Mouse;
@@ -2152,16 +2171,19 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View)
 			m_Panning = false;
 	}
 	CUIRect VisibilityBar, ShowAll;
-	Navigator.HSplitBottom(24, &Navigator, &VisibilityBar);
-	if(Editor.Ui()->MouseButtonClicked(0) && (Navigator.Inside(Mouse) || Inspector.Inside(Mouse)))
+	Navigator.HSplitBottom(NarrowSidebar ? 42 : 24, &Navigator, &VisibilityBar);
+	if(Interactive && Editor.Ui()->MouseButtonClicked(0) && (Navigator.Inside(Mouse) || Inspector.Inside(Mouse)))
 		m_LayerTreeActive = Navigator.Inside(Mouse);
 	VisibilityBar.Margin(2, &VisibilityBar);
-	VisibilityBar.VSplitRight(64, &VisibilityBar, &ShowAll);
+	if(NarrowSidebar)
+		VisibilityBar.HSplitBottom(20, &VisibilityBar, &ShowAll);
+	else
+		VisibilityBar.VSplitRight(64, &VisibilityBar, &ShowAll);
 	int Hidden = 0;
 	for(int i = 0; i < (int)m_Result.m_vEntries.size(); ++i)
 		if((m_Result.m_vEntries[i].m_Kind == MapDiff::EEntryKind::LAYER || m_Result.m_vEntries[i].m_Kind == MapDiff::EEntryKind::GROUP) && !LayerVisible(i))
 			++Hidden;
-	Label(Editor, VisibilityBar, Hidden ? std::to_string(Hidden) + " hidden / both maps" : "All layers visible", 9);
+	Label(Editor, VisibilityBar, Hidden ? std::to_string(Hidden) + (NarrowSidebar ? " hidden" : " hidden / both maps") : "All layers visible", 9);
 	if(Editor.DoButton_Editor(&m_aButtonIds[14], "Show all", Hidden ? 0 : -1, &ShowAll, BUTTONFLAG_LEFT, "Restore all comparison visibility. Source editor visibility is unchanged."))
 		for(auto &State : m_vLayerStates)
 			State.m_Visible = true;
@@ -2171,7 +2193,7 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View)
 		RenderLayerTree(Editor, Navigator);
 	else if(!m_vNavigator.empty())
 	{
-		NavigatorList().SetActive(m_LayerTreeActive && !Editor.Ui()->IsPopupOpen());
+		NavigatorList().SetActive(m_LayerTreeActive && Editor.m_Dialog == DIALOG_NONE && !Editor.Ui()->IsPopupOpen());
 		int NavSelected = -1;
 		for(int i = 0; i < (int)m_vNavigator.size(); ++i)
 			if(m_SelectedEntry >= 0 && m_vNavigator[i] == m_SelectedEntry)
@@ -2273,12 +2295,6 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View)
 		}
 		if(Inspector.h > 0)
 			RenderInspector(Editor, Inspector);
-	}
-	if(Editor.m_aTooltip[0])
-	{
-		const CUIRect Tip{12, Editor.Ui()->Screen()->h - 21, Editor.Ui()->Screen()->w - 24, 17};
-		Tip.Draw(ColorRGBA(0.05f, 0.05f, 0.06f, 0.95f), IGraphics::CORNER_ALL, 3);
-		Label(Editor, Tip, Editor.m_aTooltip, 9);
 	}
 }
 
@@ -2491,12 +2507,12 @@ void CMapCompareTabs::OnInput(CEditor &Editor, const IInput::CEvent &Event)
 		m_pSelected->OnInput(Editor, Event);
 }
 
-void CMapCompareTabs::Render(CEditor &Editor, CUIRect View)
+void CMapCompareTabs::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar)
 {
 	if(m_Transition)
 		Label(Editor, View, "Release held keys and mouse buttons to switch tabs.", 14);
 	else if(m_pSelected)
-		m_pSelected->Render(Editor, View);
+		m_pSelected->Render(Editor, View, Toolbar);
 }
 
 void CMapCompareTabs::EndFrame(CEditor &Editor)

@@ -190,12 +190,14 @@ public:
 	void TestMapLocally();
 	void GotoPosition();
 	void CompareMaps() { m_MapCompare.OpenSelector(*this); }
+	bool IsComparisonView() const { return m_MapCompare.Active() || m_MapCompare.Transitioning(); }
+	bool QuickActionAllowed(const CQuickAction *pAction) const;
 #define REGISTER_QUICK_ACTION(name, text, callback, disabled, active, button_color, description) CQuickAction m_QuickAction##name;
 #include <game/editor/quick_actions.h>
 #undef REGISTER_QUICK_ACTION
 
 	CEditor() :
-#define REGISTER_QUICK_ACTION(name, text, callback, disabled, active, button_color, description) m_QuickAction##name(text, description, callback, disabled, active, button_color),
+#define REGISTER_QUICK_ACTION(name, text, callback, disabled, active, button_color, description) m_QuickAction##name(text, description, callback, [this]() { return !QuickActionAllowed(&m_QuickAction##name) || (disabled)(); }, active, button_color),
 #include <game/editor/quick_actions.h>
 #undef REGISTER_QUICK_ACTION
 		m_Dialog(DIALOG_NONE)
@@ -698,7 +700,8 @@ public:
 		TOP,
 		RIGHT,
 	};
-	void DoEditorDragBar(CUIRect View, CUIRect *pDragBar, EDragSide Side, float *pValue, float MinValue = 100.0f, float MaxValue = 400.0f);
+	static constexpr float MIN_SIDEBAR_WIDTH = 100.0f;
+	void DoEditorDragBar(CUIRect View, CUIRect *pDragBar, EDragSide Side, float *pValue, float MinValue = MIN_SIDEBAR_WIDTH, float MaxValue = 400.0f);
 
 	void RenderMenubar(CUIRect Menubar);
 	void ShowHelp();

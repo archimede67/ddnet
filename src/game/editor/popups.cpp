@@ -26,7 +26,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuFile(void *pContext, CUIRect Vie
 
 	CUIRect Slot;
 	View.HSplitTop(12.0f, &Slot, &View);
-	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionNewMap, "New", 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionNewMap.Description()))
+	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionNewMap, "New", pEditor->m_QuickActionNewMap.Disabled() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionNewMap.Description()))
 	{
 		pEditor->m_QuickActionNewMap.Call();
 		return CUi::POPUP_CLOSE_CURRENT;
@@ -34,7 +34,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuFile(void *pContext, CUIRect Vie
 
 	View.HSplitTop(10.0f, nullptr, &View);
 	View.HSplitTop(12.0f, &Slot, &View);
-	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionLoadMap, "Load", 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionLoadMap.Description()))
+	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionLoadMap, "Load", pEditor->m_QuickActionLoadMap.Disabled() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionLoadMap.Description()))
 	{
 		pEditor->m_QuickActionLoadMap.Call();
 		return CUi::POPUP_CLOSE_CURRENT;
@@ -50,7 +50,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuFile(void *pContext, CUIRect Vie
 
 	View.HSplitTop(10.0f, nullptr, &View);
 	View.HSplitTop(12.0f, &Slot, &View);
-	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionAppendMap, "Append", 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionAppendMap.Description()))
+	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionAppendMap, "Append", pEditor->m_QuickActionAppendMap.Disabled() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionAppendMap.Description()))
 	{
 		pEditor->m_QuickActionAppendMap.Call();
 		return CUi::POPUP_CLOSE_CURRENT;
@@ -58,7 +58,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuFile(void *pContext, CUIRect Vie
 
 	View.HSplitTop(10.0f, nullptr, &View);
 	View.HSplitTop(12.0f, &Slot, &View);
-	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionSave, pEditor->m_QuickActionSave.Label(), 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionSave.Description()))
+	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionSave, pEditor->m_QuickActionSave.Label(), pEditor->m_QuickActionSave.Disabled() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionSave.Description()))
 	{
 		pEditor->m_QuickActionSave.Call();
 		return CUi::POPUP_CLOSE_CURRENT;
@@ -66,7 +66,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuFile(void *pContext, CUIRect Vie
 
 	View.HSplitTop(2.0f, nullptr, &View);
 	View.HSplitTop(12.0f, &Slot, &View);
-	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionSaveAs, pEditor->m_QuickActionSaveAs.Label(), 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionSaveAs.Description()))
+	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionSaveAs, pEditor->m_QuickActionSaveAs.Label(), pEditor->m_QuickActionSaveAs.Disabled() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionSaveAs.Description()))
 	{
 		pEditor->m_QuickActionSaveAs.Call();
 		return CUi::POPUP_CLOSE_CURRENT;
@@ -74,7 +74,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuFile(void *pContext, CUIRect Vie
 
 	View.HSplitTop(2.0f, nullptr, &View);
 	View.HSplitTop(12.0f, &Slot, &View);
-	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionSaveCopy, pEditor->m_QuickActionSaveCopy.Label(), 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionSaveCopy.Description()))
+	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionSaveCopy, pEditor->m_QuickActionSaveCopy.Label(), pEditor->m_QuickActionSaveCopy.Disabled() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionSaveCopy.Description()))
 	{
 		pEditor->m_QuickActionSaveCopy.Call();
 		return CUi::POPUP_CLOSE_CURRENT;
@@ -82,7 +82,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuFile(void *pContext, CUIRect Vie
 
 	View.HSplitTop(10.0f, nullptr, &View);
 	View.HSplitTop(12.0f, &Slot, &View);
-	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionMapDetails, pEditor->m_QuickActionMapDetails.Label(), 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionMapDetails.Description()))
+	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionMapDetails, pEditor->m_QuickActionMapDetails.Label(), pEditor->m_QuickActionMapDetails.Disabled() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionMapDetails.Description()))
 	{
 		pEditor->m_QuickActionMapDetails.Call();
 		return CUi::POPUP_CLOSE_CURRENT;
@@ -90,7 +90,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuFile(void *pContext, CUIRect Vie
 
 	View.HSplitTop(2.0f, nullptr, &View);
 	View.HSplitTop(12.0f, &Slot, &View);
-	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionTestMapLocally, pEditor->m_QuickActionTestMapLocally.Label(), 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionTestMapLocally.Description()))
+	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionTestMapLocally, pEditor->m_QuickActionTestMapLocally.Label(), pEditor->m_QuickActionTestMapLocally.Disabled() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionTestMapLocally.Description()))
 	{
 		pEditor->m_QuickActionTestMapLocally.Call();
 		return CUi::POPUP_CLOSE_CURRENT;
@@ -98,7 +98,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuFile(void *pContext, CUIRect Vie
 
 	View.HSplitTop(10.0f, nullptr, &View);
 	View.HSplitTop(12.0f, &Slot, &View);
-	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionCloseMap, pEditor->m_QuickActionCloseMap.Label(), 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionCloseMap.Description()))
+	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionCloseMap, pEditor->IsComparisonView() ? "Close comparison" : pEditor->m_QuickActionCloseMap.Label(), pEditor->m_QuickActionCloseMap.Disabled() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionCloseMap.Description()))
 	{
 		pEditor->m_QuickActionCloseMap.Call();
 		return CUi::POPUP_CLOSE_CURRENT;
@@ -106,7 +106,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuFile(void *pContext, CUIRect Vie
 
 	View.HSplitTop(10.0f, nullptr, &View);
 	View.HSplitTop(12.0f, &Slot, &View);
-	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionExit, pEditor->m_QuickActionExit.Label(), 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionExit.Description()))
+	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionExit, pEditor->m_QuickActionExit.Label(), pEditor->m_QuickActionExit.Disabled() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionExit.Description()))
 	{
 		pEditor->m_QuickActionExit.Call();
 		return CUi::POPUP_CLOSE_CURRENT;
@@ -123,7 +123,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuTools(void *pContext, CUIRect Vi
 	View.HSplitTop(12.0f, &Slot, &View);
 	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionCompareMaps, "Compare maps", pEditor->m_QuickActionCompareMaps.Disabled() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionCompareMaps.Description()))
 	{
-		pEditor->CompareMaps();
+		pEditor->m_QuickActionCompareMaps.Call();
 		return CUi::POPUP_CLOSE_CURRENT;
 	}
 	View.HSplitTop(2.0f, nullptr, &View);
@@ -137,14 +137,14 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuTools(void *pContext, CUIRect Vi
 	View.HSplitTop(12.0f, &Slot, &View);
 	static int s_RemoveUnusedEnvelopesButton = 0;
 	static CUi::SConfirmPopupContext s_ConfirmPopupContext;
-	if(pEditor->DoButton_MenuItem(&s_RemoveUnusedEnvelopesButton, "Remove unused envelopes", 0, &Slot, BUTTONFLAG_LEFT, "Remove all unused envelopes from the map."))
+	if(pEditor->DoButton_MenuItem(&s_RemoveUnusedEnvelopesButton, "Remove unused envelopes", pEditor->IsComparisonView() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, "Remove all unused envelopes from the map."))
 	{
 		s_ConfirmPopupContext.Reset();
 		s_ConfirmPopupContext.YesNoButtons();
 		str_copy(s_ConfirmPopupContext.m_aMessage, "Are you sure that you want to remove all unused envelopes from this map?");
 		pEditor->Ui()->ShowPopupConfirm(Slot.x + Slot.w, Slot.y, &s_ConfirmPopupContext);
 	}
-	if(s_ConfirmPopupContext.m_Result == CUi::SConfirmPopupContext::CONFIRMED)
+	if(s_ConfirmPopupContext.m_Result == CUi::SConfirmPopupContext::CONFIRMED && !pEditor->IsComparisonView())
 		pEditor->Map()->RemoveUnusedEnvelopes();
 	if(s_ConfirmPopupContext.m_Result != CUi::SConfirmPopupContext::UNSET)
 	{
@@ -155,7 +155,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuTools(void *pContext, CUIRect Vi
 	static int s_BorderButton = 0;
 	View.HSplitTop(2.0f, nullptr, &View);
 	View.HSplitTop(12.0f, &Slot, &View);
-	if(pEditor->DoButton_MenuItem(&s_BorderButton, "Place border", 0, &Slot, BUTTONFLAG_LEFT, "Place tiles in a 2-tile wide border at the edges of the selected tile layer."))
+	if(pEditor->DoButton_MenuItem(&s_BorderButton, "Place border", pEditor->IsComparisonView() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, "Place tiles in a 2-tile wide border at the edges of the selected tile layer."))
 	{
 		std::shared_ptr<CLayerTiles> pT = std::static_pointer_cast<CLayerTiles>(pEditor->Map()->SelectedLayerType(0, LAYERTYPE_TILES));
 		if(pT && !pT->m_HasTele && !pT->m_HasSpeedup && !pT->m_HasSwitch && !pT->m_HasFront && !pT->m_HasTune)
@@ -171,7 +171,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuTools(void *pContext, CUIRect Vi
 
 	View.HSplitTop(2.0f, nullptr, &View);
 	View.HSplitTop(12.0f, &Slot, &View);
-	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionGotoPosition, pEditor->m_QuickActionGotoPosition.Label(), 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionGotoPosition.Description()))
+	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionGotoPosition, pEditor->m_QuickActionGotoPosition.Label(), pEditor->m_QuickActionGotoPosition.Disabled() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionGotoPosition.Description()))
 	{
 		pEditor->m_QuickActionGotoPosition.Call();
 	}
@@ -179,7 +179,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuTools(void *pContext, CUIRect Vi
 	static int s_TileArtButton = 0;
 	View.HSplitTop(2.0f, nullptr, &View);
 	View.HSplitTop(12.0f, &Slot, &View);
-	if(pEditor->DoButton_MenuItem(&s_TileArtButton, "Add tile art", 0, &Slot, BUTTONFLAG_LEFT, "Generate tile art from image."))
+	if(pEditor->DoButton_MenuItem(&s_TileArtButton, "Add tile art", pEditor->IsComparisonView() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, "Generate tile art from image."))
 	{
 		pEditor->m_FileBrowser.ShowFileDialog(IStorage::TYPE_ALL, CFileBrowser::EFileType::IMAGE, "Add tile art", "Open", "mapres", "", CallbackAddTileArt, pEditor);
 		return CUi::POPUP_CLOSE_CURRENT;
@@ -188,7 +188,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuTools(void *pContext, CUIRect Vi
 	static int s_QuadArtButton = 0;
 	View.HSplitTop(2.0f, nullptr, &View);
 	View.HSplitTop(12.0f, &Slot, &View);
-	if(pEditor->DoButton_MenuItem(&s_QuadArtButton, "Add quad art", 0, &Slot, BUTTONFLAG_LEFT, "Generate quad art from image."))
+	if(pEditor->DoButton_MenuItem(&s_QuadArtButton, "Add quad art", pEditor->IsComparisonView() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, "Generate quad art from image."))
 	{
 		pEditor->m_FileBrowser.ShowFileDialog(IStorage::TYPE_ALL, CFileBrowser::EFileType::IMAGE, "Add quad art", "Open", "mapres", "", CallbackAddQuadArt, pEditor);
 		return CUi::POPUP_CLOSE_CURRENT;
@@ -213,12 +213,14 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuSettings(void *pContext, CUIRect
 {
 	CEditor *pEditor = static_cast<CEditor *>(pContext);
 
+	const bool ReadOnly = pEditor->IsComparisonView();
+
 	CUIRect Slot;
 	View.HSplitTop(12.0f, &Slot, &View);
 	static int s_EntitiesButtonId = 0;
 	char aButtonText[64];
 	str_format(aButtonText, sizeof(aButtonText), "Entities: %s", pEditor->m_SelectEntitiesImage.c_str());
-	if(pEditor->DoButton_MenuItem(&s_EntitiesButtonId, aButtonText, 0, &Slot, BUTTONFLAG_LEFT, "Choose game layer entities image for different gametypes."))
+	if(pEditor->DoButton_MenuItem(&s_EntitiesButtonId, aButtonText, ReadOnly ? -1 : 0, &Slot, BUTTONFLAG_LEFT, "Choose game layer entities image for different gametypes."))
 	{
 		pEditor->m_vSelectEntitiesFiles.clear();
 		pEditor->Storage()->ListDirectory(IStorage::TYPE_ALL, "editor/entities", EntitiesListdirCallback, pEditor);
@@ -242,11 +244,11 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuSettings(void *pContext, CUIRect
 		pEditor->Ui()->DoLabel(&Label, "Brush coloring", 10.0f, TEXTALIGN_ML);
 		static int s_ButtonNo = 0;
 		static int s_ButtonYes = 0;
-		if(pEditor->DoButton_Ex(&s_ButtonNo, "No", !pEditor->m_BrushColorEnabled, &No, BUTTONFLAG_LEFT, "Disable brush coloring.", IGraphics::CORNER_L))
+		if(pEditor->DoButton_Ex(&s_ButtonNo, "No", ReadOnly ? -1 : (!pEditor->m_BrushColorEnabled), &No, BUTTONFLAG_LEFT, "Disable brush coloring.", IGraphics::CORNER_L))
 		{
 			pEditor->m_BrushColorEnabled = false;
 		}
-		if(pEditor->DoButton_Ex(&s_ButtonYes, "Yes", pEditor->m_BrushColorEnabled, &Yes, BUTTONFLAG_LEFT, "Enable brush coloring.", IGraphics::CORNER_R))
+		if(pEditor->DoButton_Ex(&s_ButtonYes, "Yes", ReadOnly ? -1 : (pEditor->m_BrushColorEnabled), &Yes, BUTTONFLAG_LEFT, "Enable brush coloring.", IGraphics::CORNER_R))
 		{
 			pEditor->m_BrushColorEnabled = true;
 		}
@@ -267,11 +269,11 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuSettings(void *pContext, CUIRect
 		{
 			static int s_ButtonNo = 0;
 			static int s_ButtonYes = 0;
-			if(pEditor->DoButton_Ex(&s_ButtonNo, "No", pEditor->m_AllowPlaceUnusedTiles == EUnusedEntities::NOT_ALLOWED, &No, BUTTONFLAG_LEFT, "[Ctrl+U] Disallow placing unused tiles.", IGraphics::CORNER_L))
+			if(pEditor->DoButton_Ex(&s_ButtonNo, "No", ReadOnly ? -1 : (pEditor->m_AllowPlaceUnusedTiles == EUnusedEntities::NOT_ALLOWED), &No, BUTTONFLAG_LEFT, "[Ctrl+U] Disallow placing unused tiles.", IGraphics::CORNER_L))
 			{
 				pEditor->m_AllowPlaceUnusedTiles = EUnusedEntities::NOT_ALLOWED;
 			}
-			if(pEditor->DoButton_Ex(&s_ButtonYes, "Yes", pEditor->m_AllowPlaceUnusedTiles == EUnusedEntities::ALLOWED_EXPLICIT, &Yes, BUTTONFLAG_LEFT, "[Ctrl+U] Allow placing unused tiles.", IGraphics::CORNER_R))
+			if(pEditor->DoButton_Ex(&s_ButtonYes, "Yes", ReadOnly ? -1 : (pEditor->m_AllowPlaceUnusedTiles == EUnusedEntities::ALLOWED_EXPLICIT), &Yes, BUTTONFLAG_LEFT, "[Ctrl+U] Allow placing unused tiles.", IGraphics::CORNER_R))
 			{
 				pEditor->m_AllowPlaceUnusedTiles = EUnusedEntities::ALLOWED_EXPLICIT;
 			}
@@ -294,17 +296,17 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuSettings(void *pContext, CUIRect
 		static int s_ButtonDec = 0;
 		static int s_ButtonHex = 0;
 		CQuickAction *pAction = &pEditor->m_QuickActionShowInfoOff;
-		if(pEditor->DoButton_Ex(&s_ButtonOff, pAction->LabelShort(), pAction->Active(), &Off, BUTTONFLAG_LEFT, pAction->Description(), IGraphics::CORNER_L))
+		if(pEditor->DoButton_Ex(&s_ButtonOff, pAction->LabelShort(), pAction->Disabled() ? -1 : pAction->Active(), &Off, BUTTONFLAG_LEFT, pAction->Description(), IGraphics::CORNER_L))
 		{
 			pAction->Call();
 		}
 		pAction = &pEditor->m_QuickActionShowInfoDec;
-		if(pEditor->DoButton_Ex(&s_ButtonDec, pAction->LabelShort(), pAction->Active(), &Dec, BUTTONFLAG_LEFT, pAction->Description(), IGraphics::CORNER_NONE))
+		if(pEditor->DoButton_Ex(&s_ButtonDec, pAction->LabelShort(), pAction->Disabled() ? -1 : pAction->Active(), &Dec, BUTTONFLAG_LEFT, pAction->Description(), IGraphics::CORNER_NONE))
 		{
 			pAction->Call();
 		}
 		pAction = &pEditor->m_QuickActionShowInfoHex;
-		if(pEditor->DoButton_Ex(&s_ButtonHex, pAction->LabelShort(), pAction->Active(), &Hex, BUTTONFLAG_LEFT, pAction->Description(), IGraphics::CORNER_R))
+		if(pEditor->DoButton_Ex(&s_ButtonHex, pAction->LabelShort(), pAction->Disabled() ? -1 : pAction->Active(), &Hex, BUTTONFLAG_LEFT, pAction->Description(), IGraphics::CORNER_R))
 		{
 			pAction->Call();
 		}
@@ -324,12 +326,12 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuSettings(void *pContext, CUIRect
 
 		static int s_ButtonNo = 0;
 		static int s_ButtonYes = 0;
-		if(pEditor->DoButton_Ex(&s_ButtonNo, "No", !pEditor->m_ShowEnvelopePreview, &No, BUTTONFLAG_LEFT, "Do not preview the paths of quads with a position envelope when a quad layer is selected.", IGraphics::CORNER_L))
+		if(pEditor->DoButton_Ex(&s_ButtonNo, "No", ReadOnly ? -1 : (!pEditor->m_ShowEnvelopePreview), &No, BUTTONFLAG_LEFT, "Do not preview the paths of quads with a position envelope when a quad layer is selected.", IGraphics::CORNER_L))
 		{
 			pEditor->m_ShowEnvelopePreview = false;
 			pEditor->m_ActiveEnvelopePreview = EEnvelopePreview::NONE;
 		}
-		if(pEditor->DoButton_Ex(&s_ButtonYes, "Yes", pEditor->m_ShowEnvelopePreview, &Yes, BUTTONFLAG_LEFT, "Preview the paths of quads with a position envelope when a quad layer is selected.", IGraphics::CORNER_R))
+		if(pEditor->DoButton_Ex(&s_ButtonYes, "Yes", ReadOnly ? -1 : (pEditor->m_ShowEnvelopePreview), &Yes, BUTTONFLAG_LEFT, "Preview the paths of quads with a position envelope when a quad layer is selected.", IGraphics::CORNER_R))
 		{
 			pEditor->m_ShowEnvelopePreview = true;
 			pEditor->m_ActiveEnvelopePreview = EEnvelopePreview::NONE;
@@ -1794,6 +1796,12 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMapInfo(void *pContext, CUIRect View
 CUi::EPopupMenuFunctionResult CEditor::PopupEvent(void *pContext, CUIRect View, bool Active)
 {
 	CEditor *pEditor = static_cast<CEditor *>(pContext);
+	// An editing confirmation must never execute against a background map.
+	if(pEditor->IsComparisonView() && pEditor->m_PopupEventType != POPEVENT_EXIT)
+	{
+		pEditor->m_PopupEventWasActivated = false;
+		return CUi::POPUP_CLOSE_CURRENT;
+	}
 
 	const char *pTitle;
 	const char *pMessage;

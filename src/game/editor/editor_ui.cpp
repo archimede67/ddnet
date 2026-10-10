@@ -84,7 +84,12 @@ int CEditor::DoButton_Editor(const void *pId, const char *pText, int Checked, co
 {
 	pRect->Draw(GetButtonColor(pId, Checked), IGraphics::CORNER_ALL, 3.0f);
 	CUIRect NewRect = *pRect;
-	Ui()->DoLabel(&NewRect, pText, 10.0f, TEXTALIGN_MC);
+	SLabelProperties Props;
+	Props.m_MaxWidth = NewRect.w;
+	Props.m_EllipsisAtEnd = true;
+	if(Checked < 0)
+		Props.SetColor(ColorRGBA(0.6f, 0.6f, 0.6f, 1));
+	Ui()->DoLabel(&NewRect, pText, 10.0f, TEXTALIGN_MC, Props);
 	Checked %= 2;
 	return DoButtonLogic(pId, Checked, pRect, Flags, pToolTip);
 }
@@ -111,6 +116,8 @@ int CEditor::DoButton_Ex(const void *pId, const char *pText, int Checked, const 
 	SLabelProperties Props;
 	Props.m_MaxWidth = Rect.w;
 	Props.m_EllipsisAtEnd = true;
+	if(Checked < 0)
+		Props.SetColor(ColorRGBA(0.6f, 0.6f, 0.6f, 1));
 	Ui()->DoLabel(&Rect, pText, FontSize, Align, Props);
 
 	return DoButtonLogic(pId, Checked, pRect, Flags, pToolTip);

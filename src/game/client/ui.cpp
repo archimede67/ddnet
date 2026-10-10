@@ -392,6 +392,8 @@ void CUi::UpdateTouchState(CTouchState &State) const
 
 bool CUi::ConsumeHotkey(EHotkey Hotkey)
 {
+	if(!Enabled())
+		return false;
 	const bool Pressed = m_HotkeysPressed & Hotkey;
 	m_HotkeysPressed &= ~Hotkey;
 	return Pressed;
@@ -525,6 +527,8 @@ void CUi::UpdateClipping()
 
 int CUi::DoButtonLogic(const void *pId, int Checked, const CUIRect *pRect, const unsigned Flags)
 {
+	if(!Enabled())
+		return 0;
 	int ReturnValue = 0;
 	const bool Inside = MouseHovered(pRect);
 
@@ -570,6 +574,8 @@ int CUi::DoDraggableButtonLogic(const void *pId, int Checked, const CUIRect *pRe
 		*pClicked = false;
 	if(pAbrupted != nullptr)
 		*pAbrupted = false;
+	if(!Enabled())
+		return 0;
 
 	if(CheckActiveItem(pId))
 	{

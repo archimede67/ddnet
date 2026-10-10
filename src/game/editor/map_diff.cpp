@@ -2,6 +2,7 @@
 
 #include <base/hash.h>
 #include <base/hash_ctxt.h>
+#include <base/str.h>
 
 #include <algorithm>
 #include <deque>
@@ -36,8 +37,110 @@ namespace MapDiff
 					Now();
 			}
 		};
+		void InlineSettings(CSettingRow &Row, const std::string &Before, const std::string &After, size_t &Budget, CCheck &Check)
+		{
+			size_t Prefix = 0, EndA = Before.size(), EndB = After.size();
+			while(Prefix < EndA && Prefix < EndB && Before[Prefix] == After[Prefix])
+			{
+				Check.Tick();
+				++Prefix;
+			}
+			auto Continuation = [](char Byte) { return (static_cast<unsigned char>(Byte) & 0xc0) == 0x80; };
+			// A byte prefix can end in the middle of a different Unicode codepoint.
+			while(Prefix && ((Prefix < EndA && Continuation(Before[Prefix])) || (Prefix < EndB && Continuation(After[Prefix]))))
+				--Prefix;
+			while(EndA > Prefix && EndB > Prefix && Before[EndA - 1] == After[EndB - 1])
+			{
+				Check.Tick();
+				--EndA;
+				--EndB;
+			}
+			while((EndA < Before.size() && Continuation(Before[EndA])) || (EndB < After.size() && Continuation(After[EndB])))
+			{
+				++EndA;
+				++EndB;
+			}
+			auto Add = [&](int Side, size_t Start, size_t End) {
+				if(Start == End)
+					return;
+				auto &Ranges = Row.m_avChanged[Side];
+				if(!Ranges.empty() && Ranges.back().m_End == (int)Start)
+					Ranges.back().m_End = End;
+				else
+					Ranges.push_back({(int)Start, (int)End});
+			};
+			// Linear trimming is proportional to input bytes. Quadratic alignment is
+			// capped both per command and for the entire settings result, using byte
+			// counts as a conservative upper bound on decoded codepoint counts.
+			const size_t BytesA = EndA - Prefix, BytesB = EndB - Prefix;
+			const size_t Limit = std::min(Budget, size_t{64 * 1024});
+			if(!BytesA || !BytesB || BytesA + 1 > Limit / (BytesB + 1))
+			{
+				Add(0, Prefix, EndA);
+				Add(1, Prefix, EndB);
+				return;
+			}
+			struct CUnit
+			{
+				int m_Codepoint;
+				size_t m_Byte;
+			};
+			auto Decode = [&](const std::string &Text, size_t End) {
+				std::vector<CUnit> Units;
+				const char *pText = Text.c_str() + Prefix;
+				while(pText < Text.c_str() + End)
+				{
+					Check.Tick();
+					const size_t Byte = pText - Text.c_str();
+					int Codepoint = str_utf8_decode(&pText);
+					if(Codepoint < 0)
+					{
+						// The decoder may consume several malformed bytes. Preserve
+						// each byte's identity instead of equating their leading byte.
+						Codepoint = -1 - static_cast<unsigned char>(Text[Byte]);
+						pText = Text.c_str() + Byte + 1;
+					}
+					Units.push_back({Codepoint, Byte});
+				}
+				Units.push_back({0, End});
+				return Units;
+			};
+			const auto A = Decode(Before, EndA), B = Decode(After, EndB);
+			const size_t N = A.size() - 1, M = B.size() - 1;
+			Budget -= (N + 1) * (M + 1);
+			std::vector<unsigned> Lcs((N + 1) * (M + 1));
+			auto Cell = [&](size_t X, size_t Y) -> unsigned & { return Lcs[X * (M + 1) + Y]; };
+			for(size_t X = N; X-- > 0;)
+				for(size_t Y = M; Y-- > 0;)
+				{
+					Check.Tick();
+					Cell(X, Y) = A[X].m_Codepoint == B[Y].m_Codepoint ? 1 + Cell(X + 1, Y + 1) : std::max(Cell(X + 1, Y), Cell(X, Y + 1));
+				}
+			size_t X = 0, Y = 0;
+			while(X < N || Y < M)
+			{
+				Check.Tick();
+				if(X < N && Y < M && A[X].m_Codepoint == B[Y].m_Codepoint)
+				{
+					++X;
+					++Y;
+				}
+				else if(X < N && (Y == M || Cell(X + 1, Y) >= Cell(X, Y + 1)))
+				{
+					Add(0, A[X].m_Byte, A[X + 1].m_Byte);
+					++X;
+				}
+				else
+				{
+					Add(1, B[Y].m_Byte, B[Y + 1].m_Byte);
+					++Y;
+				}
+			}
+		}
 		void AlignSettings(CEntry &Entry, const std::vector<std::string> &Before, const std::vector<std::string> &After, CCheck &Check)
 		{
+			size_t InlineBudget = 1024 * 1024;
+			const std::string Empty;
 			auto Row = [&](int A, int B) {
 				Check.Tick();
 				CSettingRow Row{A, B, -1};
@@ -45,8 +148,9 @@ namespace MapDiff
 				{
 					Row.m_Property = Entry.m_vProperties.size();
 					Entry.m_vProperties.push_back({"Command " + (A < 0 ? std::string("-") : std::to_string(A + 1)) + " / " + (B < 0 ? std::string("-") : std::to_string(B + 1)), A < 0 ? "(absent)" : Before[A], B < 0 ? "(absent)" : After[B]});
+					InlineSettings(Row, A < 0 ? Empty : Before[A], B < 0 ? Empty : After[B], InlineBudget, Check);
 				}
-				Entry.m_vSettings.push_back(Row);
+				Entry.m_vSettings.push_back(std::move(Row));
 			};
 			size_t Prefix = 0, EndA = Before.size(), EndB = After.size();
 			while(Prefix < EndA && Prefix < EndB && Before[Prefix] == After[Prefix])

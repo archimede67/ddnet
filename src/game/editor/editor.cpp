@@ -3547,6 +3547,13 @@ void CEditor::RenderModebar(CUIRect View)
 
 void CEditor::RenderStatusbar(CUIRect View, CUIRect *pTooltipRect)
 {
+	if(IsComparisonView())
+	{
+		CUIRect Status;
+		View.VSplitRight(190, pTooltipRect, &Status);
+		Ui()->DoLabel(&Status, "Read-only comparison / Esc: back", 10, TEXTALIGN_MR);
+		return;
+	}
 	CUIRect Button;
 	View.VSplitRight(100.0f, &View, &Button);
 	if(DoButton_Editor(&m_QuickActionEnvelopes, m_QuickActionEnvelopes.Label(), m_QuickActionEnvelopes.Color(), &Button, BUTTONFLAG_LEFT, m_QuickActionEnvelopes.Description()))
@@ -3701,7 +3708,10 @@ void CEditor::RenderMenubar(CUIRect MenuBar)
 	str_timestamp_format(aTimeStr, sizeof(aTimeStr), "%H:%M");
 
 	char aBuf[256];
-	str_format(aBuf, sizeof(aBuf), "X: %.1f, Y: %.1f, Z: %.1f, T: %.1f, A: %.1f, G: %i  %s", MapView()->MouseWorldPos().x / 32.0f, MapView()->MouseWorldPos().y / 32.0f, MapView()->Zoom()->GetValue(), Map()->m_EnvelopeEvaluator.m_AnimateTime * Map()->m_EnvelopeEvaluator.m_AnimateSpeed, Map()->m_EnvelopeEvaluator.m_AnimateSpeed, MapView()->MapGrid()->Factor(), aTimeStr);
+	if(IsComparisonView())
+		str_format(aBuf, sizeof(aBuf), "Read-only comparison  %s", aTimeStr);
+	else
+		str_format(aBuf, sizeof(aBuf), "X: %.1f, Y: %.1f, Z: %.1f, T: %.1f, A: %.1f, G: %i  %s", MapView()->MouseWorldPos().x / 32.0f, MapView()->MouseWorldPos().y / 32.0f, MapView()->Zoom()->GetValue(), Map()->m_EnvelopeEvaluator.m_AnimateTime * Map()->m_EnvelopeEvaluator.m_AnimateSpeed, Map()->m_EnvelopeEvaluator.m_AnimateSpeed, MapView()->MapGrid()->Factor(), aTimeStr);
 	Ui()->DoLabel(&Info, aBuf, 10.0f, TEXTALIGN_MR);
 
 	static int s_HelpButton = 0;
@@ -3711,11 +3721,8 @@ void CEditor::RenderMenubar(CUIRect MenuBar)
 	}
 
 	static int s_CloseButton = 0;
-	if(DoButton_Editor(&s_CloseButton, "×", 0, &Close, BUTTONFLAG_LEFT, "[Escape] Exit from the editor."))
-	{
-		OnClose();
-		g_Config.m_ClEditor = 0;
-	}
+	if(DoButton_Editor(&s_CloseButton, "×", m_QuickActionExit.Disabled() ? -1 : 0, &Close, BUTTONFLAG_LEFT, m_QuickActionExit.Description()))
+		m_QuickActionExit.Call();
 }
 
 void CEditor::ShowHelp()
@@ -3725,6 +3732,18 @@ void CEditor::ShowHelp()
 	{
 		ShowFileDialogError("Failed to open the link '%s' in the default web browser.", pLink);
 	}
+}
+
+bool CEditor::QuickActionAllowed(const CQuickAction *pAction) const
+{
+	if(m_MapCompare.Transitioning())
+		return false;
+	if(!m_MapCompare.Active())
+		return true;
+	return pAction == &m_QuickActionNewMap || pAction == &m_QuickActionLoadMap ||
+	       pAction == &m_QuickActionLoadIngameMap || pAction == &m_QuickActionShowHelp ||
+	       pAction == &m_QuickActionExit || pAction == &m_QuickActionCompareMaps ||
+	       pAction == &m_QuickActionReopenComparison || pAction == &m_QuickActionCloseMap;
 }
 
 void CEditor::Exit()
@@ -3745,50 +3764,43 @@ void CEditor::Render()
 {
 	m_aTooltip[0] = 0;
 	m_CursorType = CURSOR_NORMAL;
-	// The shared strip is processed before either document's content.
+	const bool Comparison = IsComparisonView();
+	const bool Gui = m_GuiActive || Comparison;
 	Graphics()->Clear(0.0f, 0.0f, 0.0f);
 	Ui()->MapScreen();
-	CUIRect SharedTabs = *Ui()->Screen();
-	SharedTabs.HSplitTop(22, nullptr, &SharedTabs);
-	SharedTabs.HSplitTop(20, &SharedTabs, nullptr);
-	SharedTabs.VSplitLeft(m_ToolBoxWidth + 2, nullptr, &SharedTabs);
-	SharedTabs.VSplitRight(2, &SharedTabs, nullptr);
-	if(m_GuiActive || m_MapCompare.Active() || m_MapCompare.Transitioning())
-		DoMapTabs(SharedTabs);
-	if(m_MapCompare.Active() || m_MapCompare.Transitioning())
-	{
-		CUIRect Content = *Ui()->Screen();
-		Content.HSplitTop(46, nullptr, &Content);
-		m_MapCompare.Render(*this, Content);
-		Ui()->RenderPopupMenus();
-		RenderMousePointer();
-		return;
-	}
-	// basic start
 	CUIRect View = *Ui()->Screen();
-	Ui()->MapScreen();
-	m_CursorType = CURSOR_NORMAL;
 
 	float Width = View.w;
 	float Height = View.h;
 
 	// render checker
 	CUIRect BackgroundView = View;
-	if(m_GuiActive)
+	if(Gui)
 		BackgroundView.HSplitTop(44, nullptr, &BackgroundView);
-	RenderBackground(BackgroundView, m_CheckerTexture, 32.0f, 1.0f);
+	if(Comparison)
+		RenderBackground(BackgroundView, g_pData->m_aImages[IMAGE_BACKGROUND_NOISE].m_Id, 80, 0.26f);
+	else
+		RenderBackground(BackgroundView, m_CheckerTexture, 32.0f, 1.0f);
 
-	UpdateBrushPicker();
+	if(!Comparison)
+		UpdateBrushPicker();
 
-	CUIRect MenuBar, ModeBar, ToolBar, StatusBar, ExtraEditor, ToolBox;
-	if(m_GuiActive)
+	CUIRect MenuBar, ModeBar, ToolBar, StatusBar, ExtraEditor, ToolBox, CompareToolbar;
+	if(Gui)
 	{
 		View.HSplitTop(20.0f, &MenuBar, &View);
 		View.HSplitTop(78.0f, &ToolBar, &View);
-		View.VSplitLeft(m_ToolBoxWidth, &ToolBox, &View);
+		if(Comparison)
+		{
+			ToolBar.HSplitTop(26, nullptr, &CompareToolbar);
+			CompareToolbar.Margin(6, &CompareToolbar);
+			CompareToolbar.HSplitTop(23, &CompareToolbar, nullptr);
+		}
+		if(!Comparison)
+			View.VSplitLeft(m_ToolBoxWidth, &ToolBox, &View);
 
 		View.HSplitBottom(16.0f, &View, &StatusBar);
-		if(!m_ShowPicker && m_ActiveExtraEditor != EXTRAEDITOR_NONE)
+		if(!Comparison && !m_ShowPicker && m_ActiveExtraEditor != EXTRAEDITOR_NONE)
 			View.HSplitBottom(m_aExtraEditorSplits[(int)m_ActiveExtraEditor], &View, &ExtraEditor);
 	}
 	else
@@ -3801,10 +3813,10 @@ void CEditor::Render()
 	}
 
 	//	a little hack for now
-	if(m_Mode == MODE_LAYERS)
+	if(!Comparison && m_Mode == MODE_LAYERS)
 		MapView()->Render(View);
 
-	if(m_Dialog == DIALOG_NONE && CLineInput::GetActiveInput() == nullptr)
+	if(!IsComparisonView() && m_Dialog == DIALOG_NONE && CLineInput::GetActiveInput() == nullptr)
 	{
 		// handle undo/redo hotkeys
 		if(Ui()->CheckActiveItem(nullptr))
@@ -3838,17 +3850,20 @@ void CEditor::Render()
 	const float BackgroundBrightness = 0.26f;
 	const float BackgroundScale = 80.0f;
 
-	if(m_GuiActive)
+	if(Gui)
 	{
 		RenderBackground(MenuBar, IGraphics::CTextureHandle(), BackgroundScale, 0.0f);
 		MenuBar.Margin(2.0f, &MenuBar);
 
-		RenderBackground(ToolBox, g_pData->m_aImages[IMAGE_BACKGROUND_NOISE].m_Id, BackgroundScale, BackgroundBrightness);
-		ToolBox.Margin(2.0f, &ToolBox);
+		if(!Comparison)
+		{
+			RenderBackground(ToolBox, g_pData->m_aImages[IMAGE_BACKGROUND_NOISE].m_Id, BackgroundScale, BackgroundBrightness);
+			ToolBox.Margin(2.0f, &ToolBox);
+		}
 
-		CUIRect ToolbarBackground = ToolBar;
-		ToolbarBackground.HSplitTop(24, nullptr, &ToolbarBackground);
-		RenderBackground(ToolbarBackground, g_pData->m_aImages[IMAGE_BACKGROUND_NOISE].m_Id, BackgroundScale, BackgroundBrightness);
+		// Groups manage their own low-level clipping, so foreground chrome is
+		// drawn after the world. Every interactive control is processed once.
+		RenderBackground(ToolBar, g_pData->m_aImages[IMAGE_BACKGROUND_NOISE].m_Id, BackgroundScale, BackgroundBrightness);
 		ToolBar.Margin(2.0f, &ToolBar);
 		ToolBar.VSplitLeft(m_ToolBoxWidth, &ModeBar, &ToolBar);
 
@@ -3856,21 +3871,34 @@ void CEditor::Render()
 		StatusBar.Margin(2.0f, &StatusBar);
 	}
 
+	const bool UiEnabled = Ui()->Enabled();
+	// Modal controls render later with input enabled; comparison controls and
+	// their scroll regions must not claim that same input underneath them.
+	if(Comparison && (m_Dialog != DIALOG_NONE || Ui()->IsPopupOpen()))
+		Ui()->SetEnabled(false);
+	if(Comparison)
+		m_MapCompare.Render(*this, View, CompareToolbar);
+
 	// do the toolbar
 	{
 		CUIRect MapTabs;
 		ToolBar.HSplitTop(20.0f, &MapTabs, &ToolBar);
 		ToolBar.HSplitTop(5.0f, nullptr, &ToolBar);
 
-		if(m_Mode == MODE_LAYERS)
-			DoToolbarLayers(ToolBar);
-		else if(m_Mode == MODE_IMAGES)
-			DoToolbarImages(ToolBar);
-		else if(m_Mode == MODE_SOUNDS)
-			DoToolbarSounds(ToolBar);
+		if(Gui)
+			DoMapTabs(MapTabs);
+		if(!IsComparisonView())
+		{
+			if(m_Mode == MODE_LAYERS)
+				DoToolbarLayers(ToolBar);
+			else if(m_Mode == MODE_IMAGES)
+				DoToolbarImages(ToolBar);
+			else if(m_Mode == MODE_SOUNDS)
+				DoToolbarSounds(ToolBar);
+		}
 	}
 
-	if(m_Dialog == DIALOG_NONE)
+	if(!m_MapCompare.Transitioning() && m_Dialog == DIALOG_NONE && !Ui()->IsPopupOpen() && CLineInput::GetActiveInput() == nullptr)
 	{
 		const bool ModPressed = Input()->ModifierIsPressed();
 		const bool ShiftPressed = Input()->ShiftIsPressed();
@@ -3923,7 +3951,7 @@ void CEditor::Render()
 		}
 	}
 
-	if(m_GuiActive)
+	if(Gui && !IsComparisonView())
 	{
 		CUIRect DragBar;
 		ToolBox.VSplitRight(1.0f, &ToolBox, &DragBar);
@@ -3945,11 +3973,17 @@ void CEditor::Render()
 	Ui()->MapScreen();
 
 	CUIRect TooltipRect;
-	if(m_GuiActive)
+	if(Gui)
 	{
 		RenderMenubar(MenuBar);
-		RenderModebar(ModeBar);
-		if(!m_ShowPicker)
+		if(Comparison)
+		{
+			ModeBar.HSplitTop(20, &ModeBar, nullptr);
+			Ui()->DoLabel(&ModeBar, "Comparison", 10, TEXTALIGN_MC);
+		}
+		else if(!IsComparisonView())
+			RenderModebar(ModeBar);
+		if(!IsComparisonView() && !m_ShowPicker)
 		{
 			if(m_ActiveExtraEditor != EXTRAEDITOR_NONE)
 			{
@@ -3977,7 +4011,8 @@ void CEditor::Render()
 	}
 
 	RenderPressedKeys(View);
-	RenderSavingIndicator(View);
+	if(!Comparison)
+		RenderSavingIndicator(View);
 
 	if(m_Dialog == DIALOG_MAPSETTINGS_ERROR)
 	{
@@ -3996,7 +4031,7 @@ void CEditor::Render()
 		m_PopupEventWasActivated = true;
 	}
 
-	if(m_Dialog == DIALOG_NONE && !Ui()->IsPopupHovered() && Ui()->MouseInside(&View))
+	if(!IsComparisonView() && m_Dialog == DIALOG_NONE && !Ui()->IsPopupHovered() && Ui()->MouseInside(&View))
 	{
 		// handle zoom hotkeys
 		if(CLineInput::GetActiveInput() == nullptr)
@@ -4056,11 +4091,13 @@ void CEditor::Render()
 		}
 	}
 
+	Ui()->SetEnabled(UiEnabled);
 	m_FileBrowser.Render();
 	m_Prompt.Render();
 	m_FontTyper.Render();
 
-	MapView()->UpdateZoom();
+	if(!IsComparisonView())
+		MapView()->UpdateZoom();
 
 	// Cancel color pipette with escape before closing popup menus with escape
 	if(m_ColorPipetteActive && Ui()->ConsumeHotkey(CUi::HOTKEY_ESCAPE))
@@ -4071,16 +4108,17 @@ void CEditor::Render()
 	Ui()->RenderPopupMenus();
 	FreeDynamicPopupMenus();
 
-	UpdateColorPipette();
+	if(!IsComparisonView())
+		UpdateColorPipette();
 
-	if(m_Dialog == DIALOG_NONE && !m_PopupEventActivated && Ui()->ConsumeHotkey(CUi::HOTKEY_ESCAPE))
+	if(!IsComparisonView() && m_Dialog == DIALOG_NONE && !m_PopupEventActivated && Ui()->ConsumeHotkey(CUi::HOTKEY_ESCAPE))
 	{
 		OnClose();
 		g_Config.m_ClEditor = 0;
 	}
 
 	// The tooltip can be set in popup menus so we have to render the tooltip after the popup menus.
-	if(m_GuiActive)
+	if(Gui)
 		RenderTooltip(TooltipRect);
 
 	Ui()->RenderBackButton();
@@ -4536,7 +4574,10 @@ void CEditor::AddDefaultMap()
 	std::unique_ptr<CEditorMap> pNewMap = std::make_unique<CEditorMap>(this);
 	pNewMap->CreateDefault();
 	m_vpMaps.push_back(std::move(pNewMap));
-	m_SelectedMap = m_vpMaps.size() - 1;
+	if(IsComparisonView())
+		m_MapCompare.SelectMap(*this, m_vpMaps.back().get());
+	else
+		m_SelectedMap = m_vpMaps.size() - 1;
 	m_MapTabsRevealSelected = true;
 	UpdateMapDisplayNames();
 }
@@ -4942,17 +4983,27 @@ void CEditor::OnInput(const IInput::CEvent &Event)
 		}
 	}
 
-	if(m_MapCompare.Active() || m_MapCompare.Transitioning())
-	{
-		m_MapCompare.OnInput(*this, Event);
-		return;
-	}
 	if(m_Dialog == DIALOG_NONE && CLineInput::GetActiveInput() == nullptr && Event.m_Key == KEY_F1)
 	{
 		if((Event.m_Flags & IInput::FLAG_PRESS) != 0 && (Event.m_Flags & IInput::FLAG_REPEAT) == 0)
 		{
 			m_QuickActionShowHelp.Call();
 		}
+		return;
+	}
+
+	if(IsComparisonView())
+	{
+		if(!m_MapCompare.Transitioning())
+		{
+			m_Prompt.OnInput(Event);
+			if(m_Dialog != DIALOG_NONE || CLineInput::GetActiveInput() != nullptr)
+			{
+				Ui()->OnInput(Event);
+				return;
+			}
+		}
+		m_MapCompare.OnInput(*this, Event);
 		return;
 	}
 
@@ -4978,6 +5029,7 @@ void CEditor::OnRender()
 		Ui()->ClearHotkeys();
 		Input()->Clear();
 		m_MapCompare.EndFrame(*this);
+		CLineInput::RenderCandidates();
 		return;
 	}
 	Ui()->SetMouseSlow(false);
@@ -5109,6 +5161,10 @@ bool CEditor::Load(const char *pFilename, int StorageType)
 	if(Result)
 	{
 		m_vpMaps.push_back(std::move(pNewMap));
+		// Loading from a comparison's file dialog must release dialog ownership
+		// before the document manager can schedule its safe transition.
+		if(m_Dialog != DIALOG_NONE)
+			OnDialogClose();
 		m_MapCompare.SelectMap(*this, m_vpMaps.back().get());
 		m_SelectedMap = m_vpMaps.size() - 1;
 		m_MapTabsRevealSelected = true;

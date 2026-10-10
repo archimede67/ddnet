@@ -61,9 +61,12 @@ void CScrollRegion::End()
 	if(!ContentOverflows())
 		return;
 
-	DoScrollInput();
-	UpdateHotScrollRegion();
-	AdvanceAnimation();
+	if(Ui()->Enabled())
+	{
+		DoScrollInput();
+		UpdateHotScrollRegion();
+		AdvanceAnimation();
+	}
 	DoSlider();
 }
 
@@ -323,7 +326,7 @@ void CScrollRegion::DoSlider()
 	const float MousePos = m_Params.m_ScrollHorizontal ? Ui()->MouseX() : Ui()->MouseY();
 	const bool WasActive = Ui()->ActiveItem() == pId;
 	Ui()->DoButtonLogic(pId, 0, &m_RailRect, BUTTONFLAG_LEFT); // Result ignored, we only care about the button becoming and being active
-	if(Ui()->CheckActiveItem(pId))
+	if(Ui()->Enabled() && Ui()->CheckActiveItem(pId))
 	{
 		if(!WasActive)
 		{

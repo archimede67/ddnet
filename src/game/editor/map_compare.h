@@ -196,7 +196,7 @@ public:
 	void Close();
 	void OnInput(CEditor &Editor, const IInput::CEvent &Event);
 	void OnUpdate(CEditor &Editor);
-	void Render(CEditor &Editor, CUIRect View);
+	void Render(CEditor &Editor, CUIRect View, CUIRect Toolbar);
 };
 
 // Stable viewer ownership and a single worker shared by all comparison tabs.
@@ -240,7 +240,7 @@ public:
 	void Reopen(CEditor &Editor);
 	void OnUpdate(CEditor &Editor);
 	void OnInput(CEditor &Editor, const IInput::CEvent &Event);
-	void Render(CEditor &Editor, CUIRect View);
+	void Render(CEditor &Editor, CUIRect View, CUIRect Toolbar);
 	void EndFrame(CEditor &Editor);
 };
 #endif

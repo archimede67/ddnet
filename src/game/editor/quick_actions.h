@@ -32,7 +32,7 @@ REGISTER_QUICK_ACTION(
 	ALWAYS_FALSE,
 	ALWAYS_FALSE,
 	DEFAULT_BTN,
-	"[Escape] Exit from the editor.")
+	"Exit from the editor.")
 REGISTER_QUICK_ACTION(
 	BrushPicker,
 	"Brush picker",
@@ -340,12 +340,17 @@ REGISTER_QUICK_ACTION(
 	"[Ctrl+A] Open a map and add everything from that map to the current map.")
 REGISTER_QUICK_ACTION(
 	CloseMap,
-	"Close map",
-	[&]() { m_MapCompare.CloseMap(*this, Map()); },
+	"Close tab",
+	[&]() {
+		if(m_MapCompare.Active())
+			m_MapCompare.Selected()->Close();
+		else
+			m_MapCompare.CloseMap(*this, Map());
+	},
 	ALWAYS_FALSE,
 	ALWAYS_FALSE,
 	DEFAULT_BTN,
-	"[Ctrl+F4] Close the current map.")
+	"[Ctrl+F4] Close the current map or comparison tab.")
 REGISTER_QUICK_ACTION(
 	ReopenComparison,
 	"Reopen comparison",
