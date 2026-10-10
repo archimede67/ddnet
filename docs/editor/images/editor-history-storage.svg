@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="344" viewBox="0 0 760 344" role="img" aria-labelledby="title desc">
+  <title id="title">Two complete tile states share unchanged storage</title>
+  <desc id="desc">Revision A refers to original chunk X and unchanged chunk Y. Revision B, after painting X, refers to new chunk X prime and the same Y. Only shared nodes along X's path and X's chunk detach. Tree levels and unrelated document records are omitted.</desc>
+  <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#536579"/></marker></defs>
+  <rect width="760" height="344" rx="12" fill="#f7f9fc"/>
+  <g font-family="Segoe UI,Arial,sans-serif" fill="#172d43" text-anchor="middle">
+    <text x="380" y="33" font-size="20" font-weight="600">Painting X preserves A and creates B</text>
+    <g stroke="#536579" stroke-width="2" marker-end="url(#arrow)" fill="none">
+      <path d="M205 103L150 199"/><path d="M245 103L365 199"/><path d="M515 103L395 199"/><path d="M555 103L610 199"/>
+    </g>
+    <g stroke="#a3b6cb" fill="#fff">
+      <rect x="110" y="55" width="235" height="48" rx="8"/>
+      <rect x="415" y="55" width="235" height="48" rx="8"/>
+      <rect x="30" y="203" width="215" height="65" rx="8"/>
+      <rect x="272" y="203" width="216" height="65" rx="8" fill="#e1edff"/>
+      <rect x="515" y="203" width="215" height="65" rx="8" fill="#def2e8"/>
+    </g>
+    <g font-size="18">
+      <text x="227" y="85">Revision A: before</text><text x="532" y="85">Revision B: after</text>
+      <text x="137" y="230">Original chunk X</text><text x="380" y="230">Unchanged chunk Y</text><text x="622" y="230">New chunk X′</text>
+    </g>
+    <g font-size="14" fill="#42566c">
+      <text x="135" y="153">Old path</text><text x="627" y="153">Copied path</text>
+      <text x="137" y="254">Still owned by A</text><text x="380" y="254">One allocation, shared</text><text x="622" y="254">Copy of one 32×32 chunk</text>
+      <text x="380" y="301">Simplified tree: unchanged branches share storage too.</text>
+      <text x="380" y="323">Empty subtrees allocate nothing. Other document records are omitted.</text>
+    </g>
+  </g>
+</svg>

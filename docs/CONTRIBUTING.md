@@ -24,6 +24,9 @@ If you would like to work on an issue, please comment on it to be assigned to it
 
 Adding new features generally requires the support of at least two maintainers to avoid feature creep.
 
+For in-game editor changes, read the [editor undo/redo contributor guide](editor/EDITOR_HISTORY.md).
+It traces an edit through the system and explains how to add properties, objects and map-item types.
+
 ## Programming languages
 
 We currently use the following languages to develop DDNet.

@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="498" viewBox="0 0 760 498" role="img" aria-labelledby="title desc">
+  <title id="title">One interaction, one revision; restore after UI callbacks return</title>
+  <desc id="desc">An edit begins, updates live objects repeatedly, completes, then captures and compares values. A changed result becomes one revision; a no-op preserves the timeline. Undo or cancellation queues restoration until the end-of-frame safe point, prepares replacement objects and publishes them. Navigation moves the cursor only after successful restoration.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#536579"/></marker>
+  </defs>
+  <rect width="760" height="498" rx="12" fill="#f7f9fc"/>
+  <g font-family="Segoe UI,Arial,sans-serif" text-anchor="middle" fill="#172d43">
+    <g font-size="20" font-weight="600">
+      <text x="195" y="34">Record an edit</text><text x="565" y="34">Restore a state</text>
+    </g>
+    <g stroke="#536579" stroke-width="2" marker-end="url(#arrow)">
+      <path d="M195 107V124"/><path d="M195 181V198"/><path d="M195 255V272"/><path d="M195 329V346"/>
+      <path d="M565 107V124"/><path d="M565 181V198"/><path d="M565 255V272"/><path d="M565 329V346"/>
+    </g>
+    <g stroke="#a3b6cb" fill="#fff">
+      <rect x="30" y="53" width="330" height="54" rx="8"/>
+      <rect x="30" y="127" width="330" height="54" rx="8"/>
+      <rect x="30" y="201" width="330" height="54" rx="8"/>
+      <rect x="30" y="275" width="330" height="54" rx="8"/>
+      <rect x="400" y="53" width="330" height="54" rx="8"/>
+      <rect x="400" y="127" width="330" height="54" rx="8"/>
+      <rect x="400" y="201" width="330" height="54" rx="8" fill="#fff1dc"/>
+      <rect x="400" y="275" width="330" height="54" rx="8"/>
+      <rect x="30" y="349" width="330" height="54" rx="8" fill="#def2e8"/>
+      <rect x="400" y="349" width="330" height="54" rx="8" fill="#def2e8"/>
+    </g>
+    <g font-size="17">
+      <text x="195" y="86">Begin(owner, label)</text>
+      <text x="195" y="150">Update live objects</text><text x="195" y="172" font-size="14">Repeat through the stroke or drag</text>
+      <text x="195" y="234">Complete on release / accept</text>
+      <text x="195" y="308">Capture → validate → compare</text>
+      <text x="195" y="372">Changed: retain one new revision</text><text x="195" y="394" font-size="14">Unchanged: keep timeline and redo</text>
+      <text x="565" y="86">Undo / redo / cancel / rollback</text>
+      <text x="565" y="160">Queue the target state</text>
+      <text x="565" y="224">End-of-frame safe point</text><text x="565" y="246" font-size="14">Rendering and UI callbacks have returned</text>
+      <text x="565" y="298">Prepare objects and resources</text><text x="565" y="320" font-size="14">Resolve references and session choices</text>
+      <text x="565" y="372">Replace live document</text><text x="565" y="394" font-size="14">Move navigation cursor after success</text>
+    </g>
+    <g font-size="14" fill="#42566c">
+      <text x="195" y="439">Updates do not capture the map.</text>
+      <text x="195" y="461">One owner groups the whole interaction.</text>
+      <text x="565" y="439">Old object pointers can become invalid.</text>
+      <text x="565" y="461">Undo during an edit cancels that edit first.</text>
+    </g>
+  </g>
+</svg>

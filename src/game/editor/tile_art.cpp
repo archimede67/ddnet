@@ -1,5 +1,4 @@
 #include "editor.h"
-#include "editor_actions.h"
 
 #include <base/fs.h>
 #include <base/str.h>
@@ -108,64 +107,61 @@ static std::shared_ptr<CEditorImage> ImageInfoToEditorImage(CEditorMap *pMap, CI
 	std::shared_ptr<CEditorImage> pEditorImage = std::make_shared<CEditorImage>(pMap);
 	*pEditorImage = std::move(Image);
 
-	pEditorImage->m_Texture = pMap->Editor()->Graphics()->LoadTextureRaw(*pEditorImage, pMap->Editor()->Graphics()->TextureLoadFlags(), pName);
+	pEditorImage->m_Texture = pMap->Editor()->Graphics()->LoadTextureRaw(pEditorImage->ImageCopy(), pMap->Editor()->Graphics()->TextureLoadFlags(), pName);
 	pEditorImage->m_External = 0;
 	str_copy(pEditorImage->m_aName, pName);
 
 	return pEditorImage;
 }
 
-static std::shared_ptr<CLayerTiles> AddLayerWithImage(CEditorMap *pMap, const std::shared_ptr<CLayerGroup> &pGroup, int Width, int Height, CImageInfo &Image, const char *pName)
-{
-	std::shared_ptr<CEditorImage> pEditorImage = ImageInfoToEditorImage(pMap, Image, pName);
-	pMap->m_vpImages.push_back(pEditorImage);
-
-	std::shared_ptr<CLayerTiles> pLayer = std::make_shared<CLayerTiles>(pMap, Width, Height);
-	str_copy(pLayer->m_aName, pName);
-	pLayer->m_Image = pMap->m_vpImages.size() - 1;
-	pGroup->AddLayer(pLayer);
-
-	return pLayer;
-}
-
 static void SetTilelayerIndices(const std::shared_ptr<CLayerTiles> &pLayer, const std::array<ColorRGBA, NumTiles> &aColorGroup, const CImageInfo &Image)
 {
-	for(int x = 0; x < pLayer->m_Width; x++)
+	for(int x = 0; x < pLayer->Width(); x++)
 	{
-		for(int y = 0; y < pLayer->m_Height; y++)
-			pLayer->m_pTiles[x + y * pLayer->m_Width].m_Index = GetColorIndex(aColorGroup, Image.PixelColor(x, y));
+		for(int y = 0; y < pLayer->Height(); y++)
+			pLayer->m_Tiles.Update(x + y * pLayer->Width(), [&](auto &Cell) { Cell.m_Index = GetColorIndex(aColorGroup, Image.PixelColor(x, y)); });
 	}
 }
 
-void CEditorMap::AddTileArt(CImageInfo &&Image, const char *pFilename, bool IgnoreHistory)
+void CEditorMap::AddTileArt(CImageInfo &&Image, const char *pFilename)
 {
-	char aTileArtFilename[IO_MAX_PATH_LENGTH];
-	fs_split_file_extension(fs_filename(pFilename), aTileArtFilename, sizeof(aTileArtFilename));
-
-	std::shared_ptr<CLayerGroup> pGroup = NewGroup();
-	str_copy(pGroup->m_aName, aTileArtFilename);
-
-	int ImageCount = m_vpImages.size();
-
-	auto vUniqueColors = GetUniqueColors(Image);
-	auto vaColorGroups = GroupColors(vUniqueColors);
-	auto vColorImages = ColorGroupsToImages(vaColorGroups);
-	char aImageName[IO_MAX_PATH_LENGTH];
-	for(size_t i = 0; i < vColorImages.size(); i++)
+	struct CPreparedArt
 	{
-		str_format(aImageName, sizeof(aImageName), "%s %" PRIzu, aTileArtFilename, i + 1);
-		std::shared_ptr<CLayerTiles> pLayer = AddLayerWithImage(this, pGroup, Image.m_Width, Image.m_Height, vColorImages[i], aImageName);
-		SetTilelayerIndices(pLayer, vaColorGroups[i], Image);
-	}
-	auto IndexMap = SortImages();
-
-	if(!IgnoreHistory)
-	{
-		m_EditorHistory.RecordAction(std::make_shared<CEditorActionTileArt>(this, ImageCount, pFilename, IndexMap));
-	}
-
-	Image.Free();
-	OnModify();
+		std::shared_ptr<CLayerGroup> m_pGroup;
+		std::vector<std::shared_ptr<CEditorImage>> m_vpImages;
+	};
+	auto Prepared = Editor()->PrepareDocumentOperation("tile art", [&] {
+		CImageInfo OwnedImage(std::move(Image));
+		char aTileArtFilename[IO_MAX_PATH_LENGTH];
+		fs_split_file_extension(fs_filename(pFilename), aTileArtFilename, sizeof(aTileArtFilename));
+		auto pGroup = std::make_shared<CLayerGroup>(this);
+		str_copy(pGroup->m_aName, aTileArtFilename);
+		const auto vUniqueColors = GetUniqueColors(OwnedImage);
+		const auto vaColorGroups = GroupColors(vUniqueColors);
+		auto vColorImages = ColorGroupsToImages(vaColorGroups);
+		std::vector<std::shared_ptr<CEditorImage>> vpImages;
+		for(size_t i = 0; i < vColorImages.size(); i++)
+		{
+			char aImageName[IO_MAX_PATH_LENGTH];
+			str_format(aImageName, sizeof(aImageName), "%s %" PRIzu, aTileArtFilename, i + 1);
+			auto pImage = ImageInfoToEditorImage(this, vColorImages[i], aImageName);
+			auto pLayer = std::make_shared<CLayerTiles>(this, OwnedImage.m_Width, OwnedImage.m_Height);
+			str_copy(pLayer->m_aName, aImageName);
+			pLayer->m_Image = CDocumentReference{pImage->m_Id};
+			SetTilelayerIndices(pLayer, vaColorGroups[i], OwnedImage);
+			pGroup->m_vpLayers.push_back(pLayer);
+			vpImages.push_back(pImage);
+		}
+		return CPreparedArt{std::move(pGroup), std::move(vpImages)};
+	});
+	if(!Prepared.m_pGroup)
+		return;
+	m_DocumentHistory.Edit(this, "Add tile art", editor_history::ECategory::MAP, [&] {
+		m_vpImages.insert(m_vpImages.end(), Prepared.m_vpImages.begin(), Prepared.m_vpImages.end());
+		m_vpGroups.push_back(Prepared.m_pGroup);
+		SortImages();
+		OnModify();
+	});
 }
 
 void CEditor::TileArtCheckColors()
@@ -185,7 +181,7 @@ void CEditor::TileArtCheckColors()
 	}
 	else
 	{
-		Map()->AddTileArt(std::move(m_TileArtImageInfo), m_aTileArtFilename, false);
+		Map()->AddTileArt(std::move(m_TileArtImageInfo), m_aTileArtFilename);
 		OnDialogClose();
 	}
 }

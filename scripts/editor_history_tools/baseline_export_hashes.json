@@ -1,0 +1,50 @@
+[
+  {
+    "fixture": "coverage.map",
+    "byte_equal": true,
+    "all_items_equal": true,
+    "all_data_equal": true,
+    "items": 19,
+    "data_blocks": 17,
+    "old_sha256": "88a73f3d1540605c3bcf55d6fd141467561fe0869d84cf6c24444e67d52a3f9e",
+    "new_sha256": "88a73f3d1540605c3bcf55d6fd141467561fe0869d84cf6c24444e67d52a3f9e",
+    "old_bytes": 3805,
+    "new_bytes": 3805
+  },
+  {
+    "fixture": "Gold Mine.map",
+    "byte_equal": true,
+    "all_items_equal": true,
+    "all_data_equal": true,
+    "items": 49,
+    "data_blocks": 36,
+    "old_sha256": "b63e68c1e12f11696811cf2d54c6123ca225f24756e7bca85978a1774cbc947e",
+    "new_sha256": "b63e68c1e12f11696811cf2d54c6123ca225f24756e7bca85978a1774cbc947e",
+    "old_bytes": 229160,
+    "new_bytes": 229160
+  },
+  {
+    "fixture": "jungle_day.map",
+    "byte_equal": true,
+    "all_items_equal": true,
+    "all_data_equal": true,
+    "items": 24,
+    "data_blocks": 12,
+    "old_sha256": "7164786db03343f595f8cbfbb0d5a40cf74a3b972f4888af5bd18d0d2038ede7",
+    "new_sha256": "7164786db03343f595f8cbfbb0d5a40cf74a3b972f4888af5bd18d0d2038ede7",
+    "old_bytes": 3671,
+    "new_bytes": 3671
+  },
+  {
+    "fixture": "Tutorial.map",
+    "byte_equal": true,
+    "all_items_equal": true,
+    "all_data_equal": true,
+    "items": 165,
+    "data_blocks": 153,
+    "old_sha256": "796a3716fe64657bfb8bc6af5f9422b197278919a9d875e43b9bbbcb73262fc0",
+    "new_sha256": "796a3716fe64657bfb8bc6af5f9422b197278919a9d875e43b9bbbcb73262fc0",
+    "old_bytes": 1060483,
+    "new_bytes": 1060483
+  }
+]

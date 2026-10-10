@@ -3,6 +3,8 @@
 #ifndef GAME_CLIENT_LINEINPUT_H
 #define GAME_CLIENT_LINEINPUT_H
 
+#include "lineinput_history.h"
+
 #include <base/vmath.h>
 
 #include <engine/client.h>
@@ -12,6 +14,7 @@
 
 #include <game/client/ui_rect.h>
 
+#include <optional>
 #include <string>
 
 enum class EInputPriority
@@ -82,6 +85,11 @@ private:
 	bool m_WasRendered;
 
 	char m_ClearButtonId;
+	CLineInputHistory m_LocalHistory;
+	bool m_ProcessingInput = false;
+	CLineInputHistory::CState TextHistoryState() const;
+	void RestoreTextHistoryState(const CLineInputHistory::CState &State);
+	void RecordTextHistoryState(const CLineInputHistory::CState &Before);
 
 	void UpdateStrData();
 	enum EMoveDirection
@@ -175,6 +183,9 @@ public:
 	void SetCalculateOffsetCallback(const FCalculateOffsetCallback &pfnCalculateOffsetCallback) { m_pfnCalculateOffsetCallback = pfnCalculateOffsetCallback; }
 
 	bool ProcessInput(const IInput::CEvent &Event);
+	/** Traverse only this focused draft. A false result must not trigger map undo. */
+	bool UndoText();
+	bool RedoText();
 	bool WasChanged()
 	{
 		const bool Changed = m_WasChanged;
@@ -232,6 +243,7 @@ public:
 
 	void SetInteger64(int64_t Number, int Base = 10, int HexPrefix = 6);
 	int64_t GetInteger64(int Base = 10) const;
+	std::optional<int64_t> IntegerDraft(int Base) const;
 
 	void SetFloat(float Number);
 	float GetFloat() const;

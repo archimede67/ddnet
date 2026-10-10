@@ -123,9 +123,12 @@ private:
 	std::vector<CItemInfo> m_vItems;
 	std::vector<CDataInfo> m_vDatas;
 	std::vector<CExtendedItemType> m_vExtendedItemTypes;
+	bool m_EagerCompression = false;
+	bool m_Failed = false;
 
 	int GetTypeFromIndex(int Index) const;
 	int GetExtendedItemTypeIndex(int Type, const CUuid *pUuid);
+	bool CompressData(CDataInfo &Info, const void *pData);
 
 public:
 	CDataFileWriter();
@@ -137,15 +140,23 @@ public:
 		m_vItems = std::move(Other.m_vItems);
 		m_vDatas = std::move(Other.m_vDatas);
 		m_vExtendedItemTypes = std::move(Other.m_vExtendedItemTypes);
+		m_EagerCompression = Other.m_EagerCompression;
+		m_Failed = Other.m_Failed;
 	}
 	~CDataFileWriter();
 
 	[[nodiscard]] bool Open(class IStorage *pStorage, const char *pFilename, int StorageType = IStorage::TYPE_SAVE);
+	/** Compress each block directly from the caller's buffer, retaining no raw copy. */
+	void SetEagerCompression() { m_EagerCompression = true; }
+	bool Failed() const { return m_Failed; }
 	int AddItem(int Type, int Id, size_t Size, const void *pData, const CUuid *pUuid = nullptr);
 	int AddData(size_t Size, const void *pData, ECompressionLevel CompressionLevel = COMPRESSION_DEFAULT);
 	int AddDataSwapped(size_t Size, const void *pData);
 	int AddDataString(const char *pStr);
-	void Finish();
+	/** Close an unfinished output; the caller may then remove its temporary file. */
+	void Abort();
+	/** Returns false on compression, write, or close failure. */
+	bool Finish();
 };
 
 #endif

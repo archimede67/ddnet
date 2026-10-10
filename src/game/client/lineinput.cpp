@@ -2,6 +2,7 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "lineinput.h"
 
+#include "number_input.h"
 #include "ui.h"
 
 #include <base/dbg.h>
@@ -27,6 +28,7 @@ void CLineInput::SetBuffer(char *pStr, size_t MaxSize, size_t MaxChars)
 {
 	if(m_pStr && m_pStr == pStr)
 		return;
+	m_LocalHistory.Clear();
 	const char *pLastStr = m_pStr;
 	m_pStr = pStr;
 	m_MaxSize = MaxSize;
@@ -49,19 +51,26 @@ void CLineInput::SetBuffer(char *pStr, size_t MaxSize, size_t MaxChars)
 
 void CLineInput::Clear()
 {
+	const auto Before = !m_ProcessingInput && IsActive() ? std::optional(TextHistoryState()) : std::nullopt;
 	mem_zero(m_pStr, m_MaxSize);
 	UpdateStrData();
+	if(Before)
+		RecordTextHistoryState(*Before);
 }
 
 void CLineInput::Set(const char *pString)
 {
+	const auto Before = !m_ProcessingInput && IsActive() ? std::optional(TextHistoryState()) : std::nullopt;
 	str_copy(m_pStr, pString, m_MaxSize);
 	UpdateStrData();
 	SetCursorOffset(m_Len);
+	if(Before)
+		RecordTextHistoryState(*Before);
 }
 
 void CLineInput::SetRange(const char *pString, size_t Begin, size_t End)
 {
+	const auto Before = !m_ProcessingInput && IsActive() ? std::optional(TextHistoryState()) : std::nullopt;
 	if(Begin > End)
 		std::swap(Begin, End);
 	Begin = std::clamp<size_t>(Begin, 0, m_Len);
@@ -95,6 +104,8 @@ void CLineInput::SetRange(const char *pString, size_t Begin, size_t End)
 		m_pStr[m_Len] = '\0';
 		m_SelectionStart = m_SelectionEnd = m_CursorPos;
 	}
+	if(Before)
+		RecordTextHistoryState(*Before);
 }
 
 void CLineInput::Insert(const char *pString, size_t Begin)
@@ -188,10 +199,65 @@ size_t CLineInput::OffsetFromDisplayToActual(size_t DisplayOffset)
 	return DisplayOffset;
 }
 
+CLineInputHistory::CState CLineInput::TextHistoryState() const
+{
+	return {m_pStr == nullptr ? "" : m_pStr, m_CursorPos, m_SelectionStart, m_SelectionEnd};
+}
+
+void CLineInput::RestoreTextHistoryState(const CLineInputHistory::CState &State)
+{
+	str_copy(m_pStr, State.m_Text.c_str(), m_MaxSize);
+	UpdateStrData();
+	SetCursorOffset(State.m_Cursor);
+	SetSelection(State.m_SelectionStart, State.m_SelectionEnd);
+	m_WasChanged = true;
+	m_WasCursorChanged = true;
+}
+
+void CLineInput::RecordTextHistoryState(const CLineInputHistory::CState &Before)
+{
+	if(!m_ProcessingInput && IsActive())
+		m_LocalHistory.Record(Before, TextHistoryState());
+}
+
+bool CLineInput::UndoText()
+{
+	if(!IsActive())
+		return false;
+	const auto State = m_LocalHistory.Undo(TextHistoryState());
+	if(!State)
+		return false;
+	RestoreTextHistoryState(*State);
+	return true;
+}
+
+bool CLineInput::RedoText()
+{
+	if(!IsActive())
+		return false;
+	const auto State = m_LocalHistory.Redo(TextHistoryState());
+	if(!State)
+		return false;
+	RestoreTextHistoryState(*State);
+	return true;
+}
+
 bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 {
 	// update derived attributes to handle external changes to the buffer
 	UpdateStrData();
+
+	const auto Before = TextHistoryState();
+	if((Event.m_Flags & IInput::FLAG_PRESS) && Input()->ModifierIsPressed() && !Input()->AltIsPressed() && (Event.m_Key == KEY_Z || Event.m_Key == KEY_Y))
+	{
+		const bool Redo = Event.m_Key == KEY_Y || Input()->ShiftIsPressed();
+		if(Redo)
+			RedoText();
+		else
+			UndoText();
+		return true;
+	}
+	m_ProcessingInput = true;
 
 	const size_t OldCursorPos = m_CursorPos;
 	const bool Selecting = Input()->ShiftIsPressed();
@@ -406,6 +472,9 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 
 	m_WasCursorChanged |= OldCursorPos != m_CursorPos;
 	m_WasCursorChanged |= SelectionLength != GetSelectionLength();
+	m_ProcessingInput = false;
+	if(IsActive())
+		m_LocalHistory.Record(Before, TextHistoryState());
 	return KeyHandled;
 }
 
@@ -662,11 +731,13 @@ void CLineInput::Deactivate() const
 
 void CLineInput::OnActivate()
 {
+	m_LocalHistory.Clear();
 	Input()->StartTextInput();
 }
 
 void CLineInput::OnDeactivate()
 {
+	m_LocalHistory.Clear();
 	Input()->StopTextInput();
 	m_MouseSelection.m_Selecting = false;
 }
@@ -715,6 +786,11 @@ void CLineInputNumber::SetInteger64(int64_t Number, int Base, int HexPrefix)
 int64_t CLineInputNumber::GetInteger64(int Base) const
 {
 	return str_toint64_base(GetString(), Base);
+}
+
+std::optional<int64_t> CLineInputNumber::IntegerDraft(int Base) const
+{
+	return ParseIntegerDraft(GetString(), Base);
 }
 
 void CLineInputNumber::SetFloat(float Number)

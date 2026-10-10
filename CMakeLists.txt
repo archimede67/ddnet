@@ -2753,7 +2753,9 @@ if(CLIENT)
     laser_data.h
     lineinput.cpp
     lineinput.h
+    lineinput_history.h
     multiview.cpp
+    number_input.h
     pickup_data.cpp
     pickup_data.h
     prediction/entities/character.cpp
@@ -2806,9 +2808,7 @@ if(CLIENT)
     component.h
     editor.cpp
     editor.h
-    editor_action.h
-    editor_actions.cpp
-    editor_actions.h
+    editor_factory.cpp
     editor_history.cpp
     editor_history.h
     editor_object.cpp
@@ -2816,8 +2816,6 @@ if(CLIENT)
     editor_props.cpp
     editor_server_settings.cpp
     editor_server_settings.h
-    editor_trackers.cpp
-    editor_trackers.h
     editor_ui.cpp
     editor_ui.h
     enums.h
@@ -2829,6 +2827,18 @@ if(CLIENT)
     file_browser.h
     font_typer.cpp
     font_typer.h
+    history/document_history.cpp
+    history/document_history.h
+    history/edit_coordinator.h
+    history/resource_blob.h
+    history/revision_history.h
+    history/save_job.cpp
+    history/save_job.h
+    history/save_queue.h
+    history/save_state.h
+    history/shared_value.h
+    history/tile_plane.h
+    history/tile_projection.h
     layer_selector.cpp
     layer_selector.h
     map_grid.cpp
@@ -2838,6 +2848,14 @@ if(CLIENT)
     map_view.cpp
     map_view.h
     mapitems.h
+    mapitems/document_export.cpp
+    mapitems/document_export.h
+    mapitems/document_graph.cpp
+    mapitems/document_graph.h
+    mapitems/document_restore.cpp
+    mapitems/document_session.h
+    mapitems/document_values.h
+    mapitems/element_values.h
     mapitems/envelope.cpp
     mapitems/envelope.h
     mapitems/envelope_evaluator.cpp
@@ -2871,6 +2889,7 @@ if(CLIENT)
     mapitems/map_io.cpp
     mapitems/sound.cpp
     mapitems/sound.h
+    mapitems/tile_values.h
     popups.cpp
     prompt.cpp
     prompt.h
@@ -2883,8 +2902,6 @@ if(CLIENT)
     quick_action.h
     quick_actions.cpp
     quick_actions.h
-    references.cpp
-    references.h
     smooth_value.cpp
     smooth_value.h
     tile_art.cpp
@@ -2904,6 +2921,7 @@ if(CLIENT)
     render_layer.h
     render_map.cpp
     render_map.h
+    tile_cursor.h
     # tidy-alphabetical-end
   )
   set(GAME_GENERATED_CLIENT
@@ -3080,6 +3098,44 @@ if(CLIENT)
 
   list(APPEND TARGETS_OWN game-client)
   list(APPEND TARGETS_LINK game-client)
+
+  # The adapter tests replace only the editor factory. The client/bootstrap,
+  # controls, SDL input, native map writer and headless services stay real.
+  if(HEADLESS_CLIENT AND (GTEST_FOUND OR DOWNLOAD_GTEST))
+    set(EDITOR_TEST_CLIENT_SRC ${CLIENT_SRC})
+    list(REMOVE_ITEM EDITOR_TEST_CLIENT_SRC "${PROJECT_SOURCE_DIR}/src/game/editor/editor_factory.cpp")
+    add_executable(editor-testrunner EXCLUDE_FROM_ALL
+      ${EDITOR_TEST_CLIENT_SRC}
+      src/test/editor_runtime/history.cpp
+      ${DEPS_CLIENT}
+      $<TARGET_OBJECTS:engine-gfx>
+      $<TARGET_OBJECTS:engine-shared>
+      $<TARGET_OBJECTS:game-shared>
+      $<TARGET_OBJECTS:rust-bridge-shared>
+    )
+    add_dependencies(editor-testrunner generate_content_types)
+    if(VULKAN)
+      add_dependencies(editor-testrunner build_vulkan_shaders)
+    endif()
+    target_link_libraries(editor-testrunner ${LIBS_CLIENT} ${GTEST_LIBRARIES})
+    get_target_property(EDITOR_CLIENT_INCLUDES game-client INCLUDE_DIRECTORIES)
+    get_target_property(EDITOR_CLIENT_DEFINITIONS game-client COMPILE_DEFINITIONS)
+    target_include_directories(editor-testrunner SYSTEM PRIVATE ${GTEST_INCLUDE_DIRS})
+    if(EDITOR_CLIENT_INCLUDES)
+      target_include_directories(editor-testrunner SYSTEM PRIVATE ${EDITOR_CLIENT_INCLUDES})
+    endif()
+    if(EDITOR_CLIENT_DEFINITIONS)
+      target_compile_definitions(editor-testrunner PRIVATE ${EDITOR_CLIENT_DEFINITIONS})
+    endif()
+    list(APPEND TARGETS_OWN editor-testrunner)
+    list(APPEND TARGETS_LINK editor-testrunner)
+    add_custom_target(run_editor_tests
+      COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_editor_history.py
+        --client $<TARGET_FILE:editor-testrunner> --source ${PROJECT_SOURCE_DIR}
+      DEPENDS editor-testrunner
+      USES_TERMINAL
+    )
+  endif()
 endif()
 
 
@@ -3454,6 +3510,8 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     csv_test.cpp
     datafile_test.cpp
     dbg_test.cpp
+    editor_history.cpp
+    editor_history_benchmark.cpp
     editor_test.cpp
     fs_test.cpp
     gameworld_test.cpp
@@ -3464,6 +3522,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     jobs_test.cpp
     json_test.cpp
     jsonwriter_test.cpp
+    lineinput_history.cpp
     linereader_test.cpp
     mapbugs_test.cpp
     mapitems_test.cpp
@@ -3511,6 +3570,10 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     src/engine/client/sqlite.cpp
     src/game/client/components/censor.cpp
     src/game/client/components/censor.h
+    src/game/editor/history/save_job.cpp
+    src/game/editor/history/save_job.h
+    src/game/editor/mapitems/document_export.cpp
+    src/game/editor/mapitems/document_export.h
     # tidy-alphabetical-end
   )
 
@@ -3551,6 +3614,10 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
   add_custom_target(run_tests_verbose
     DEPENDS run_cxx_tests_verbose
   )
+  if(TARGET run_editor_tests)
+    add_dependencies(run_cxx_tests run_editor_tests)
+    add_dependencies(run_cxx_tests_verbose run_editor_tests)
+  endif()
   if(NOT MSVC OR CMAKE_BUILD_TYPE STREQUAL Release OR CMAKE_BUILD_TYPE STREQUAL RelWithDebInfo OR CMAKE_BUILD_TYPE STREQUAL MinSizeRel)
     # On MSVC, Rust tests only work in the release mode because we link our C++
     # code with the debug C standard library (/MTd) but Rust only supports
@@ -4184,7 +4251,7 @@ foreach(target ${TARGETS_LINK})
 endforeach()
 
 if(PRECOMPILE_HEADERS AND NOT CMAKE_VERSION VERSION_LESS 3.16)
-  foreach(target engine-shared game-client game-server-without-main game-shared testrunner)
+  foreach(target engine-shared game-client editor-testrunner game-server-without-main game-shared testrunner)
     if(TARGET ${target})
       target_precompile_headers(${target} PRIVATE src/pch.h)
     endif()
