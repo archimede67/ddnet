@@ -64,6 +64,11 @@ ACCESSOR(TSection, CMapCompare, m_Section, int)
 ACCESSOR(TDivider, CEditor, m_ToolBoxDivider, CUIRect)
 using TToolbarIdArray = char[17];
 ACCESSOR(TToolbarIds, CMapCompare, m_aButtonIds, TToolbarIdArray)
+using THeadingIdArray = char[2];
+ACCESSOR(THeadingIds, CMapCompare, m_aSourceHeadingIds, THeadingIdArray)
+ACCESSOR(TNativeTooltips, CUi, m_Tooltips, CTooltips)
+using TTooltipCache = std::unordered_map<uintptr_t, CTooltip>;
+ACCESSOR(TTooltipCacheEntries, CTooltips, m_Tooltips, TTooltipCache)
 ACCESSOR(TPanning, CMapCompare, m_Panning, bool)
 ACCESSOR(TToolboxWidth, CEditor, m_ToolBoxWidth, float)
 ACCESSOR(TPrompt, CEditor, m_Prompt, CPrompt)
@@ -133,6 +138,12 @@ struct TRenderPane
 	friend Type Access(TRenderPane);
 };
 template struct CAccess<TRenderPane, &CMapCompare::RenderPane>;
+struct TRenderStatusbar
+{
+	using Type = void (CEditor::*)(CUIRect, CUIRect *);
+	friend Type Access(TRenderStatusbar);
+};
+template struct CAccess<TRenderStatusbar, &CEditor::RenderStatusbar>;
 bool HasSnapshot(CMapCompare &);
 const void *SnapshotIdentity(CMapCompare &);
 const MapDiff::CSnapshot &CapturedSnapshot(CMapCompare &, int);
@@ -278,18 +289,15 @@ class CSmokeEditor : public CEditor
 	}
 	vec2 SectionPosition(int Section)
 	{
-		const float Width = m_ToolBoxWidth - 5;
-		if(Width < 180)
-			return vec2(2 + (Width - 4) / 2, 100 + 24 * Section + 12);
-		return vec2(2 + (Width - 4) * (Section % 2 ? 0.75f : 0.25f), 100 + 24 * (Section / 2) + 12);
+		return vec2(2 + (m_ToolBoxWidth - 5) * (Section + 0.5f) / 4, 58);
 	}
-	float NavigatorTop() { return 100 + (m_ToolBoxWidth - 5 < 180 ? 96 : 48); }
+	float NavigatorTop() { return 73; }
 	vec2 ToolbarPosition(int Id)
 	{
-		// Independent native shell oracle: rows start at 47/74, are 22 high,
-		// and successive controls are separated by 5 units.
-		const float aCenters[] = {22.5f, 72.5f, 135, 221, 22.5f, 72.5f, 120};
-		return vec2(m_ToolBoxWidth + 2 + aCenters[Id], Id < 4 ? 58 : 85);
+		// Independent compact toolbar oracle: one 22-high row at y=47,
+		// with native 5-unit gaps and a total span of 342 units.
+		const float aCenters[] = {20, 65, 121, 199.5f, 262, 297, 329.5f};
+		return vec2(m_ToolBoxWidth + 2 + aCenters[Id], 58);
 	}
 	vec2 ShowAllPosition() { return vec2(m_ToolBoxWidth < 185 ? m_ToolBoxWidth / 2 : m_ToolBoxWidth - 39, Ui()->Screen()->h - 14); }
 	void CloseComparison()
@@ -1649,7 +1657,7 @@ class CSmokeEditor : public CEditor
 				if(Navigator[Row] >= 0 && Result().m_vEntries[Navigator[Row]].m_Kind == MapDiff::EEntryKind::LAYER)
 					return vec2(100, NavigatorTop() + Row * 36 + 18);
 			Check(false, "spatial entry available after settings");
-			return vec2(100, 141);
+			return vec2(100, NavigatorTop() + 18);
 		});
 		Do([this] {
 			Check(Result().m_vEntries[Compare().*Access(TSelectedEntry{})].m_Kind == MapDiff::EEntryKind::LAYER, "settings click switches back to the map view");
@@ -3439,6 +3447,64 @@ class CSmokeEditor : public CEditor
 		Expected.Free();
 	}
 
+	void CheckSourceTooltipPixels(int Side)
+	{
+		CImageInfo Actual;
+		static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Actual);
+		if(!Actual.m_pData)
+		{
+			Check(false, "source tooltip framebuffer available");
+			return;
+		}
+		// Build the expected identity from the fixture, without reading the
+		// tooltip cache or invoking the production tooltip renderer.
+		const auto *pSource = Side ? m_pAfter : m_pBefore;
+		const std::string Text = std::string(Side ? "+ After: " : "- Before: ") + pSource->m_aDisplayName + (Side ? " * (unsaved changes)\n" : " (saved)\n") + pSource->m_aFilename;
+		const std::string Tail = Side ? "/after.map" : "/before.map";
+		const size_t TailStart = Text.find(Tail);
+		Check(TailStart > 256 && TailStart != std::string::npos, "tooltip path tail is beyond the status buffer");
+		const auto Bounds = TextRender()->TextBoundingBox(14, Text.c_str(), -1, 600);
+		Check(Bounds.m_H > 42, "full source identity wraps across multiple tooltip lines");
+		const float Left = std::clamp(Ui()->MouseX() - (Bounds.m_W + 10) / 2, 5.0f, Ui()->Screen()->w - Bounds.m_W - 15) + 5;
+		const float Top = 101; // 91 pane origin + native 5-unit gap and padding.
+		Graphics()->Clear(0, 0, 0);
+		CTextCursor Cursor;
+		Cursor.SetPosition(vec2(Left, Top));
+		Cursor.m_FontSize = 14;
+		Cursor.m_LineWidth = 600;
+		// Green only in the oracle isolates the literal final path component.
+		Cursor.m_vColorSplits.emplace_back(TailStart, Tail.size(), ColorRGBA(0, 1, 0, 1));
+		TextRender()->TextEx(&Cursor, Text.c_str());
+		CImageInfo Expected;
+		static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Expected);
+		int Glyphs = 0, Missing = 0, TailGlyphs = 0, TailMissing = 0;
+		for(int y = Top / Ui()->Screen()->h * Actual.m_Height; y < (Top + Bounds.m_H) / Ui()->Screen()->h * Actual.m_Height; ++y)
+			for(int x = Left / Ui()->Screen()->w * Actual.m_Width; x < (Left + Bounds.m_W) / Ui()->Screen()->w * Actual.m_Width; ++x)
+			{
+				const auto Oracle = Expected.PixelColor(x, y);
+				if(Oracle.g < 0.98f)
+					continue;
+				const auto Color = Actual.PixelColor(x, y);
+				const bool Absent = Color.r < 0.9f || Color.g < 0.9f || Color.b < 0.9f;
+				++Glyphs;
+				Missing += Absent;
+				if(Oracle.r < 0.02f && Oracle.b < 0.02f)
+				{
+					++TailGlyphs;
+					TailMissing += Absent;
+				}
+			}
+		Check(Glyphs > 100 && Missing == 0, "sustained heading hover draws the full wrapped identity; missing glyph pixels=" + std::to_string(Missing));
+		Check(TailGlyphs > 12 && TailMissing == 0, "floating tooltip visibly draws the path tail beyond status help; missing tail pixels=" + std::to_string(TailMissing));
+		if(Missing || TailMissing)
+		{
+			CImageLoader::SavePng(Storage()->OpenFile("screenshots/compact-tooltip-actual.png", IOFLAG_WRITE, IStorage::TYPE_SAVE), "compact-tooltip-actual.png", Actual);
+			CImageLoader::SavePng(Storage()->OpenFile("screenshots/compact-tooltip-oracle.png", IOFLAG_WRITE, IStorage::TYPE_SAVE), "compact-tooltip-oracle.png", Expected);
+		}
+		Actual.Free();
+		Expected.Free();
+	}
+
 	void DragSidebar(float Width)
 	{
 		auto Move = [this](vec2 Point) { Ui()->OnCursorMove((Point.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (Point.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); };
@@ -3457,48 +3523,39 @@ class CSmokeEditor : public CEditor
 		auto Move = [this](vec2 Point) { Ui()->OnCursorMove((Point.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (Point.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); };
 		Do([this, Comparison] {
 			const auto &Divider = this->*Access(TDivider{});
-			Check(Divider.x == m_ToolBoxWidth - 5 && Divider.y == 100 && Divider.w == 5 && Divider.h == Ui()->Screen()->h - 102, "native shell sidebar boundaries match for every document");
+			const float SidebarTop = Comparison ? 73 : 100;
+			Check(Divider.x == m_ToolBoxWidth - 5 && Divider.y == SidebarTop && Divider.w == 5 && Divider.h == Ui()->Screen()->h - SidebarTop - 2, "shared sidebar uses each document's toolbar height");
 			CImageInfo Image;
 			static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Image);
 			Check(Image.m_pData != nullptr, "mode icon framebuffer is available");
 			if(Image.m_pData)
-				for(int Mode = 0; Mode < 3; ++Mode)
+				for(int Mode = 0; Mode < (Comparison ? 4 : 3); ++Mode)
 				{
-					const float Center = 2 + (m_ToolBoxWidth - 5) * (Mode + 0.5f) / 3;
+					const float Center = 2 + (m_ToolBoxWidth - 5) * (Mode + 0.5f) / (Comparison ? 4 : 3);
 					float Brightest = 0;
 					int Glyphs = 0;
-					for(float Y = 78; Y < 93; ++Y)
+					for(float Y = Comparison ? 51 : 78; Y < (Comparison ? 66 : 93); ++Y)
 						for(float X = Center - 7; X < Center + 7; ++X)
 						{
 							const auto Color = Image.PixelColor(X / Ui()->Screen()->w * Image.m_Width, Y / Ui()->Screen()->h * Image.m_Height);
 							Brightest = std::max(Brightest, Color.r);
 							Glyphs += Color.r > 0.4f;
 						}
-					Check(Glyphs > 3 && (Comparison ? Brightest <= 0.62f : Brightest > 0.8f), Comparison ? "disabled native mode glyph is visible and grey" : "enabled native mode glyph stays bright");
-				}
-			if(Comparison && Image.m_pData)
-				for(int Action = 0; Action < 3; ++Action)
-				{
-					const float Center = Ui()->Screen()->w - 52 - Action * 110;
-					int Glyphs = 0;
-					float Brightest = 0;
-					for(float Y = Ui()->Screen()->h - 13; Y < Ui()->Screen()->h - 3; ++Y)
-						for(float X = Center - 35; X < Center + 35; ++X)
-						{
-							const auto Color = Image.PixelColor(X / Ui()->Screen()->w * Image.m_Width, Y / Ui()->Screen()->h * Image.m_Height);
-							Glyphs += Color.r > 0.4f;
-							Brightest = std::max(Brightest, Color.r);
-						}
-					Check(Glyphs > 10 && Brightest <= 0.62f, "native disabled status label is visible and grey at position " + std::to_string(Action));
+					Check(Glyphs > 3 && Brightest > 0.8f, Comparison ? "active comparison section glyph is visible and bright" : "enabled native mode glyph stays bright");
 				}
 			Image.Free();
 			if(Comparison)
 			{
 				const auto &Panes = Compare().*Access(TPanes{});
-				Check(Panes[0].x == m_ToolBoxWidth && Panes[0].y == 168 && Panes[1].x + Panes[1].w == Ui()->Screen()->w, "comparison content uses native toolbar and sidebar boundaries");
+				Check(Panes[0].x == m_ToolBoxWidth && Panes[0].y == 91 && Panes[1].x + Panes[1].w == Ui()->Screen()->w, "comparison panes start after one source title row");
+				Check(ToolbarPosition(6).x + 12.5f <= Ui()->Screen()->w - 2, "all seven actions fit in the compact toolbar at native width limits");
+				const CUIRect Status{2, Ui()->Screen()->h - 14, Ui()->Screen()->w - 4, 12};
+				CUIRect Tooltip;
+				(this->*Access(TRenderStatusbar{}))(Status, &Tooltip);
+				Check(Tooltip.x == Status.x && Tooltip.y == Status.y && Tooltip.w == Status.w && Tooltip.h == Status.h, "comparison returns the full status rectangle without reserving editor footer buttons");
 			}
 		});
-		for(int Row = 0; Row < 2; ++Row)
+		for(int Row = 0; Row < (Comparison ? 1 : 2); ++Row)
 		{
 			auto pId = std::make_shared<const void *>(nullptr);
 			Do([this, Move, Row] { Move(vec2(m_ToolBoxWidth + 22, Row ? 85 : 58)); });
@@ -3517,13 +3574,50 @@ class CSmokeEditor : public CEditor
 				Do([this, Move, Id] { Move(ToolbarPosition(Id)); });
 				Delay(2);
 				Do([this, Id] { Check(Ui()->HotItem() == &(Compare().*Access(TToolbarIds{}))[Id], "comparison toolbar action is reachable inside the shell: " + std::to_string(Id)); });
-				if(Id != 3 && Id != 6)
+				if(Id != 6)
 				{
-					Do([this, Move, Id] { const float aWidths[] = {45, 45, 70, 92, 45, 45, 40}; Move(ToolbarPosition(Id) + vec2(aWidths[Id] / 2 + 2.5f, 0)); });
+					Do([this, Move, Id] { const float aWidths[] = {40, 40, 62, 85, 30, 30, 25}; Move(ToolbarPosition(Id) + vec2(aWidths[Id] / 2 + 2.5f, 0)); });
 					Delay(2);
 					Do([this, Id] { const auto &Ids = Compare().*Access(TToolbarIds{}); Check(Ui()->HotItem() != &Ids[Id] && Ui()->HotItem() != &Ids[Id + 1], "comparison toolbar retains native five-unit button gaps"); });
 				}
 			}
+		if(Comparison)
+		{
+			auto pSection = std::make_shared<int>();
+			Do([this, pSection] { *pSection = Compare().*Access(TSection{}); });
+			for(int Section = 0; Section < 4; ++Section)
+			{
+				Click([this, Section] { return SectionPosition(Section); });
+				Do([this, Section, Move] {
+					const int aIds[] = {12, 13, 15, 16};
+					const char *apNames[] = {"Changes:", "Layers:", "Envelopes:", "Server settings:"};
+					Check((Compare().*Access(TSection{})) == Section && Ui()->HotItem() == &(Compare().*Access(TToolbarIds{}))[aIds[Section]], "section icon click selects its named section");
+					Check(str_startswith(m_aTooltip, apNames[Section]), "section tooltip names its destination");
+					Move(vec2(Ui()->Screen()->w - 40, 18));
+				});
+				Delay();
+				Do([this, Section] {
+					CImageInfo Image;
+					static_cast<CGraphics_Threaded *>(Graphics())->ReadFramebuffer(Image);
+					Check(Image.m_pData != nullptr, "selected section framebuffer is available");
+					if(Image.m_pData)
+						for(int Icon = 0; Icon < 4; ++Icon)
+						{
+							const float X = 5 + (m_ToolBoxWidth - 5) * Icon / 4;
+							const auto Color = Image.PixelColor(X / Ui()->Screen()->w * Image.m_Width, 58 / Ui()->Screen()->h * Image.m_Height);
+							Check((Color.r > Color.g + 0.2f) == (Icon == Section), "only the selected comparison icon uses native selected styling");
+						}
+					Image.Free();
+				});
+			}
+			Click([this, pSection] { return SectionPosition(*pSection); });
+			for(int Action = 0; Action < 3; ++Action)
+			{
+				Do([this, Move, Action] { Move(vec2(Ui()->Screen()->w - 52 - Action * 110, Ui()->Screen()->h - 8)); });
+				Delay();
+				Do([this] { Check(Ui()->HotItem() != &m_QuickActionEnvelopes && Ui()->HotItem() != &m_QuickActionServerSettings && Ui()->HotItem() != &m_QuickActionHistory, "comparison footer has no editor action targets"); Check(str_find(m_aTooltip, " changes. - red: Before") != nullptr, "unhovered comparison footer shows the summary"); });
+			}
+		}
 	}
 
 	void ChromePolishSteps()
@@ -3545,6 +3639,8 @@ class CSmokeEditor : public CEditor
 				for(float Y : {24.0f, 32.0f, 40.0f, 52.0f, 62.0f, 72.0f, 95.0f})
 					for(float X : {10.0f, m_ToolBoxWidth + 5, Ui()->Screen()->w / 2, Ui()->Screen()->w - 30})
 					{
+						if(Tabs().Active() && Y >= 71)
+							continue;
 						const auto Color = Image.PixelColor(X / Ui()->Screen()->w * Image.m_Width, Y / Ui()->Screen()->h * Image.m_Height);
 						Check(!(Color.r > 0.85f && Color.g < 0.15f && Color.b > 0.85f), "tab and control rows occlude magenta world geometry at y=" + std::to_string(Y));
 					}
@@ -3559,7 +3655,7 @@ class CSmokeEditor : public CEditor
 				// CreateDefault's derived zoom is only synchronized on its first
 				// normal render. Establish that invariant for both owned fixtures.
 				pMap->m_MapViewState.m_WorldZoom = pMap->m_MapViewState.m_Zoom.GetValue() / 100;
-				pMap->m_Modified = true;
+				str_copy(pMap->m_aFilename, Side ? "maps/compact-controls/saved-after.map" : "maps/compact-controls/saved-before.map");
 				pMap->m_vSettings = {Side ? "sv_name shared words shared words shared words shared words shared words cafè 世間🙃 shared end" : "sv_name shared words shared words shared words shared words shared words café 世界🙂 shared end"};
 				for(int Group = 0; Group < 2; ++Group)
 				{
@@ -3575,6 +3671,7 @@ class CSmokeEditor : public CEditor
 					}
 					pGroup->AddLayer(pLayer);
 				}
+				pMap->m_Modified = Side != 0;
 				(Side ? m_pAfter : m_pBefore) = pMap.get();
 				Maps().push_back(std::move(pMap));
 			}
@@ -3612,8 +3709,50 @@ class CSmokeEditor : public CEditor
 				Screenshot("polish-comparison-chrome-" + std::to_string(Width) + "-sidebar-" + std::to_string(Sidebar));
 			}
 		}
+		Do([this] { Graphics()->Resize(750, 600, 0); OnWindowResize(); m_ToolBoxWidth = 400; });
+		Delay();
+		Do([this] { Check(Ui()->Screen()->w == 750 && (Compare().*Access(TPanes{}))[0].w == 171, "minimum rendered 5:4 aspect keeps both comparison panes usable"); });
+		for(int Id = 0; Id < 7; ++Id)
+		{
+			Do([this, Id] { const auto Point = ToolbarPosition(Id); Ui()->OnCursorMove((Point.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (Point.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); });
+			Delay(2);
+			Do([this, Id] { Check(Ui()->HotItem() == &(Compare().*Access(TToolbarIds{}))[Id] && ToolbarPosition(6).x + 12.5f <= Ui()->Screen()->w - 2, "compact action remains reachable with only 346 available units"); });
+		}
+		Screenshot("compact-minimum-aspect-sidebar-400");
+		Do([this] { Graphics()->Resize(800, 600, 0); OnWindowResize(); });
 		Do([this] { m_ToolBoxWidth = 225; });
 		Delay();
+		for(int Side = 0; Side < 2; ++Side)
+		{
+			Do([this, Side] {
+				auto *pSource = Side ? m_pAfter : m_pBefore;
+				str_copy(pSource->m_aDisplayName, Side ? "A long After map name that should be clipped to a single compact source heading" : "A long Before map name that should be clipped to a single compact source heading");
+				str_copy(pSource->m_aFilename, (std::string("maps/") + std::string(180, Side ? 'a' : 'b') + (Side ? "/after.map" : "/before.map")).c_str());
+				const auto &Pane = (Compare().*Access(TPanes{}))[Side];
+				const vec2 Point(Pane.x + Pane.w / 2, Pane.y - 10);
+				Ui()->OnCursorMove((Point.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (Point.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
+			});
+			Delay(75);
+			Do([this, Side] {
+				const auto *pSource = Side ? m_pAfter : m_pBefore;
+				const auto *pId = &(Compare().*Access(THeadingIds{}))[Side];
+				Check(Ui()->HotItem() == pId, "source heading has a stable native hover target");
+				Check(str_find(m_aTooltip, pSource->m_aDisplayName) && str_find(m_aTooltip, Side ? "unsaved changes" : "(saved)"), "clipped source heading exposes name and saved state through status help");
+				const auto &Tooltips = (Ui()->*Access(TNativeTooltips{})).*Access(TTooltipCacheEntries{});
+				const auto It = Tooltips.find(reinterpret_cast<uintptr_t>(pId));
+				Check(It != Tooltips.end() && str_length(It->second.m_pText) > 256 && str_find(It->second.m_pText, pSource->m_aDisplayName) && str_find(It->second.m_pText, pSource->m_aFilename) && str_find(It->second.m_pText, Side ? "unsaved changes" : "(saved)") && It->second.m_WidthHint == 600.0f, "native wrapping heading tooltip retains full identity beyond the status buffer limit");
+				CheckSourceTooltipPixels(Side);
+				m_SavedCenter = Compare().*Access(TCenter{});
+				Mouse(SDL_BUTTON_LEFT, true);
+			});
+			Delay();
+			Do([this] { Check(Ui()->ActiveItem() == nullptr && !(Compare().*Access(TPanning{})) && (Compare().*Access(TCenter{})) == m_SavedCenter, "source heading hover cannot claim a click or start a canvas gesture"); Mouse(SDL_BUTTON_LEFT, false); });
+			Delay();
+			Screenshot(Side ? "compact-after-heading-tooltip" : "compact-before-heading-tooltip");
+		}
+		Do([this] { m_pBefore->m_aFilename[0] = '\0'; const auto &Pane = (Compare().*Access(TPanes{}))[0]; const vec2 Point(Pane.x + Pane.w / 2, Pane.y - 10); Ui()->OnCursorMove((Point.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (Point.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); });
+		Delay();
+		Do([this] { Check(str_find(m_aTooltip, "unsaved map") && str_find(m_aTooltip, "No saved path"), "unsaved source heading explains missing path"); str_copy(m_pBefore->m_aFilename, "maps/compact-controls/saved-before.map"); });
 		Do([this, CheckChrome] {
 			CheckChrome();
 			for(auto *pAction : {&m_QuickActionSave, &m_QuickActionSaveAs, &m_QuickActionSaveCopy, &m_QuickActionAppendMap, &m_QuickActionMapDetails, &m_QuickActionTestMapLocally, &m_QuickActionAddGroup, &m_QuickActionToggleGrid, &m_QuickActionEnvelopes})
@@ -3626,10 +3765,10 @@ class CSmokeEditor : public CEditor
 		});
 		auto pEditingState = std::make_shared<std::pair<int, EExtraEditor>>();
 		Do([this, pEditingState] { *pEditingState = {m_Mode, m_ActiveExtraEditor}; m_Mode = MODE_SOUNDS; m_ActiveExtraEditor = EXTRAEDITOR_HISTORY; });
-		auto CheckEditingState = [this] { Check(m_Mode == MODE_SOUNDS && m_ActiveExtraEditor == EXTRAEDITOR_HISTORY, "individual disabled shell control preserves non-default mode and extra editor"); };
-		for(int Mode = 0; Mode < 3; ++Mode)
+		auto CheckEditingState = [this] { Check(m_Mode == MODE_SOUNDS && m_ActiveExtraEditor == EXTRAEDITOR_HISTORY, "comparison controls preserve non-default source mode and extra editor"); };
+		for(int Section = 0; Section < 4; ++Section)
 		{
-			Click([this, Mode] { return vec2(2 + (m_ToolBoxWidth - 5) * (Mode + 0.5f) / 3, 85); });
+			Click([this, Section] { return SectionPosition(Section); });
 			Do(CheckEditingState);
 		}
 		for(int Arrow : {SDLK_LEFT, SDLK_RIGHT})
@@ -3643,7 +3782,7 @@ class CSmokeEditor : public CEditor
 			Do(CheckEditingState);
 		}
 		Press(SDLK_ESCAPE);
-		Do([this, CheckEditingState] { Check(!Tabs().Active(), "disabled shell checks return to the normal map"); CheckEditingState(); CheckSources("disabled native shell controls after returning to map"); });
+		Do([this, CheckEditingState] { Check(!Tabs().Active(), "compact shell checks return to the normal map"); CheckEditingState(); CheckSources("compact shell controls after returning to map"); });
 		Do([this, pEditingState] { m_Mode = pEditingState->first; m_ActiveExtraEditor = pEditingState->second; OpenComparison(*this, m_pBefore, m_pAfter); });
 		WaitReady();
 		Click([this] { return SectionPosition(3); });
@@ -3739,14 +3878,21 @@ class CSmokeEditor : public CEditor
 		Do([this] { Check(m_Dialog == DIALOG_NONE && !Tabs().Active() && Map() != m_pBefore && Map() != m_pAfter, "successful Load selects the new document after releasing dialog input"); CloseMap(Maps().size() - 1, false); OpenComparison(*this, m_pBefore, m_pAfter); });
 		WaitReady();
 		Do([this, pLoadState] { Check(Tabs().Selected() == pLoadState->first && SnapshotIdentity(Compare()) == pLoadState->second, "successful Load preserves the prior comparison and cached snapshot"); CheckSources("successful comparison Load"); });
+		Do([this] { Check(!((Ui()->*Access(TNativeTooltips{})).*Access(TTooltipCacheEntries{})).empty(), "comparison source tooltips are cached before disposal"); });
 		Click([] { return vec2(20, 10); });
 		Click([] { return vec2(40, 194); });
-		Do([this] { Check(!Tabs().Active(), "File Close targets the comparison document"); CheckSources("comparison File close"); m_QuickActionReopenComparison.Call(); });
+		Do([this] { Check(!Tabs().Active(), "File Close targets the comparison document"); Check(((Ui()->*Access(TNativeTooltips{})).*Access(TTooltipCacheEntries{})).empty(), "comparison disposal clears cached tooltip IDs and source pointers"); CheckSources("comparison File close"); m_QuickActionReopenComparison.Call(); });
 		WaitReady();
 		Do([this] { Check(Tabs().Active(), "Reopen restores a menu-closed comparison"); m_QuickActionNewMap.Call(); });
 		Delay();
 		Do([this] { Check(!Tabs().Active() && Map() != m_pBefore && Map() != m_pAfter, "New safely selects its new document from comparison"); CloseMap(Maps().size() - 1, false); m_QuickActionCompareMaps.Call(); });
 		Delay();
+		for(int Section = 0; Section < 4; ++Section)
+		{
+			Click([this, Section] { return SectionPosition(Section); });
+			Do([this] { Check(State() == 1 && (Compare().*Access(TSection{})) == 0 && (Compare().*Access(TSelectedEntry{})) == -1, "selector section icons cannot inspect stale entries"); });
+		}
+		Screenshot("compact-selector");
 		Click([] { return vec2(20, 10); });
 		Do([this] { Check(State() == 1 && Ui()->IsPopupOpen() && m_QuickActionSave.Disabled(), "selector retains shared menus and command policy"); Ui()->ClosePopupMenus(); CloseComparison(); });
 		Delay();

@@ -1155,7 +1155,7 @@ void CMapCompare::RenderSelector(CEditor &Editor, CUIRect View)
 	}
 	Buttons.VSplitRight(160, nullptr, &Buttons);
 	Buttons.Margin(4, &Buttons);
-	if(Editor.DoButton_Editor(&m_aButtonIds[9], "Compare current contents", ValidSources(Editor) ? 0 : -1, &Buttons, BUTTONFLAG_LEFT, "Open the read-only comparison.") && ValidSources(Editor))
+	if(Editor.DoButton_Editor(&m_aButtonIds[9], "Compare current contents", ValidSources(Editor) ? 0 : -1, &Buttons, BUTTONFLAG_LEFT, "Compare the current contents of both maps.") && ValidSources(Editor))
 		Editor.m_MapCompare.Open(Editor, m_apSources[0], m_apSources[1]);
 }
 
@@ -2030,18 +2030,36 @@ void CMapCompare::RenderLayerTree(CEditor &Editor, CUIRect View)
 	m_ScrollToLayer = false;
 }
 
+void CMapCompare::RenderSectionbar(CEditor &Editor, CUIRect View)
+{
+	const bool Available = m_State == EState::READY && Current(Editor);
+	const bool Interactive = Available && Editor.Ui()->Enabled() && Editor.m_Dialog == DIALOG_NONE && !Editor.Ui()->IsPopupOpen() && !Editor.m_MapCompare.Transitioning();
+	const char *apIcons[] = {FontIcon::LIST_UL, FontIcon::LAYER_GROUP, FontIcon::CHART_LINE, FontIcon::TERMINAL};
+	const char *apTips[] = {"Changes: browse map, image, sound and layer differences.", "Layers: inspect layers and comparison visibility.", "Envelopes: inspect all envelopes, including unchanged ones.", "Server settings: inspect ordered server commands, including unchanged ones."};
+	const int aIds[] = {12, 13, 15, 16};
+	const float Width = View.w / NUM_SECTIONS;
+	for(int Section = 0; Section < NUM_SECTIONS; ++Section)
+	{
+		CUIRect Button;
+		View.VSplitLeft(Width, &Button, &View);
+		const int Corners = Section == 0 ? IGraphics::CORNER_L : Section == NUM_SECTIONS - 1 ? IGraphics::CORNER_R :
+												       IGraphics::CORNER_NONE;
+		if(Editor.DoButton_FontIcon(&m_aButtonIds[aIds[Section]], apIcons[Section], Available ? m_Section == Section : -1, &Button, BUTTONFLAG_LEFT, apTips[Section], Corners) && Interactive)
+			SetSection(Section);
+	}
+}
+
 void CMapCompare::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar, CUIRect Sidebar)
 {
 	Editor.Ui()->MapScreen();
-	CUIRect ToolbarTop, ToolbarBottom;
-	CEditor::SplitToolbarRows(Toolbar, ToolbarTop, ToolbarBottom);
+	Toolbar.HSplitTop(22.0f, &Toolbar, nullptr);
 	auto Button = [&](CUIRect &Row, int Id, const char *pText, float Width, int Checked = 0, const char *pTooltip = nullptr) {
 		CUIRect Rect;
 		Row.VSplitLeft(Width, &Rect, &Row);
 		Row.VSplitLeft(5.0f, nullptr, &Row);
 		return Editor.DoButton_Editor(&m_aButtonIds[Id], pText, Checked, &Rect, BUTTONFLAG_LEFT, pTooltip ? pTooltip : pText) != 0;
 	};
-	if(Button(ToolbarTop, 0, "Back", 45, 0, "[Esc] Return to editing."))
+	if(Button(Toolbar, 0, "Back", 40, 0, "[Esc] Return to editing."))
 		Editor.m_MapCompare.SelectMap(Editor, Editor.Map());
 	if(m_State == EState::CLOSING)
 	{
@@ -2063,12 +2081,12 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar, CUIRect
 		Label(Editor, View, "Updating comparison to current map contents...", 14);
 		return;
 	}
-	if(Button(ToolbarTop, 1, "Swap", 45))
+	if(Button(Toolbar, 1, "Swap", 40))
 	{
 		Editor.m_MapCompare.Open(Editor, m_apSources[1], m_apSources[0]);
 		return;
 	}
-	if(Button(ToolbarTop, 2, m_ByGroup ? "By group" : "By layer", 70))
+	if(Button(Toolbar, 2, m_ByGroup ? "By group" : "By layer", 62))
 	{
 		m_ByGroup = !m_ByGroup;
 		const int FocusedChild = m_FocusEntry;
@@ -2084,7 +2102,7 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar, CUIRect
 	const char *pContextLabel = m_Context == CONTEXT_OFF ? "Context: off" : m_Context == CONTEXT_MAP ? "Context: map" :
 									m_ByGroup                        ? "Context: group" :
 													   "Context: layer";
-	if(Button(ToolbarTop, 3, pContextLabel, 92, m_Context != CONTEXT_OFF, "Cycle context: changes only, selected layer/group, full map. Changes stay emphasized."))
+	if(Button(Toolbar, 3, pContextLabel, 85, m_Context != CONTEXT_OFF, "Cycle context: changes only, selected layer/group, full map. Changes stay emphasized."))
 	{
 		m_Context = (m_Context + 1) % 3;
 		if(m_vChangedNavigator.empty())
@@ -2094,46 +2112,16 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar, CUIRect
 		if(m_SelectedEntry < 0 && !m_vNavigator.empty() && m_vNavigator.front() >= 0)
 			Select(m_vNavigator.front());
 	}
-	if(Button(ToolbarBottom, 4, "Prev", 45, m_vChangedNavigator.empty() ? -1 : 0, "[P] Go to the previous difference, skipping unchanged items."))
+	if(Button(Toolbar, 4, "Prev", 30, m_vChangedNavigator.empty() ? -1 : 0, "[P] Go to the previous difference, skipping unchanged items."))
 		Navigate(-1);
-	if(Button(ToolbarBottom, 5, "Next", 45, m_vChangedNavigator.empty() ? -1 : 0, "[N] Go to the next difference, skipping unchanged items."))
+	if(Button(Toolbar, 5, "Next", 30, m_vChangedNavigator.empty() ? -1 : 0, "[N] Go to the next difference, skipping unchanged items."))
 		Navigate(1);
-	if(Button(ToolbarBottom, 6, "Fit", 40, 0, "[Home] Fit the selected difference."))
+	if(Button(Toolbar, 6, "Fit", 25, 0, "[Home] Fit the selected difference."))
 		FitSelection();
-	Label(Editor, ToolbarBottom, "READ ONLY", 11);
-	CUIRect Navigator, Inspector{};
+	CUIRect Navigator = Sidebar, Inspector{};
 	if(Editor.Ui()->ActiveItem() == &Editor.m_ToolBoxDivider)
 		m_Panning = false;
 	const bool NarrowSidebar = Sidebar.w < 180;
-	CUIRect Tabs, aRows[2], aTabs[4];
-	Sidebar.HSplitTop(NarrowSidebar ? 96 : 48, &Tabs, &Navigator);
-	Tabs.VSplitRight(4, &Tabs, nullptr);
-	if(NarrowSidebar)
-	{
-		for(auto &Tab : aTabs)
-		{
-			Tabs.HSplitTop(24, &Tab, &Tabs);
-			Tab.HMargin(2, &Tab);
-		}
-	}
-	else
-	{
-		Tabs.HSplitMid(&aRows[0], &aRows[1], 3);
-		for(int Row = 0; Row < 2; ++Row)
-		{
-			aRows[Row].HMargin(2, &aRows[Row]);
-			aRows[Row].VSplitMid(&aTabs[Row * 2], &aTabs[Row * 2 + 1], 3);
-		}
-	}
-	const char *apSections[] = {"Changes", "Layers", "Envelopes", "Server settings"};
-	const char *apTips[] = {"Browse map, image, sound and layer differences.", "Inspect layers and comparison visibility.", "Inspect all envelopes, including unchanged ones.", "Inspect ordered server commands, including unchanged ones."};
-	const int aIds[] = {12, 13, 15, 16};
-	for(int Section = 0; Section < NUM_SECTIONS; ++Section)
-		if(Editor.DoButton_Editor(&m_aButtonIds[aIds[Section]], apSections[Section], m_Section == Section, &aTabs[Section], BUTTONFLAG_LEFT, apTips[Section]))
-			SetSection(Section);
-	CUIRect Summary;
-	View.HSplitTop(24, &Summary, &View);
-	Label(Editor, Summary, m_Result.ChangeCount() == 0 ? "No differences in map content. Enable context to inspect matching layers." : std::to_string(m_Result.ChangeCount()) + " changes. - red: Before   + green: After   [?]: uncertain pairing." + (MapView() ? " Drag a canvas to pan; wheel to zoom." : ""), 11);
 	const CUIRect ContentView = View;
 	const bool SettingsView = m_SelectedEntry >= 0 && m_Result.m_vEntries[m_SelectedEntry].m_Kind == MapDiff::EEntryKind::SETTINGS;
 	if(!SettingsView)
@@ -2142,11 +2130,17 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar, CUIRect
 	View.VSplitMid(&aColumns[0], &aColumns[1], 8);
 	for(int Side = 0; Side < 2; ++Side)
 	{
-		CUIRect Name, Path;
-		aColumns[Side].HSplitTop(20, &Name, &aColumns[Side]);
-		aColumns[Side].HSplitTop(26, &Path, &m_aPanes[Side]);
-		Label(Editor, Name, std::string(Side == 0 ? "- Before: " : "+ After: ") + SourceName(m_apSources[Side]), 12, Side == 0 ? REMOVE_COLOR : ADD_COLOR);
-		Label(Editor, Path, m_apSources[Side]->m_aFilename[0] ? m_apSources[Side]->m_aFilename : "No saved path", 10);
+		CUIRect Name;
+		aColumns[Side].HSplitTop(20, &Name, &m_aPanes[Side]);
+		const auto *pSource = m_apSources[Side];
+		const std::string Prefix = Side == 0 ? "- Before: " : "+ After: ";
+		Label(Editor, Name, Prefix + (pSource->m_Modified || !pSource->m_aFilename[0] ? "* " : "") + pSource->m_aDisplayName, 12, Side == 0 ? REMOVE_COLOR : ADD_COLOR);
+		m_aSourceTooltips[Side] = Prefix + SourceName(pSource) + "\n" + (pSource->m_aFilename[0] ? pSource->m_aFilename : "No saved path");
+		// Hover identity uses the native status help without claiming a gesture.
+		const std::string StatusHelp = Prefix + SourceName(pSource) + " / " + (pSource->m_aFilename[0] ? pSource->m_aFilename : "No saved path");
+		Editor.DoButtonLogic(&m_aSourceHeadingIds[Side], 0, &Name, 0, StatusHelp.c_str());
+		if(Editor.Ui()->Enabled())
+			Editor.Ui()->DoToolTip(&m_aSourceHeadingIds[Side], &Name, m_aSourceTooltips[Side].c_str(), 600.0f);
 	}
 	vec2 Mouse(Editor.Ui()->MouseX(), Editor.Ui()->MouseY());
 	const bool Interactive = Editor.m_Dialog == DIALOG_NONE && !Editor.Ui()->IsPopupOpen();
@@ -2266,7 +2260,7 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar, CUIRect
 		if(!NowSettingsView)
 			View.HSplitBottom(std::clamp(View.h * 0.36f, 130.0f, 235.0f), &View, &Inspector);
 		for(auto &Pane : m_aPanes)
-			Pane.h = View.h - 46;
+			Pane.h = View.h - 20;
 	}
 	if(m_FitAfterSettings)
 	{
@@ -2289,6 +2283,11 @@ void CMapCompare::Render(CEditor &Editor, CUIRect View, CUIRect Toolbar, CUIRect
 		}
 		if(Inspector.h > 0)
 			RenderInspector(Editor, Inspector);
+	}
+	if(!Editor.m_aTooltip[0])
+	{
+		const std::string Summary = m_Result.ChangeCount() == 0 ? "No differences in map content. Enable context to inspect matching layers." : std::to_string(m_Result.ChangeCount()) + " changes. - red: Before   + green: After   [?]: uncertain pairing." + (MapView() ? " Drag a canvas to pan; wheel to zoom." : "");
+		str_copy(Editor.m_aTooltip, Summary.c_str());
 	}
 }
 
@@ -2429,6 +2428,8 @@ void CMapCompareTabs::Dispose(CEditor &Editor, CMapCompare *pDocument, bool Reme
 		m_pSelected = nullptr;
 	if(m_pPending == pDocument)
 		m_pPending = nullptr;
+	// Native tooltips retain pointers to the document's owned source strings.
+	Editor.Ui()->OnReset();
 	m_vpDocuments.erase(std::find_if(m_vpDocuments.begin(), m_vpDocuments.end(), [&](const auto &pOther) { return pOther.get() == pDocument; }));
 }
 

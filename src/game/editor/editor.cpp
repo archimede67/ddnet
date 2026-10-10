@@ -3518,6 +3518,12 @@ void CEditor::RenderModebar(CUIRect View)
 	}
 
 	// mode buttons
+	if(ReadOnly)
+	{
+		if(auto *pComparison = m_MapCompare.Selected())
+			pComparison->RenderSectionbar(*this, ModeButtons);
+		return;
+	}
 	{
 		ModeButtons.VSplitLeft(ButtonWidth, &ModeButton, &ModeButtons);
 		static int s_LayersButton = 0;
@@ -3553,6 +3559,11 @@ void CEditor::RenderModebar(CUIRect View)
 
 void CEditor::RenderStatusbar(CUIRect View, CUIRect *pTooltipRect)
 {
+	if(IsComparisonView())
+	{
+		*pTooltipRect = View;
+		return;
+	}
 	CUIRect Button;
 	View.VSplitRight(100.0f, &View, &Button);
 	if(DoButton_Editor(&m_QuickActionEnvelopes, m_QuickActionEnvelopes.Label(), m_QuickActionEnvelopes.Color(), &Button, BUTTONFLAG_LEFT, m_QuickActionEnvelopes.Description()))
@@ -3708,7 +3719,7 @@ void CEditor::RenderMenubar(CUIRect MenuBar)
 
 	char aBuf[256];
 	if(IsComparisonView())
-		str_format(aBuf, sizeof(aBuf), "Read-only comparison  %s", aTimeStr);
+		str_copy(aBuf, aTimeStr);
 	else
 		str_format(aBuf, sizeof(aBuf), "X: %.1f, Y: %.1f, Z: %.1f, T: %.1f, A: %.1f, G: %i  %s", MapView()->MouseWorldPos().x / 32.0f, MapView()->MouseWorldPos().y / 32.0f, MapView()->Zoom()->GetValue(), Map()->m_EnvelopeEvaluator.m_AnimateTime * Map()->m_EnvelopeEvaluator.m_AnimateSpeed, Map()->m_EnvelopeEvaluator.m_AnimateSpeed, MapView()->MapGrid()->Factor(), aTimeStr);
 	Ui()->DoLabel(&Info, aBuf, 10.0f, TEXTALIGN_MR);
@@ -3789,7 +3800,7 @@ void CEditor::Render()
 	if(Gui)
 	{
 		View.HSplitTop(20.0f, &MenuBar, &View);
-		View.HSplitTop(78.0f, &ToolBar, &View);
+		View.HSplitTop(Comparison ? 51.0f : 78.0f, &ToolBar, &View);
 		View.VSplitLeft(m_ToolBoxWidth, &ToolBox, &View);
 
 		View.HSplitBottom(16.0f, &View, &StatusBar);
@@ -4107,6 +4118,8 @@ void CEditor::Render()
 	// The tooltip can be set in popup menus so we have to render the tooltip after the popup menus.
 	if(Gui)
 		RenderTooltip(TooltipRect);
+	if(Comparison && Ui()->Enabled() && m_Dialog == DIALOG_NONE && !Ui()->IsPopupOpen() && !m_MapCompare.Transitioning())
+		Ui()->OnRenderTooltip();
 
 	Ui()->RenderBackButton();
 	RenderMousePointer();

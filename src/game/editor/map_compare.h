@@ -154,6 +154,8 @@ class CMapCompare
 	CListBox m_aPairLists[2];
 	std::map<const CEditorMap *, char> m_aSelectorIds[2];
 	char m_aButtonIds[17]{};
+	char m_aSourceHeadingIds[2]{};
+	std::string m_aSourceTooltips[2];
 	bool ValidSources(const CEditor &Editor) const;
 	bool Current(const CEditor &Editor) const;
 	CBookmark Bookmark(const MapDiff::CEntry &Entry) const;
@@ -194,6 +196,7 @@ public:
 	void Close();
 	void OnInput(CEditor &Editor, const IInput::CEvent &Event);
 	void OnUpdate(CEditor &Editor);
+	void RenderSectionbar(CEditor &Editor, CUIRect View);
 	void Render(CEditor &Editor, CUIRect View, CUIRect Toolbar, CUIRect Sidebar);
 };
 
