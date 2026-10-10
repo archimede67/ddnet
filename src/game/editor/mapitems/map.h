@@ -94,6 +94,8 @@ public:
 	float m_LastSaveTime;
 	void OnModify();
 	void ResetModifiedState();
+	// Content generation is independent of dirty/save state and never decreases.
+	uint64_t m_ContentRevision = 0;
 
 	// UI elements
 	char m_TabSelectButtonId;

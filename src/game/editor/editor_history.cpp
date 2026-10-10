@@ -19,6 +19,7 @@ void CEditorHistory::Execute(const std::shared_ptr<IEditorAction> &pAction, cons
 
 void CEditorHistory::RecordAction(const std::shared_ptr<IEditorAction> &pAction, const char *pDisplay)
 {
+	Map()->OnModify();
 	if(m_IsBulk)
 	{
 		m_vpBulkActions.push_back(pAction);
@@ -47,6 +48,7 @@ bool CEditorHistory::Undo()
 	m_vpUndoActions.pop_back();
 
 	pLastAction->Undo();
+	Map()->OnModify();
 
 	m_vpRedoActions.emplace_back(pLastAction);
 	return true;
@@ -61,6 +63,7 @@ bool CEditorHistory::Redo()
 	m_vpRedoActions.pop_back();
 
 	pLastAction->Redo();
+	Map()->OnModify();
 
 	m_vpUndoActions.emplace_back(pLastAction);
 	return true;

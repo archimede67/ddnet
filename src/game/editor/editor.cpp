@@ -342,6 +342,9 @@ void CEditor::DoAudioPreview(CUIRect View, const void *pPlayPauseButtonId, const
 
 void CEditor::DoMapTabs(CUIRect MapTabs)
 {
+	const bool Interactive = !m_MapCompare.Transitioning();
+	const auto *pSelectedComparison = Interactive ? m_MapCompare.Selected() : m_MapCompare.m_pPending;
+	const auto *pSelectedMap = Interactive ? (m_MapCompare.Active() ? nullptr : Map()) : m_MapCompare.m_pPendingMap;
 	CScrollRegionParams ScrollParams;
 	ScrollParams.m_ScrollbarThickness = 6.0f;
 	ScrollParams.m_ScrollbarMargin = 2.0f;
@@ -359,7 +362,7 @@ void CEditor::DoMapTabs(CUIRect MapTabs)
 		CUIRect MapButton;
 		MapTabs.VSplitLeft(ButtonWidth + 18.0f, &MapButton, &MapTabs);
 		MapTabs.VSplitLeft(2.0f, nullptr, &MapTabs);
-		if(m_MapTabsScrollRegion.AddRect(MapButton, m_MapTabsRevealSelected && m_SelectedMap == Index))
+		if(m_MapTabsScrollRegion.AddRect(MapButton, m_MapTabsRevealSelected && pSelectedMap == pMap.get()))
 		{
 			CUIRect CloseButton;
 			MapButton.VSplitRight(18.0f, &MapButton, &CloseButton);
@@ -369,7 +372,7 @@ void CEditor::DoMapTabs(CUIRect MapTabs)
 			char aTooltip[256];
 			str_format(aTooltip, sizeof(aTooltip), "Select map '%s'.", pMap->m_aFilename[0] == '\0' ? "unnamed" : pMap->m_aFilename);
 			const int TabButtonResult = DoButton_Ex(&pMap->m_TabSelectButtonId,
-				pMap->m_aDisplayName, m_SelectedMap == Index ? 1 : 0, &MapButton, BUTTONFLAG_LEFT | BUTTONFLAG_RIGHT | (Saving ? 0 : (int)BUTTONFLAG_MIDDLE),
+				pMap->m_aDisplayName, pSelectedMap == pMap.get() ? 1 : 0, &MapButton, BUTTONFLAG_LEFT | BUTTONFLAG_RIGHT | (Saving ? 0 : (int)BUTTONFLAG_MIDDLE),
 				aTooltip, IGraphics::CORNER_L);
 
 			int CloseButtonResult;
@@ -386,19 +389,18 @@ void CEditor::DoMapTabs(CUIRect MapTabs)
 					pMap->m_Modified ? "Close the selected map. This map has unsaved changes." : "Close the selected map.", IGraphics::CORNER_R, ShowCloseIcon ? 9.0f : 6.0f);
 			}
 
-			if(TabButtonResult == 1)
+			if(Interactive && TabButtonResult == 1)
 			{
-				m_SelectedMap = Index;
+				m_MapCompare.SelectMap(*this, pMap.get());
 				m_MapTabsScrollRegion.ScrollHere();
-				Reset();
 			}
-			else if(TabButtonResult == 2 || CloseButtonResult == 2)
+			else if(Interactive && (TabButtonResult == 2 || CloseButtonResult == 2))
 			{
 				m_PopupMapTab.m_pEditor = this;
 				m_PopupMapTab.m_SelectedMap = Index;
 				Ui()->DoPopupMenu(&m_PopupMapTab, Ui()->MouseX(), Ui()->MouseY(), 170.0f, 96.0f, &m_PopupMapTab, CPopupMapTab::Render);
 			}
-			else if(TabButtonResult == 3 || CloseButtonResult == 1 || CloseButtonResult == 3)
+			else if(Interactive && (TabButtonResult == 3 || CloseButtonResult == 1 || CloseButtonResult == 3))
 			{
 				CloseIndex = Index;
 			}
@@ -407,42 +409,34 @@ void CEditor::DoMapTabs(CUIRect MapTabs)
 		++Index;
 	}
 
+	CMapCompare *pCloseComparison = nullptr;
+	for(const auto &pDocument : m_MapCompare.m_vpDocuments)
+	{
+		const bool Selected = pDocument.get() == pSelectedComparison;
+		const bool Pending = pDocument->m_State == CMapCompare::EState::CAPTURE || pDocument->m_State == CMapCompare::EState::COMPUTING || !pDocument->Current(*this);
+		std::string Title = pDocument->m_State == CMapCompare::EState::SELECT ? "Compare maps..." :
+											std::string("Before: ") + pDocument->m_apSources[0]->m_aDisplayName + " / After: " + pDocument->m_apSources[1]->m_aDisplayName + (Pending ? " *" : "");
+		CUIRect Button, Close;
+		MapTabs.VSplitLeft(std::clamp(TextRender()->TextWidth(10, Title.c_str()) + 12, 150.0f, 270.0f) + 18, &Button, &MapTabs);
+		MapTabs.VSplitLeft(2, nullptr, &MapTabs);
+		if(!m_MapTabsScrollRegion.AddRect(Button, m_MapTabsRevealSelected && Selected))
+			continue;
+		Button.VSplitRight(18, &Button, &Close);
+		const int Result = DoButton_Ex(&pDocument->m_TabSelectButtonId, Title.c_str(), Selected, &Button, BUTTONFLAG_LEFT | BUTTONFLAG_MIDDLE, Title.c_str(), IGraphics::CORNER_L);
+		const int Closed = DoButton_FontIcon(&pDocument->m_TabCloseButtonId, FontIcon::XMARK, 0, &Close, BUTTONFLAG_LEFT | BUTTONFLAG_MIDDLE, "Close comparison. Reopen with Ctrl+Shift+F4 or Tools.", IGraphics::CORNER_R, 9);
+		if(Interactive && Result == 1)
+			m_MapCompare.Select(*this, pDocument.get());
+		if(Interactive && (Result == 3 || Closed))
+			pCloseComparison = pDocument.get();
+	}
+	if(pCloseComparison)
+		pCloseComparison->Close();
 	m_MapTabsRevealSelected = false;
 	m_MapTabsScrollRegion.End();
 
 	if(CloseIndex.has_value())
 	{
-		CloseMap(CloseIndex.value(), true);
-	}
-
-	if(m_Dialog == DIALOG_NONE &&
-		CLineInput::GetActiveInput() == nullptr &&
-		Ui()->CheckActiveItem(nullptr))
-	{
-		// Close selected map with Ctrl+F4
-		if(!CloseIndex.has_value() &&
-			Input()->ModifierIsPressed() &&
-			Input()->KeyPress(KEY_F4))
-		{
-			CloseMap(m_SelectedMap, true);
-		}
-
-		// Switch between maps with Ctrl+Tab and Ctrl+Shift+Tab
-		if(m_vpMaps.size() > 1 &&
-			Input()->ModifierIsPressed() &&
-			Input()->KeyPress(KEY_TAB))
-		{
-			if(Input()->ShiftIsPressed())
-			{
-				m_SelectedMap = m_SelectedMap == 0 ? m_vpMaps.size() - 1 : m_SelectedMap - 1;
-			}
-			else
-			{
-				m_SelectedMap = m_SelectedMap == m_vpMaps.size() - 1 ? 0 : m_SelectedMap + 1;
-			}
-			m_MapTabsRevealSelected = true;
-			Reset();
-		}
+		m_MapCompare.CloseMap(*this, m_vpMaps[CloseIndex.value()].get());
 	}
 }
 
@@ -2145,6 +2139,7 @@ void CEditor::DoQuadEnvPoint(const CQuad *pQuad, CEnvelope *pEnvelope, int QuadI
 	{
 		if(MapView()->MouseDeltaWorld() != vec2(0.0f, 0.0f))
 		{
+			const std::array<int, 3> OldValues = {pPoint->m_aValues[0], pPoint->m_aValues[1], pPoint->m_aValues[2]};
 			if(m_QuadEnvelopePointOperation == EQuadEnvelopePointOperation::MOVE)
 			{
 				vec2 Pos = MapView()->MouseWorldPos();
@@ -2159,6 +2154,8 @@ void CEditor::DoQuadEnvPoint(const CQuad *pQuad, CEnvelope *pEnvelope, int QuadI
 			{
 				pPoint->m_aValues[2] += 10 * Ui()->MouseDeltaX();
 			}
+			if(OldValues != std::array<int, 3>{pPoint->m_aValues[0], pPoint->m_aValues[1], pPoint->m_aValues[2]})
+				Map()->OnModify();
 		}
 
 		if(!Ui()->MouseButton(0))
@@ -3049,6 +3046,7 @@ bool CEditor::ReplaceImage(const char *pFilename, int StorageType, bool CheckDup
 
 	Map()->SortImages();
 	Map()->SelectImage(pImg);
+	Map()->OnModify();
 	OnDialogClose();
 	return true;
 }
@@ -3105,6 +3103,7 @@ bool CEditor::AddImage(const char *pFilename, int StorageType, void *pUser)
 	pEditor->Map()->m_vpImages.push_back(pImg);
 	pEditor->Map()->SortImages();
 	pEditor->Map()->SelectImage(pImg);
+	pEditor->Map()->OnModify();
 	pEditor->OnDialogClose();
 	return true;
 }
@@ -3159,6 +3158,7 @@ bool CEditor::AddSound(const char *pFilename, int StorageType, void *pUser)
 	pEditor->Map()->m_vpSounds.push_back(pSound);
 
 	pEditor->Map()->SelectSound(pSound);
+	pEditor->Map()->OnModify();
 	pEditor->OnDialogClose();
 	return true;
 }
@@ -3216,6 +3216,7 @@ bool CEditor::ReplaceSound(const char *pFilename, int StorageType, bool CheckDup
 	pSound->m_DataSize = DataSize;
 
 	Map()->SelectSound(pSound);
+	Map()->OnModify();
 	OnDialogClose();
 	return true;
 }
@@ -3675,7 +3676,7 @@ void CEditor::RenderMenubar(CUIRect MenuBar)
 	if(DoButton_Ex(&s_ToolsButton, "Tools", 0, &ToolsButton, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_T, EditorFontSizes::MENU, TEXTALIGN_ML))
 	{
 		static SPopupMenuId s_PopupMenuToolsId;
-		Ui()->DoPopupMenu(&s_PopupMenuToolsId, ToolsButton.x, ToolsButton.y + ToolsButton.h - 1.0f, 200.0f, 94.0f, this, PopupMenuTools, PopupProperties);
+		Ui()->DoPopupMenu(&s_PopupMenuToolsId, ToolsButton.x, ToolsButton.y + ToolsButton.h - 1.0f, 200.0f, 108.0f, this, PopupMenuTools, PopupProperties);
 	}
 
 	MenuBar.VSplitLeft(5.0f, nullptr, &MenuBar);
@@ -3742,14 +3743,28 @@ void CEditor::Exit()
 
 void CEditor::Render()
 {
-	if(m_MapCompare.Active())
+	m_aTooltip[0] = 0;
+	m_CursorType = CURSOR_NORMAL;
+	// The shared strip is processed before either document's content.
+	Graphics()->Clear(0.0f, 0.0f, 0.0f);
+	Ui()->MapScreen();
+	CUIRect SharedTabs = *Ui()->Screen();
+	SharedTabs.HSplitTop(22, nullptr, &SharedTabs);
+	SharedTabs.HSplitTop(20, &SharedTabs, nullptr);
+	SharedTabs.VSplitLeft(m_ToolBoxWidth + 2, nullptr, &SharedTabs);
+	SharedTabs.VSplitRight(2, &SharedTabs, nullptr);
+	if(m_GuiActive || m_MapCompare.Active() || m_MapCompare.Transitioning())
+		DoMapTabs(SharedTabs);
+	if(m_MapCompare.Active() || m_MapCompare.Transitioning())
 	{
-		m_MapCompare.Render(*this);
+		CUIRect Content = *Ui()->Screen();
+		Content.HSplitTop(46, nullptr, &Content);
+		m_MapCompare.Render(*this, Content);
+		Ui()->RenderPopupMenus();
 		RenderMousePointer();
 		return;
 	}
 	// basic start
-	Graphics()->Clear(0.0f, 0.0f, 0.0f);
 	CUIRect View = *Ui()->Screen();
 	Ui()->MapScreen();
 	m_CursorType = CURSOR_NORMAL;
@@ -3757,11 +3772,11 @@ void CEditor::Render()
 	float Width = View.w;
 	float Height = View.h;
 
-	// reset tip
-	str_copy(m_aTooltip, "");
-
 	// render checker
-	RenderBackground(View, m_CheckerTexture, 32.0f, 1.0f);
+	CUIRect BackgroundView = View;
+	if(m_GuiActive)
+		BackgroundView.HSplitTop(44, nullptr, &BackgroundView);
+	RenderBackground(BackgroundView, m_CheckerTexture, 32.0f, 1.0f);
 
 	UpdateBrushPicker();
 
@@ -3831,7 +3846,9 @@ void CEditor::Render()
 		RenderBackground(ToolBox, g_pData->m_aImages[IMAGE_BACKGROUND_NOISE].m_Id, BackgroundScale, BackgroundBrightness);
 		ToolBox.Margin(2.0f, &ToolBox);
 
-		RenderBackground(ToolBar, g_pData->m_aImages[IMAGE_BACKGROUND_NOISE].m_Id, BackgroundScale, BackgroundBrightness);
+		CUIRect ToolbarBackground = ToolBar;
+		ToolbarBackground.HSplitTop(24, nullptr, &ToolbarBackground);
+		RenderBackground(ToolbarBackground, g_pData->m_aImages[IMAGE_BACKGROUND_NOISE].m_Id, BackgroundScale, BackgroundBrightness);
 		ToolBar.Margin(2.0f, &ToolBar);
 		ToolBar.VSplitLeft(m_ToolBoxWidth, &ModeBar, &ToolBar);
 
@@ -3844,7 +3861,7 @@ void CEditor::Render()
 		CUIRect MapTabs;
 		ToolBar.HSplitTop(20.0f, &MapTabs, &ToolBar);
 		ToolBar.HSplitTop(5.0f, nullptr, &ToolBar);
-		DoMapTabs(MapTabs);
+
 		if(m_Mode == MODE_LAYERS)
 			DoToolbarLayers(ToolBar);
 		else if(m_Mode == MODE_IMAGES)
@@ -4481,6 +4498,20 @@ void CEditor::RenderIngameEntities(const CLayerGroup &Group, const CLayerTiles &
 	}
 }
 
+void CEditor::FinishMapInteraction()
+{
+	if(Map()->m_MapViewState.m_ActiveOp == CMapView::EActiveOp::BRUSH_DRAW)
+	{
+		auto pAction = std::make_shared<CEditorBrushDrawAction>(Map(), Map()->m_SelectedGroup);
+		if(!pAction->IsEmpty())
+			Map()->m_EditorHistory.RecordAction(pAction);
+	}
+	Map()->m_MapViewState.m_ActiveOp = CMapView::EActiveOp::NONE;
+	Map()->m_QuadTracker.Finish();
+	Map()->m_SoundSourceOperationTracker.End();
+	Map()->m_EnvOpTracker.Stop(false);
+}
+
 void CEditor::Reset()
 {
 	Ui()->ClosePopupMenus();
@@ -4517,8 +4548,6 @@ void CEditor::CloseMap(size_t Index, bool Confirm)
 		return;
 	}
 
-	m_MapCompare.SourceClosing(m_vpMaps[Index].get());
-
 	if(Confirm && m_vpMaps[Index]->m_Modified)
 	{
 		if(Index != m_SelectedMap)
@@ -4537,6 +4566,7 @@ void CEditor::CloseMap(size_t Index, bool Confirm)
 		Reset();
 	}
 
+	m_MapCompare.SourceClosing(*this, m_vpMaps[Index].get());
 	Ui()->ClosePopupMenu(&m_PopupMapTab);
 	m_vpMaps.erase(m_vpMaps.begin() + Index);
 	if(m_vpMaps.empty())
@@ -4854,7 +4884,7 @@ void CEditor::OnUpdate()
 	if(CursorType != IInput::CURSOR_NONE)
 	{
 		Ui()->ConvertMouseMove(&CursorRel.x, &CursorRel.y, CursorType);
-		if(!m_MapCompare.Active())
+		if(!m_MapCompare.Active() && !m_MapCompare.Transitioning())
 			MouseAxisLock(CursorRel);
 		Ui()->OnCursorMove(CursorRel.x, CursorRel.y);
 	}
@@ -4867,7 +4897,7 @@ void CEditor::OnUpdate()
 	HandleAutosave();
 	HandleWriterFinishJobs();
 	m_MapCompare.OnUpdate(*this); // Also reap cancelled workers while comparison is closed.
-	if(m_MapCompare.Active())
+	if(m_MapCompare.Active() || m_MapCompare.Transitioning())
 		return;
 	MapView()->UpdateMouseWorld();
 	LayerSelector()->UpdateHoveredTiles();
@@ -4878,7 +4908,41 @@ void CEditor::OnUpdate()
 
 void CEditor::OnInput(const IInput::CEvent &Event)
 {
-	if(m_MapCompare.Active())
+	if((!m_MapCompare.Transitioning() || (Event.m_Key == KEY_TAB && !m_MapCompare.m_pCloseMap)) && m_Dialog == DIALOG_NONE && !Ui()->IsPopupOpen() && !m_PopupEventActivated && !m_PopupEventWasActivated && CLineInput::GetActiveInput() == nullptr && Input()->ModifierIsPressed() && (Event.m_Flags & IInput::FLAG_PRESS) && !(Event.m_Flags & IInput::FLAG_REPEAT))
+	{
+		if(Event.m_Key == KEY_F4)
+		{
+			if(Input()->ShiftIsPressed())
+				m_MapCompare.Reopen(*this);
+			else if(m_MapCompare.Active())
+				m_MapCompare.Selected()->Close();
+			else
+				m_MapCompare.CloseMap(*this, Map());
+			return;
+		}
+		if(Event.m_Key == KEY_TAB)
+		{
+			const size_t Count = m_vpMaps.size() + m_MapCompare.m_vpDocuments.size();
+			size_t Index = m_SelectedMap;
+			if(m_MapCompare.m_pPendingMap)
+				for(size_t i = 0; i < m_vpMaps.size(); ++i)
+					if(m_vpMaps[i].get() == m_MapCompare.m_pPendingMap)
+						Index = i;
+			const auto *pTarget = m_MapCompare.Transitioning() ? m_MapCompare.m_pPending : m_MapCompare.Selected();
+			if(pTarget)
+				for(size_t i = 0; i < m_MapCompare.m_vpDocuments.size(); ++i)
+					if(m_MapCompare.m_vpDocuments[i].get() == pTarget)
+						Index = m_vpMaps.size() + i;
+			Index = (Index + (Input()->ShiftIsPressed() ? Count - 1 : 1)) % Count;
+			if(Index < m_vpMaps.size())
+				m_MapCompare.SelectMap(*this, m_vpMaps[Index].get());
+			else
+				m_MapCompare.Select(*this, m_MapCompare.m_vpDocuments[Index - m_vpMaps.size()].get());
+			return;
+		}
+	}
+
+	if(m_MapCompare.Active() || m_MapCompare.Transitioning())
 	{
 		m_MapCompare.OnInput(*this, Event);
 		return;
@@ -4904,7 +4968,7 @@ void CEditor::OnInput(const IInput::CEvent &Event)
 
 void CEditor::OnRender()
 {
-	if(m_MapCompare.Active())
+	if(m_MapCompare.Active() || m_MapCompare.Transitioning())
 	{
 		Ui()->SetMouseSlow(false);
 		Ui()->StartCheck();
@@ -4958,6 +5022,7 @@ void CEditor::OnRender()
 	Ui()->ClearHotkeys();
 	Input()->Clear();
 
+	m_MapCompare.EndFrame(*this);
 	CLineInput::RenderCandidates();
 
 #if defined(CONF_DEBUG)
@@ -5033,8 +5098,6 @@ bool CEditor::HandleMapDrop(const char *pFilename, int StorageType)
 
 bool CEditor::Load(const char *pFilename, int StorageType)
 {
-	if(m_MapCompare.Active())
-		m_MapCompare.Invalidate("Comparison ended because a map was loaded or dropped. Return to the editor to compare again.");
 	const auto &&ErrorHandler = [this](const char *pErrorMessage) {
 		ShowFileDialogError("%s", pErrorMessage);
 		log_error("editor/load", "%s", pErrorMessage);
@@ -5046,6 +5109,7 @@ bool CEditor::Load(const char *pFilename, int StorageType)
 	if(Result)
 	{
 		m_vpMaps.push_back(std::move(pNewMap));
+		m_MapCompare.SelectMap(*this, m_vpMaps.back().get());
 		m_SelectedMap = m_vpMaps.size() - 1;
 		m_MapTabsRevealSelected = true;
 		UpdateMapDisplayNames();

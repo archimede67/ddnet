@@ -107,6 +107,7 @@ CEditorMap::CEditorMap(CEditor *pEditor) :
 
 void CEditorMap::OnModify()
 {
+	++m_ContentRevision;
 	m_Modified = true;
 	m_ModifiedAuto = true;
 	m_LastModifiedTime = Editor()->Client()->GlobalTime();
@@ -580,6 +581,7 @@ void CEditorMap::InsertEnvelope(int Index, std::shared_ptr<CEnvelope> &pEnvelope
 		return;
 	m_vpEnvelopes.push_back(pEnvelope);
 	m_SelectedEnvelope = MoveEnvelope((int)m_vpEnvelopes.size() - 1, Index);
+	OnModify();
 }
 
 void CEditorMap::UpdateEnvelopeReferences(int Index, std::shared_ptr<CEnvelope> &pEnvelope, std::vector<std::shared_ptr<IEditorEnvelopeReference>> &vpEditorObjectReferences)

@@ -1108,12 +1108,16 @@ void CEnvelopeEditor::Render(CUIRect View)
 									m_vAccurateDragValuesX[0] += ScreenToEnvelopeDeltaX(View, Ui()->MouseDeltaX()) * 1000.0f;
 									m_vAccurateDragValuesY[0] -= ScreenToEnvelopeDeltaY(View, Ui()->MouseDeltaY()) * 1024.0f;
 
+									const auto OldX = pEnvelope->m_vPoints[i].m_Bezier.m_aOutTangentDeltaX[c];
+									const int OldY = pEnvelope->m_vPoints[i].m_Bezier.m_aOutTangentDeltaY[c];
 									pEnvelope->m_vPoints[i].m_Bezier.m_aOutTangentDeltaX[c] = CFixedTime(std::round(m_vAccurateDragValuesX[0]));
 									pEnvelope->m_vPoints[i].m_Bezier.m_aOutTangentDeltaY[c] = std::round(m_vAccurateDragValuesY[0]);
 
 									// clamp time value
 									pEnvelope->m_vPoints[i].m_Bezier.m_aOutTangentDeltaX[c] = std::clamp(pEnvelope->m_vPoints[i].m_Bezier.m_aOutTangentDeltaX[c], CFixedTime(0), CFixedTime::FromSeconds(ScreenToEnvelopeX(View, View.x + View.w)) - pEnvelope->m_vPoints[i].m_Time);
 									m_vAccurateDragValuesX[0] = std::clamp<float>(m_vAccurateDragValuesX[0], 0, (CFixedTime::FromSeconds(ScreenToEnvelopeX(View, View.x + View.w)) - pEnvelope->m_vPoints[i].m_Time).GetInternal());
+									if(OldX != pEnvelope->m_vPoints[i].m_Bezier.m_aOutTangentDeltaX[c] || OldY != pEnvelope->m_vPoints[i].m_Bezier.m_aOutTangentDeltaY[c])
+										Map()->OnModify();
 								}
 
 								if(m_Operation == EEnvelopeEditorOp::CONTEXT_MENU)
@@ -1239,12 +1243,16 @@ void CEnvelopeEditor::Render(CUIRect View)
 									m_vAccurateDragValuesX[0] += ScreenToEnvelopeDeltaX(View, Ui()->MouseDeltaX()) * 1000.0f;
 									m_vAccurateDragValuesY[0] -= ScreenToEnvelopeDeltaY(View, Ui()->MouseDeltaY()) * 1024.0f;
 
+									const auto OldX = pEnvelope->m_vPoints[i].m_Bezier.m_aInTangentDeltaX[c];
+									const int OldY = pEnvelope->m_vPoints[i].m_Bezier.m_aInTangentDeltaY[c];
 									pEnvelope->m_vPoints[i].m_Bezier.m_aInTangentDeltaX[c] = CFixedTime(std::round(m_vAccurateDragValuesX[0]));
 									pEnvelope->m_vPoints[i].m_Bezier.m_aInTangentDeltaY[c] = std::round(m_vAccurateDragValuesY[0]);
 
 									// clamp time value
 									pEnvelope->m_vPoints[i].m_Bezier.m_aInTangentDeltaX[c] = std::clamp(pEnvelope->m_vPoints[i].m_Bezier.m_aInTangentDeltaX[c], CFixedTime::FromSeconds(ScreenToEnvelopeX(View, View.x)) - pEnvelope->m_vPoints[i].m_Time, CFixedTime(0));
 									m_vAccurateDragValuesX[0] = std::clamp<float>(m_vAccurateDragValuesX[0], (CFixedTime::FromSeconds(ScreenToEnvelopeX(View, View.x)) - pEnvelope->m_vPoints[i].m_Time).GetInternal(), 0);
+									if(OldX != pEnvelope->m_vPoints[i].m_Bezier.m_aInTangentDeltaX[c] || OldY != pEnvelope->m_vPoints[i].m_Bezier.m_aInTangentDeltaY[c])
+										Map()->OnModify();
 								}
 
 								if(m_Operation == EEnvelopeEditorOp::CONTEXT_MENU)

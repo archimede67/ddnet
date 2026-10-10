@@ -128,6 +128,13 @@ CUi::EPopupMenuFunctionResult CEditor::PopupMenuTools(void *pContext, CUIRect Vi
 	}
 	View.HSplitTop(2.0f, nullptr, &View);
 	View.HSplitTop(12.0f, &Slot, &View);
+	if(pEditor->DoButton_MenuItem(&pEditor->m_QuickActionReopenComparison, "Reopen comparison", pEditor->m_QuickActionReopenComparison.Disabled() ? -1 : 0, &Slot, BUTTONFLAG_LEFT, pEditor->m_QuickActionReopenComparison.Description()))
+	{
+		pEditor->m_QuickActionReopenComparison.Call();
+		return CUi::POPUP_CLOSE_CURRENT;
+	}
+	View.HSplitTop(2.0f, nullptr, &View);
+	View.HSplitTop(12.0f, &Slot, &View);
 	static int s_RemoveUnusedEnvelopesButton = 0;
 	static CUi::SConfirmPopupContext s_ConfirmPopupContext;
 	if(pEditor->DoButton_MenuItem(&s_RemoveUnusedEnvelopesButton, "Remove unused envelopes", 0, &Slot, BUTTONFLAG_LEFT, "Remove all unused envelopes from the map."))
@@ -466,7 +473,7 @@ CUi::EPopupMenuFunctionResult CEditor::CPopupMapTab::Render(void *pContext, CUIR
 	View.HSplitTop(12.0f, &Slot, &View);
 	if(pEditor->DoButton_MenuItem(&pPopupMapTab->m_CloseButtonId, "Close", Saving ? -1 : 0, &Slot, BUTTONFLAG_LEFT, "Close this map."))
 	{
-		pEditor->CloseMap(SelectedMapIndex, true);
+		pEditor->m_MapCompare.CloseMap(*pEditor, pSelectedMap.get());
 		return CUi::POPUP_CLOSE_CURRENT;
 	}
 
@@ -1505,6 +1512,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupImage(void *pContext, CUIRect View, 
 				return CUi::POPUP_KEEP_OPEN;
 			}
 			pImg->m_External = 0;
+			pEditor->Map()->OnModify();
 			return CUi::POPUP_CLOSE_CURRENT;
 		}
 		View.HSplitTop(5.0f, nullptr, &View);
@@ -1515,6 +1523,7 @@ CUi::EPopupMenuFunctionResult CEditor::PopupImage(void *pContext, CUIRect View, 
 		if(pEditor->DoButton_MenuItem(&s_ExternalButton, "Make external", 0, &Slot, BUTTONFLAG_LEFT, "Remove the image from the map file."))
 		{
 			pImg->m_External = 1;
+			pEditor->Map()->OnModify();
 			return CUi::POPUP_CLOSE_CURRENT;
 		}
 		View.HSplitTop(5.0f, nullptr, &View);

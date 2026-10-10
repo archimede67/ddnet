@@ -108,7 +108,9 @@ enum
 class CEditor : public IEditor
 {
 	friend class CMapCompare;
-	CMapCompare m_MapCompare;
+	friend class CMapCompareTabs;
+	CMapCompareTabs m_MapCompare;
+	void FinishMapInteraction();
 	class IInput *m_pInput = nullptr;
 	class IClient *m_pClient = nullptr;
 	class IConfigManager *m_pConfigManager = nullptr;

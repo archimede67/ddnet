@@ -35,6 +35,13 @@ public:
 	void AddQuadPointPropTrack(EQuadPointProp Prop);
 	void EndQuadPointPropTrack(EQuadPointProp Prop);
 	void EndQuadPointPropTrackAll();
+	void Finish()
+	{
+		EndQuadTrack();
+		if(m_TrackedProp != EQuadProp::NONE)
+			EndQuadPropTrack(m_TrackedProp);
+		EndQuadPointPropTrackAll();
+	}
 
 private:
 	std::vector<int> m_vSelectedQuads;

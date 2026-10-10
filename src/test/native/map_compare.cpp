@@ -22,10 +22,12 @@
 #include <game/editor/mapitems/layer_switch.h>
 #include <game/editor/mapitems/layer_tele.h>
 #include <game/editor/mapitems/layer_tune.h>
+#include <game/editor/mapitems/sound.h>
 
 #include <SDL.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -45,7 +47,14 @@ struct CAccess
 		friend Type Access(Tag); \
 	}; \
 	template struct CAccess<Tag, &Class::Member>;
-ACCESSOR(TCompare, CEditor, m_MapCompare, CMapCompare)
+ACCESSOR(TCompare, CEditor, m_MapCompare, CMapCompareTabs)
+ACCESSOR(TPendingCompare, CMapCompareTabs, m_pPending, CMapCompare *)
+ACCESSOR(TCompareDocuments, CMapCompareTabs, m_vpDocuments, std::vector<std::unique_ptr<CMapCompare>>)
+ACCESSOR(TTabScroll, CEditor, m_MapTabsScrollRegion, CScrollRegion)
+using TRevisionArray = uint64_t[2];
+ACCESSOR(TCapturedRevisions, CMapCompare, m_aRevisions, TRevisionArray)
+ACCESSOR(TWorker, CMapCompare, m_Future, std::future<MapDiff::CResult>)
+ACCESSOR(TRetiredWorker, CMapCompareTabs, m_RetiredWork, std::future<MapDiff::CResult>)
 ACCESSOR(TMaps, CEditor, m_vpMaps, std::vector<std::unique_ptr<CEditorMap>>)
 ACCESSOR(TSelectedMap, CEditor, m_SelectedMap, size_t)
 ACCESSOR(TResult, CMapCompare, m_Result, MapDiff::CResult)
@@ -67,6 +76,21 @@ ACCESSOR(TLayerTree, CMapCompare, m_LayerTree, CScrollRegion)
 ACCESSOR(TTreeActive, CMapCompare, m_LayerTreeActive, bool)
 using TNavArray = CListBox[4];
 ACCESSOR(TNavLists, CMapCompare, m_aNavigators, TNavArray)
+using TPairListArray = CListBox[2];
+ACCESSOR(TPairLists, CMapCompare, m_aPairLists, TPairListArray)
+ACCESSOR(TEnvelopeEditor, CEditor, m_EnvelopeEditor, CEnvelopeEditor)
+struct TEnvelopeX
+{
+	using Type = float (CEnvelopeEditor::*)(const CUIRect &, float) const;
+	friend Type Access(TEnvelopeX);
+};
+template struct CAccess<TEnvelopeX, &CEnvelopeEditor::EnvelopeToScreenX>;
+struct TEnvelopeY
+{
+	using Type = float (CEnvelopeEditor::*)(const CUIRect &, float) const;
+	friend Type Access(TEnvelopeY);
+};
+template struct CAccess<TEnvelopeY, &CEnvelopeEditor::EnvelopeToScreenY>;
 ACCESSOR(TListScroll, CListBox, m_ScrollRegion, CScrollRegion)
 ACCESSOR(TScrollPos, CScrollRegion, m_ScrollPos, float)
 ACCESSOR(TScrollOffset, CScrollRegion, m_ContentScrollOffset, float)
@@ -103,10 +127,14 @@ struct TRenderPane
 };
 template struct CAccess<TRenderPane, &CMapCompare::RenderPane>;
 bool HasSnapshot(CMapCompare &);
+const void *SnapshotIdentity(CMapCompare &);
+const MapDiff::CSnapshot &CapturedSnapshot(CMapCompare &, int);
 template<auto Member>
 struct CDataAccess
 {
 	friend bool HasSnapshot(CMapCompare &Obj) { return static_cast<bool>(Obj.*Member); }
+	friend const void *SnapshotIdentity(CMapCompare &Obj) { return (Obj.*Member).get(); }
+	friend const MapDiff::CSnapshot &CapturedSnapshot(CMapCompare &Obj, int Side) { return (Obj.*Member)->m_aSnapshots[Side]; }
 };
 template struct CDataAccess<&CMapCompare::m_pData>;
 bool HasRenderCache(CMapCompare &);
@@ -159,9 +187,11 @@ struct CDetailAccess
 };
 template struct CDetailAccess<&CMapCompare::m_vDetails>;
 std::tuple<bool, bool, size_t> LayerState(CMapCompare &, int);
+void SetLayerVisible(CMapCompare &, int, bool);
 template<auto Member>
 struct CLayerStateAccess
 {
+	friend void SetLayerVisible(CMapCompare &Obj, int Index, bool Visible) { (Obj.*Member)[Index].m_Visible = Visible; }
 	friend std::tuple<bool, bool, size_t> LayerState(CMapCompare &Obj, int Index)
 	{
 		const auto &State = (Obj.*Member)[Index];
@@ -169,6 +199,14 @@ struct CLayerStateAccess
 	}
 };
 template struct CLayerStateAccess<&CMapCompare::m_vLayerStates>;
+
+size_t ClosedComparisonCount(CMapCompareTabs &);
+template<auto Member>
+struct CClosedComparisonAccess
+{
+	friend size_t ClosedComparisonCount(CMapCompareTabs &Tabs) { return (Tabs.*Member).size(); }
+};
+template struct CClosedComparisonAccess<&CMapCompareTabs::m_vClosed>;
 
 class CSmokeAction : public IEditorAction
 {
@@ -189,6 +227,7 @@ class CSmokeEditor : public CEditor
 	int m_SavedEntry = -1;
 	bool m_MeasureRender = false;
 	int m_TargetContext = 0;
+	uint64_t m_CaptureCount = 0;
 	double m_LastRenderMs = 0;
 	vec2 m_SavedCenter;
 	float m_SavedScroll = 0;
@@ -204,11 +243,41 @@ class CSmokeEditor : public CEditor
 		vec2 m_World, m_Editor;
 		float m_Zoom, m_Anim;
 		size_t m_Undo, m_Redo;
+		uint64_t m_Revision;
 	} m_aContexts[2];
 	std::shared_ptr<CLayerGroup> m_pSavedBrush;
 	std::vector<int> m_SavedBrushCells;
 	std::ofstream m_Log;
-	CMapCompare &Compare() { return this->*Access(TCompare{}); }
+	CMapCompare m_ClosedCompare;
+	CMapCompareTabs &Tabs() { return this->*Access(TCompare{}); }
+	CMapCompare &Compare()
+	{
+		auto *p = Tabs().Selected();
+		if(!p)
+			p = Tabs().*Access(TPendingCompare{});
+		return p ? *p : m_ClosedCompare;
+	}
+	void OpenComparison(CEditor &, const CEditorMap *pBefore, const CEditorMap *pAfter)
+	{
+		const bool Group = Compare().*Access(TGroup{});
+		const float Width = Compare().*Access(TSidebarWidth{});
+		Tabs().Open(*this, pBefore, pAfter);
+		auto *pDocument = Tabs().*Access(TPendingCompare{});
+		if(!pDocument)
+			pDocument = Tabs().Selected();
+		if(pDocument)
+		{
+			pDocument->*Access(TGroup{}) = Group;
+			pDocument->*Access(TSidebarWidth{}) = Width;
+		}
+	}
+	void CloseComparison()
+	{
+		if(Tabs().Selected())
+			Tabs().Selected()->Close();
+		else if(auto *p = Tabs().*Access(TPendingCompare{}))
+			p->Close();
+	}
 	auto &Maps() { return this->*Access(TMaps{}); }
 	int State() { return CompareState(Compare()); }
 	const MapDiff::CResult &Result() { return Compare().*Access(TResult{}); }
@@ -229,7 +298,7 @@ class CSmokeEditor : public CEditor
 	}
 	void WaitReady()
 	{
-		m_vSteps.push_back([this] { return State() == 4; });
+		m_vSteps.push_back([this] { return !Tabs().Transitioning() && State() == 4; });
 	}
 	void Mouse(int Button, bool Down)
 	{
@@ -255,7 +324,13 @@ class CSmokeEditor : public CEditor
 												      0;
 		Do([this, Pos, pTarget] { const auto P=Pos(); pTarget->first=P; Ui()->OnCursorMove((P.x-Ui()->MouseX())*Graphics()->WindowWidth()/Ui()->Screen()->w, (P.y-Ui()->MouseY())*Graphics()->WindowHeight()/Ui()->Screen()->h); });
 		Delay();
-		Do([this, Button, pTarget] { Check(distance(Ui()->MousePos(), pTarget->first) < 0.1f, "scripted click cursor stays on its target"); pTarget->second = Ui()->HotItem(); Mouse(Button, true); });
+		Do([this, Button, pTarget] {
+			char aCursorCheck[192];
+			str_format(aCursorCheck, sizeof(aCursorCheck), "scripted click cursor stays on its target (actual %.2f,%.2f target %.2f,%.2f)", Ui()->MouseX(), Ui()->MouseY(), pTarget->first.x, pTarget->first.y);
+			Check(distance(Ui()->MousePos(), pTarget->first) < 0.1f, aCursorCheck);
+			pTarget->second = Ui()->HotItem();
+			Mouse(Button, true);
+		});
 		Delay();
 		Do([this, Button, MouseIndex, pTarget] { Check(Input()->KeyIsPressed(KEY_MOUSE_1 + MouseIndex) && Ui()->MouseButton(MouseIndex), "scripted mouse press reaches native input and UI"); Check(!pTarget->second || Ui()->ActiveItem() == pTarget->second, "scripted mouse press activates the hovered target"); Mouse(Button, false); });
 		Delay();
@@ -291,7 +366,7 @@ class CSmokeEditor : public CEditor
 	{
 		Do([this] {
 			m_TargetContext = (Compare().*Access(TContext{})) == 0 ? 2 : 0;
-			Ui()->OnCursorMove((240 - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (16 - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
+			Ui()->OnCursorMove((240 - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (62 - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
 		});
 		Delay();
 		for(int i = 0; i < 2; ++i)
@@ -315,7 +390,7 @@ class CSmokeEditor : public CEditor
 					m_aVisibility[i].push_back(pLayer->m_Visible);
 			}
 			Check(MapDiff::Capture(*p, m_aSaved[i]), "capture source");
-			m_aContexts[i] = {p->m_Modified, p->m_ModifiedAuto, p->m_SelectedGroup, p->m_vSelectedLayers, p->m_vSelectedQuads, p->m_MapViewState.m_WorldOffset, p->m_MapViewState.m_EditorOffset, p->m_MapViewState.m_WorldZoom, p->m_EnvelopeEvaluator.m_AnimateTime, p->m_EditorHistory.m_vpUndoActions.size(), p->m_EditorHistory.m_vpRedoActions.size()};
+			m_aContexts[i] = {p->m_Modified, p->m_ModifiedAuto, p->m_SelectedGroup, p->m_vSelectedLayers, p->m_vSelectedQuads, p->m_MapViewState.m_WorldOffset, p->m_MapViewState.m_EditorOffset, p->m_MapViewState.m_WorldZoom, p->m_EnvelopeEvaluator.m_AnimateTime, p->m_EditorHistory.m_vpUndoActions.size(), p->m_EditorHistory.m_vpRedoActions.size(), p->m_ContentRevision};
 		}
 		m_pSavedBrush = m_pBrush;
 		m_SavedBrushCells.clear();
@@ -354,6 +429,7 @@ class CSmokeEditor : public CEditor
 				for(int n = 0; n < T.m_Width * T.m_Height; ++n)
 					Cells.push_back(T.m_pTiles[n].m_Index);
 			}
+		Check(m_pBefore->m_ContentRevision == m_aContexts[0].m_Revision && m_pAfter->m_ContentRevision == m_aContexts[1].m_Revision, Label + " source content revisions");
 		Check(Cells == m_SavedBrushCells, Label + " nonempty brush contents");
 	}
 	void LoadPair(const std::string &Name)
@@ -578,7 +654,7 @@ class CSmokeEditor : public CEditor
 		}
 		this->*Access(TSelectedMap{}) = Maps().size() - 2;
 		Compare().*Access(TGroup{}) = false;
-		Compare().Open(*this, m_pBefore, m_pAfter);
+		OpenComparison(*this, m_pBefore, m_pAfter);
 	}
 	void CheckPixels(vec2 WorldPosition = vec2(180 * 32 + 16, 190 * 32 + 16))
 	{
@@ -639,8 +715,8 @@ class CSmokeEditor : public CEditor
 		Do([this] { CheckPixels(); Key(SDLK_HOME,true); });
 		Delay(2);
 		Do([this] { Key(SDLK_HOME,false); Check((Compare().*Access(TSelectedEntry{}))==m_SavedEntry,"Home fits without navigator selection change"); m_SavedCenter=Compare().*Access(TCenter{}); });
-		Click([] { return vec2(167, 16); });
-		Click([] { return vec2(167, 16); });
+		Click([] { return vec2(167, 62); });
+		Click([] { return vec2(167, 62); });
 		Do([this] { Check((Compare().*Access(TSelectedEntry{})) == m_SavedEntry, "group to layer returns to focused child"); });
 		ToggleMapContext();
 		Do([this] { for(int i=0;i<(int)Result().m_vEntries.size();++i) if(Result().m_vEntries[i].m_Name=="Unchanged") { (Compare().*Access(TSelect{}))(i); break; } });
@@ -650,17 +726,17 @@ class CSmokeEditor : public CEditor
 		Do([this] { Key(SDLK_n,false); const auto &Nav=Compare().*Access(TNavigator{}); Check(std::find(Nav.begin(),Nav.end(),Compare().*Access(TSelectedEntry{}))!=Nav.end(),"Next remains coherent after context change"); SelectKind(MapDiff::EEntryKind::SETTINGS); Graphics()->Resize(800,600,0); OnWindowResize(); });
 		Delay();
 		Screenshot("comparison-settings-wrapped");
-		Do([this] { const float Height=(Compare().*Access(TSettings{})).*Access(TContentSize{}); m_Log << "INSPECTOR content_size=" << Height << std::endl; Check(Height>40,"wrapped settings value expands scroll extent"); Graphics()->Resize(1280,800,0); OnWindowResize(); Compare().Close(); });
+		Do([this] { const float Height=(Compare().*Access(TSettings{})).*Access(TContentSize{}); m_Log << "INSPECTOR content_size=" << Height << std::endl; Check(Height>40,"wrapped settings value expands scroll extent"); Graphics()->Resize(1280,800,0); OnWindowResize(); CloseComparison(); });
 		Delay();
 		Do([this] { Check(!HasSnapshot(Compare()) && Result().m_vEntries.empty(),"closed viewer releases owned snapshots/results");
    m_vPixelLayers[1]->m_pTiles[180+190*256].m_Index=1; str_copy(m_pAfter->m_MapInfo.m_aAuthor,m_pBefore->m_MapInfo.m_aAuthor); m_pAfter->m_vSettings=m_pBefore->m_vSettings;
-   Compare().Open(*this,m_pBefore,m_pAfter); });
+   OpenComparison(*this,m_pBefore,m_pAfter); });
 		WaitReady();
-		Do([this] { Check(Result().ChangeCount()==0 && (Compare().*Access(TSelectedEntry{}))==-1,"changed to equal reopening has no stale selection"); Compare().Close(); });
+		Do([this] { Check(Result().ChangeCount()==0 && (Compare().*Access(TSelectedEntry{}))==-1,"changed to equal reopening has no stale selection"); CloseComparison(); });
 		Delay();
-		Do([this] { Compare().Open(*this,m_pBefore,m_pAfter); Compare().OnUpdate(*this); const auto Start=std::chrono::steady_clock::now(); Compare().Close(); Compare().Open(*this,m_pBefore,m_pAfter); Check(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-Start).count()<100,"cancel and immediate reopen do not wait for unfinished future"); });
+		Do([this] { OpenComparison(*this,m_pBefore,m_pAfter); Tabs().OnUpdate(*this); const auto Start=std::chrono::steady_clock::now(); CloseComparison(); OpenComparison(*this,m_pBefore,m_pAfter); Check(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-Start).count()<100,"cancel and immediate reopen do not wait for unfinished future"); });
 		WaitReady();
-		Do([this] { Check(Result().ChangeCount()==0,"reopened comparison completes after cancelled work is reaped"); Compare().Close(); });
+		Do([this] { Check(Result().ChangeCount()==0,"reopened comparison completes after cancelled work is reaped"); CloseComparison(); });
 		Delay();
 	}
 	void FitRegressionSteps()
@@ -687,7 +763,7 @@ class CSmokeEditor : public CEditor
 				Maps().push_back(std::move(pMap));
 			}
 			Compare().*Access(TGroup{}) = true;
-			Compare().Open(*this, m_pBefore, m_pAfter);
+			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
 		auto SelectGroup = [this] {
@@ -697,7 +773,7 @@ class CSmokeEditor : public CEditor
 		};
 		Do(SelectGroup);
 		Delay();
-		Do([this] { CheckPixels(vec2(2000 * 32 + 16, 900 * 32 + 16)); Compare().Close(); });
+		Do([this] { CheckPixels(vec2(2000 * 32 + 16, 900 * 32 + 16)); CloseComparison(); });
 		Delay();
 		Do([this] {
 			for(auto *pMap : {m_pBefore, m_pAfter})
@@ -709,12 +785,12 @@ class CSmokeEditor : public CEditor
 				pGroup->m_ClipW = pGroup->m_ClipH = 64;
 				std::static_pointer_cast<CLayerTiles>(pGroup->m_vpLayers.back())->m_pTiles[0].m_Index = 1;
 			}
-			Compare().Open(*this, m_pBefore, m_pAfter);
+			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
 		Do(SelectGroup);
 		Delay();
-		Do([this] { CheckPixels(vec2(2000 * 32 + 16, 900 * 32 + 16)); Compare().Close(); });
+		Do([this] { CheckPixels(vec2(2000 * 32 + 16, 900 * 32 + 16)); CloseComparison(); });
 		Delay();
 	}
 	void CheckBatchedMarkers()
@@ -1019,20 +1095,20 @@ class CSmokeEditor : public CEditor
 			}
 			CaptureSources();
 			Compare().*Access(TGroup{}) = false;
-			Compare().Open(*this, m_pBefore, m_pAfter);
+			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
 		auto Camera = [this] { Compare().*Access(TCenter{}) = vec2(12 * 32, 10 * 32 + 16); Compare().*Access(TZoom{}) = 1.0f; };
 		Do([this, Camera] { SelectKind(MapDiff::EEntryKind::LAYER, "Focus"); Camera(); });
 		Delay();
 		Do([this] { ContextPixels(false, false); });
-		Click([] { return vec2(240, 16); });
+		Click([] { return vec2(240, 62); });
 		Do([this] { Check((Compare().*Access(TContext{})) == 1, "context cycles to selected layer"); ContextPixels(true, false, false); });
 		Screenshot("selection-context-layer");
-		Click([] { return vec2(240, 16); });
+		Click([] { return vec2(240, 62); });
 		Do([this] { ContextPixels(true, false); CheckCachedPane(); CheckContextBufferPixels(); });
 		Screenshot("full-map-context-layer");
-		Click([] { return vec2(170, 41); });
+		Click([] { return vec2(170, 87); });
 		Do([this] {
 			Check((Compare().*Access(TSection{})) == 1, "Layers tab opens a separate tree");
 			Check(std::get<2>(LayerState(Compare(), FindEntry("Selected"))) > 2 && std::get<2>(LayerState(Compare(), FindEntry("Sibling"))) == 0, "tree aggregates child differences and distinguishes unchanged layers");
@@ -1090,17 +1166,17 @@ class CSmokeEditor : public CEditor
 		Do([this] { Check((Compare().*Access(TSelectedEntry{})) == FindEntry("Removed"), "tree selects a removed layer for inspection"); });
 		Do([this, Camera] { SelectKind(MapDiff::EEntryKind::LAYER, "Focus"); Camera(); });
 		Delay();
-		Click([] { return vec2(55, 41); });
-		Click([] { return vec2(167, 16); });
+		Click([] { return vec2(55, 87); });
+		Click([] { return vec2(167, 62); });
 		Do(Camera);
 		Delay();
 		Do([this] { ContextPixels(true, true); });
 		Screenshot("full-map-context-group");
-		Click([] { return vec2(240, 16); });
-		Click([] { return vec2(240, 16); });
+		Click([] { return vec2(240, 62); });
+		Click([] { return vec2(240, 62); });
 		Do([this] { Check((Compare().*Access(TContext{})) == 1, "context cycles to selected group"); ContextPixels(true, true, false); });
 		Screenshot("selection-context-group");
-		Click([] { return vec2(240, 16); });
+		Click([] { return vec2(240, 62); });
 		for(const auto &[Center, Zoom] : {std::pair{vec2(50 * 32, 12 * 32), 20.0f}, std::pair{vec2(50 * 32, 12 * 32), 0.5f}, std::pair{vec2(10000, 10000), 1.0f}, std::pair{vec2(12 * 32, 10 * 32 + 16), 1.0f}})
 		{
 			Do([this, Center, Zoom] { Compare().*Access(TCenter{}) = Center; Compare().*Access(TZoom{}) = Zoom; });
@@ -1110,9 +1186,9 @@ class CSmokeEditor : public CEditor
 		// Exercise the sparse immediate fallback against the same pixel oracle.
 		Do([this] { static_cast<CGraphics_Threaded *>(Graphics())->*Access(TTileBuffering{}) = false; });
 		Delay();
-		Do([this] { ContextPixels(true, true); static_cast<CGraphics_Threaded *>(Graphics())->*Access(TTileBuffering{}) = true; CheckSources("full map context"); Compare().Close(); Check(!HasRenderCache(Compare()), "close releases comparison GPU cache"); });
+		Do([this] { ContextPixels(true, true); static_cast<CGraphics_Threaded *>(Graphics())->*Access(TTileBuffering{}) = true; CheckSources("full map context"); CloseComparison(); Check(!HasRenderCache(Compare()), "close releases comparison GPU cache"); });
 		Delay();
-		Do([this] { Compare().Open(*this, m_pBefore, m_pAfter); });
+		Do([this] { OpenComparison(*this, m_pBefore, m_pAfter); });
 		WaitReady();
 		ToggleMapContext();
 		Do([this, Camera] {
@@ -1132,7 +1208,7 @@ class CSmokeEditor : public CEditor
 		Do([this] { CheckParallaxContext(); Compare().*Access(TCenter{}) += vec2(32, 64); Compare().*Access(TZoom{}) = 5; });
 		Delay();
 		Do([this] { CheckParallaxContext(); });
-		Do([this] { Check(HasRenderCache(Compare()), "reopen creates comparison cache"); Compare().Invalidate("context cache test"); Check(!HasRenderCache(Compare()), "source invalidation releases comparison cache"); Compare().Close(); });
+		Do([this] { Check(HasRenderCache(Compare()), "reopen creates comparison cache"); Compare().Invalidate("context cache test"); Check(!HasRenderCache(Compare()), "source invalidation releases comparison cache"); CloseComparison(); });
 		Delay();
 	}
 	void NavigationSteps()
@@ -1178,7 +1254,7 @@ class CSmokeEditor : public CEditor
 			}
 			CaptureSources();
 			Compare().*Access(TGroup{}) = false;
-			Compare().Open(*this, m_pBefore, m_pAfter);
+			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
 		auto Find = [this](const char *pName) {
@@ -1222,12 +1298,12 @@ class CSmokeEditor : public CEditor
 			Check((Compare().*Access(TChangedNavigator{})).size() == 5, "layer navigator separates group properties and child changes");
 			(Compare().*Access(TSelect{}))(Find("Navigation"));
 		});
-		Click([] { return vec2(240, 16); });
+		Click([] { return vec2(240, 62); });
 		Do([this] {
 			const auto &Rows = Compare().*Access(TNavigator{});
 			Check(Rows.size() == 6 && Rows.back() == -1 && !(Compare().*Access(TUnchangedExpanded{})), "unchanged section starts collapsed after changed entries");
 		});
-		Click([] { return vec2(100, 77 + 5 * 36 + 18); });
+		Click([] { return vec2(100, 123 + 5 * 36 + 18); });
 		Do([this] {
 			const auto &Rows = Compare().*Access(TNavigator{});
 			Check((Compare().*Access(TUnchangedExpanded{})) && Rows.size() > 6 && Rows[5] == -1, "unchanged section expands using its header");
@@ -1238,7 +1314,7 @@ class CSmokeEditor : public CEditor
 		});
 		Screenshot("comparison-unchanged-section");
 		// Real toolbar and keyboard events must visit each difference exactly once.
-		Click([] { return vec2(391, 16); });
+		Click([] { return vec2(391, 62); });
 		Do([Target] { Target("A", 1, 0); });
 		Press(SDLK_n);
 		Do([Target] { Target("A", 1, 1); });
@@ -1261,7 +1337,7 @@ class CSmokeEditor : public CEditor
 		Press(SDLK_p);
 		Do([Target] { Target("Added empty", 0, 9); });
 		// Arrow navigation may cross the header but must never select it.
-		Click([] { return vec2(100, 77 + 4 * 36 + 18); });
+		Click([] { return vec2(100, 123 + 4 * 36 + 18); });
 		Press(SDLK_DOWN);
 		Do([this] { Check((Compare().*Access(TSelectedEntry{})) == (Compare().*Access(TNavigator{}))[6], "keyboard skips the unchanged header downwards"); });
 		Press(SDLK_UP);
@@ -1274,13 +1350,13 @@ class CSmokeEditor : public CEditor
 		Do([Target] { Target("Added empty", 0, 9); });
 		// Collapse with an unchanged selection, then enter group navigation.
 		Do([this, Find] { (Compare().*Access(TSelect{}))(Find("B")); });
-		Click([] { return vec2(100, 77 + 5 * 36 + 18); });
+		Click([] { return vec2(100, 123 + 5 * 36 + 18); });
 		Do([this, Find] { Check(!(Compare().*Access(TUnchangedExpanded{})) && (Compare().*Access(TSelectedEntry{})) == Find("B"), "collapse preserves the inspected unchanged entry"); (Compare().*Access(TSelect{}))(Find("Navigation")); });
 		Press(SDLK_END);
 		Do([this, Find] { Check((Compare().*Access(TSelectedEntry{})) == Find("Added empty"), "End stops at the last real row before a collapsed header"); (Compare().*Access(TSelect{}))(Find("Navigation")); });
 		Press(SDLK_PAGEDOWN);
 		Do([this, Find] { Check((Compare().*Access(TSelectedEntry{})) == Find("Added empty"), "Page Down stops at the last real row before a collapsed header"); (Compare().*Access(TSelect{}))(Find("Navigation")); });
-		Click([] { return vec2(167, 16); });
+		Click([] { return vec2(167, 62); });
 		Do([this] { Check((Compare().*Access(TChangedNavigator{})).size() == 2, "group navigator aggregates child changes"); });
 		Click([this] { return DetailPosition(2); });
 		Do([this, Target, Find] { Target("A", 1, 1); (Compare().*Access(TSelect{}))(Find("Navigation")); });
@@ -1295,9 +1371,9 @@ class CSmokeEditor : public CEditor
 		Do([this, Find] { (Compare().*Access(TSelect{}))(Find("Added empty")); });
 		Press(SDLK_p);
 		Do([Target] { Target("Q", 2, 0); });
-		Click([] { return vec2(167, 16); });
+		Click([] { return vec2(167, 62); });
 		Do([this, Find] { Check((Compare().*Access(TSelectedEntry{})) == Find("Q"), "group to layer follows backwards-navigated child"); });
-		Do([this] { CheckSources("comparison navigation"); Compare().Close(); });
+		Do([this] { CheckSources("comparison navigation"); CloseComparison(); });
 		Delay();
 		Do([this] {
 			// A distant sibling must not pull a child property's fit away from its layer.
@@ -1305,7 +1381,7 @@ class CSmokeEditor : public CEditor
 				std::static_pointer_cast<CLayerTiles>(pMap->m_vpGroups[0]->m_vpLayers[2])->Resize(4096, 64);
 			str_copy(m_pAfter->m_vpGroups[0]->m_vpLayers[0]->m_aName, "A renamed");
 			Compare().*Access(TGroup{}) = true;
-			Compare().Open(*this, m_pBefore, m_pAfter);
+			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
 		Do([this, Find] { (Compare().*Access(TSelect{}))(Find("Navigation")); });
@@ -1313,7 +1389,7 @@ class CSmokeEditor : public CEditor
 		Do([this, Find] {
 			Check(SelectedDetail(Compare()) == std::array{Find("A renamed"), 0, 0}, "group navigation selects a child property");
 			Check(distance(Compare().*Access(TCenter{}), vec2(1008, 1024)) < 0.1f, "child property fit excludes other changed layers in the group");
-			Compare().Close();
+			CloseComparison();
 		});
 		Delay();
 	}
@@ -1480,7 +1556,7 @@ class CSmokeEditor : public CEditor
 			}
 			CaptureSources();
 			Compare().*Access(TGroup{}) = false;
-			Compare().Open(*this, m_pBefore, m_pAfter);
+			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
 		Do([this] { SelectKind(MapDiff::EEntryKind::SETTINGS); m_SavedCenter = Compare().*Access(TCenter{}); Graphics()->Resize(800, 600, 0); OnWindowResize(); });
@@ -1503,8 +1579,8 @@ class CSmokeEditor : public CEditor
 			Check((Compare().*Access(TCenter{})) == m_SavedCenter, "settings navigation preserves map camera");
 		});
 		Do([this] { m_SavedScroll = (Compare().*Access(TSettings{})).*Access(TScrollPos{}); });
-		Click([] { return vec2(55, 65); });
-		Click([] { return vec2(170, 65); });
+		Click([] { return vec2(55, 111); });
+		Click([] { return vec2(170, 111); });
 		Delay(20);
 		Do([this] { Check(std::abs(((Compare().*Access(TSettings{})).*Access(TScrollPos{})) - m_SavedScroll) < 0.1f && SelectedDetail(Compare()) == std::array{FindEntry("Ordered server settings"), 0, 2}, "settings section restores detail and text scroll after an envelope visit"); });
 		Screenshot("comparison-settings-distant");
@@ -1529,14 +1605,14 @@ class CSmokeEditor : public CEditor
 		Do([this] { Check(SelectedDetail(Compare()) == std::array{FindEntry("Ordered server settings"), 0, 1}, "N after settings click selects the inserted empty command"); });
 		Press(SDLK_p);
 		Do([this] { Check(SelectedDetail(Compare()) == std::array{FindEntry("Ordered server settings"), 0, 0}, "P after settings click returns to the replaced command"); });
-		Click([] { return vec2(55, 41); });
+		Click([] { return vec2(55, 87); });
 		Click([this] {
 			const auto &Navigator = Compare().*Access(TNavigator{});
 			for(int Row = 0; Row < (int)Navigator.size(); ++Row)
 				if(Navigator[Row] >= 0 && Result().m_vEntries[Navigator[Row]].m_Kind == MapDiff::EEntryKind::LAYER)
-					return vec2(100, 77 + Row * 36 + 18);
+					return vec2(100, 123 + Row * 36 + 18);
 			Check(false, "spatial entry available after settings");
-			return vec2(100, 95);
+			return vec2(100, 141);
 		});
 		Do([this] {
 			Check(Result().m_vEntries[Compare().*Access(TSelectedEntry{})].m_Kind == MapDiff::EEntryKind::LAYER, "settings click switches back to the map view");
@@ -1611,7 +1687,7 @@ class CSmokeEditor : public CEditor
 			Click([this] {
 				const auto &Rows = Compare().*Access(TNavigator{});
 				const auto It = std::find(Rows.begin(), Rows.end(), FindEntry("Overlap"));
-				return vec2(100, 77 + (It - Rows.begin()) * 36 + 18);
+				return vec2(100, 123 + (It - Rows.begin()) * 36 + 18);
 			});
 			for(int Point : {2, 1})
 			{
@@ -1647,8 +1723,8 @@ class CSmokeEditor : public CEditor
 			(Compare().*Access(TSelectDetail{}))(777);
 		});
 		Delay();
-		Click([] { return vec2(170, 65); });
-		Click([] { return vec2(55, 65); });
+		Click([] { return vec2(170, 111); });
+		Click([] { return vec2(55, 111); });
 		Delay(20);
 		Do([this] {
 			const auto &Scroll = (Compare().*Access(TDetails{})).*Access(TListScroll{});
@@ -1683,22 +1759,22 @@ class CSmokeEditor : public CEditor
 		Click([this] { const auto P = (Compare().*Access(TPanes{}))[0]; return vec2(P.x + 25, P.y + 34); });
 		Do([this] { Check((Compare().*Access(TEnvelopeChannels{})) == 0, "native envelope channel toggle affects paired graphs"); });
 		Screenshot("comparison-envelope-no-channels");
-		Click([] { return vec2(106, 16); });
+		Click([] { return vec2(106, 62); });
 		WaitReady();
 		Do([this] { SelectKind(MapDiff::EEntryKind::ENVELOPE, "Removed"); Check((Compare().*Access(TEnvelopeChannels{})) == 15, "Swap resets envelope channel state"); });
 		Delay();
 		Screenshot("comparison-envelope-added");
-		Do([this] { CheckSources("resource views, channel toggles and Swap"); Compare().*Access(TTreeActive{}) = false; Compare().Close(); });
+		Do([this] { CheckSources("resource views, channel toggles and Swap"); Compare().*Access(TTreeActive{}) = false; CloseComparison(); });
 		Delay();
-		Do([this] { Compare().Open(*this, m_pBefore, m_pAfter); });
+		Do([this] { OpenComparison(*this, m_pBefore, m_pAfter); });
 		WaitReady();
 		Do([this] { Check(Compare().*Access(TTreeActive{}), "reopen restores navigator keyboard focus"); });
-		Click([] { return vec2(55, 65); });
+		Click([] { return vec2(55, 111); });
 		Press(SDLK_DOWN);
 		Do([this] { Check(Result().m_vEntries[Compare().*Access(TSelectedEntry{})].m_Name == "Position", "reopened envelope section accepts navigator keyboard input"); });
 		Do([this] { SelectKind(MapDiff::EEntryKind::ENVELOPE, "Color"); });
 		Delay();
-		Do([this] { CheckSources("resource view reopening"); Graphics()->Resize(1280, 800, 0); OnWindowResize(); Compare().Close(); });
+		Do([this] { CheckSources("resource view reopening"); Graphics()->Resize(1280, 800, 0); OnWindowResize(); CloseComparison(); });
 		Delay();
 		Do([this] {
 			for(int Side = 0; Side < 2; ++Side)
@@ -1714,7 +1790,7 @@ class CSmokeEditor : public CEditor
 			CaptureSources();
 			Graphics()->Resize(800, 600, 0);
 			OnWindowResize();
-			Compare().Open(*this, m_pBefore, m_pAfter);
+			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
 		Do([this] {
@@ -1754,7 +1830,7 @@ class CSmokeEditor : public CEditor
 			CheckSources("settings width transitions");
 			Graphics()->Resize(1280, 800, 0);
 			OnWindowResize();
-			Compare().Close();
+			CloseComparison();
 		});
 		Delay();
 	}
@@ -1784,10 +1860,10 @@ class CSmokeEditor : public CEditor
 			}
 			CaptureSources();
 			Compare().*Access(TGroup{}) = false;
-			Compare().Open(*this, m_pBefore, m_pAfter);
+			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
-		Click([] { return vec2(240, 16); });
+		Click([] { return vec2(240, 62); });
 		Do([this] {
 			Check((Compare().*Access(TChangedNavigator{})).size() == 24, "scroll fixture overflows with changed layers");
 			Ui()->OnCursorMove((100 - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (300 - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h);
@@ -1808,7 +1884,7 @@ class CSmokeEditor : public CEditor
 		});
 		auto Header = [this] {
 			const auto &Scroll = ((Compare().*Access(TNavLists{}))[Compare().*Access(TSection{})]).*Access(TListScroll{});
-			return vec2(100, 77 + 24 * 36 + 18 + (Scroll.*Access(TScrollOffset{})));
+			return vec2(100, 123 + 24 * 36 + 18 + (Scroll.*Access(TScrollOffset{})));
 		};
 		Click(Header);
 		Delay(15);
@@ -1826,10 +1902,10 @@ class CSmokeEditor : public CEditor
 			Check(!(Compare().*Access(TUnchangedExpanded{})) && std::abs((Scroll.*Access(TScrollPos{})) - m_SavedScroll) < 0.1f, "collapsing unchanged retains scrolled viewport");
 			Check((Compare().*Access(TSelectedEntry{})) == FindEntry("Layer 40") && (Compare().*Access(TCenter{})) == m_SavedCenter, "collapsing unchanged preserves a hidden selection and camera");
 		});
-		Click([] { return vec2(170, 41); });
-		Click([] { return vec2(55, 41); });
+		Click([] { return vec2(170, 87); });
+		Click([] { return vec2(55, 87); });
 		Do([this] { Check(std::abs(((((Compare().*Access(TNavLists{}))[Compare().*Access(TSection{})]).*Access(TListScroll{})).*Access(TScrollPos{})) - m_SavedScroll) < 0.1f, "sidebar views retain independent scroll positions"); });
-		Click([] { return vec2(170, 41); });
+		Click([] { return vec2(170, 87); });
 		DoubleClick([this] { return TreePosition("Scroll"); });
 		Click([this] { return TreePosition("Scroll"); });
 		Do([this] { Key(SDLK_n, true); });
@@ -1837,16 +1913,16 @@ class CSmokeEditor : public CEditor
 		Do([this] { Key(SDLK_n, false); Check(std::get<1>(LayerState(Compare(), FindEntry("Scroll"))), "Next reveals the focused child's collapsed parent"); });
 		Click([this] { return TreePosition("Scroll", 1); });
 		Do([this] { CheckSources("scroll and tree navigation"); });
-		Click([] { return vec2(106, 16); });
+		Click([] { return vec2(106, 62); });
 		WaitReady();
 		Do([this] { Check(std::get<0>(LayerState(Compare(), FindEntry("Scroll"))) && std::get<2>(LayerState(Compare(), FindEntry("Scroll"))) == 24, "Swap resets visibility without accumulating group counts"); });
-		Click([] { return vec2(106, 16); });
+		Click([] { return vec2(106, 62); });
 		WaitReady();
-		Do([this] { Check(std::get<2>(LayerState(Compare(), FindEntry("Scroll"))) == 24, "repeated Swap retains exact aggregate counts"); Compare().Close(); });
+		Do([this] { Check(std::get<2>(LayerState(Compare(), FindEntry("Scroll"))) == 24, "repeated Swap retains exact aggregate counts"); CloseComparison(); });
 		Delay();
-		Do([this] { Compare().Open(*this, m_pBefore, m_pAfter); });
+		Do([this] { OpenComparison(*this, m_pBefore, m_pAfter); });
 		WaitReady();
-		Do([this] { Check(std::get<0>(LayerState(Compare(), FindEntry("Scroll"))) && (Compare().*Access(TSection{})) == 0, "reopening resets viewer visibility and sidebar view"); Compare().Close(); });
+		Do([this] { Check(std::get<0>(LayerState(Compare(), FindEntry("Scroll"))) && (Compare().*Access(TSection{})) == 0, "reopening resets viewer visibility and sidebar view"); CloseComparison(); });
 		Delay();
 		Do([this] {
 			for(int n = 3; n < 60; ++n)
@@ -1861,11 +1937,11 @@ class CSmokeEditor : public CEditor
 				std::swap(pMap->m_vpGroups[0], pMap->m_vpGroups[1]);
 			}
 			Compare().*Access(TGroup{}) = false;
-			Compare().Open(*this, m_pBefore, m_pAfter);
+			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
-		Click([] { return vec2(240, 16); });
-		Click([] { return vec2(100, 77 + 3 * 36 + 18); });
+		Click([] { return vec2(240, 62); });
+		Click([] { return vec2(100, 123 + 3 * 36 + 18); });
 		auto ScrollOnce = [this] {
 			Do([this] { Ui()->OnCursorMove((100 - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (300 - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); });
 			Delay();
@@ -1874,11 +1950,11 @@ class CSmokeEditor : public CEditor
 		};
 		ScrollOnce();
 		Do([this] { Check(((((Compare().*Access(TNavLists{}))[Compare().*Access(TSection{})]).*Access(TListScroll{})).*Access(TScrollPos{})) > 50, "expanded section scrolls before collapse-to-fit"); });
-		Click([this] { return vec2(100, 77 + 3 * 36 + 18 + ((((Compare().*Access(TNavLists{}))[Compare().*Access(TSection{})]).*Access(TListScroll{})).*Access(TScrollOffset{}))); });
+		Click([this] { return vec2(100, 123 + 3 * 36 + 18 + ((((Compare().*Access(TNavLists{}))[Compare().*Access(TSection{})]).*Access(TListScroll{})).*Access(TScrollOffset{}))); });
 		Do([this] { Check(((((Compare().*Access(TNavLists{}))[Compare().*Access(TSection{})]).*Access(TListScroll{})).*Access(TScrollPos{})) == 0, "section collapse clamps stored scrolling when content fits"); });
-		Click([] { return vec2(100, 77 + 3 * 36 + 18); });
+		Click([] { return vec2(100, 123 + 3 * 36 + 18); });
 		Do([this] { Check(((((Compare().*Access(TNavLists{}))[Compare().*Access(TSection{})]).*Access(TListScroll{})).*Access(TScrollPos{})) == 0, "section expansion cannot resurrect old scroll position"); });
-		Click([] { return vec2(170, 41); });
+		Click([] { return vec2(170, 87); });
 		ScrollOnce();
 		Do([this] { Check(((Compare().*Access(TLayerTree{})).*Access(TScrollPos{})) > 20, "layer tree scrolls before collapse-to-fit"); });
 		DoubleClick([this] { return TreePosition("Scroll"); });
@@ -1911,7 +1987,7 @@ class CSmokeEditor : public CEditor
 		Do([this] { Graphics()->Resize(800, 600, 0); OnWindowResize(); });
 		Delay();
 		Screenshot("comparison-layer-tree-compact");
-		Do([this] { Graphics()->Resize(1280, 800, 0); OnWindowResize(); Compare().Close(); });
+		Do([this] { Graphics()->Resize(1280, 800, 0); OnWindowResize(); CloseComparison(); });
 		Delay();
 	}
 	void MeasureMotion(const std::string &Name)
@@ -2002,24 +2078,57 @@ class CSmokeEditor : public CEditor
 				str_copy(pLargestGroup->m_aName, "Perf group");
 				m_Log << "TIMING fixture dimensions=" << pLargest->m_Width << "x" << pLargest->m_Height << " nonempty=" << MostTiles << std::endl;
 			}
+			if(LocalMaps)
+			{
+				MapDiff::CSnapshot Before, After;
+				const auto Start = std::chrono::steady_clock::now();
+				MapDiff::Capture(*m_pBefore, Before);
+				MapDiff::Capture(*m_pAfter, After);
+				const auto Captured = std::chrono::steady_clock::now();
+				const auto Result = MapDiff::Compare(Before, After);
+				const auto Finished = std::chrono::steady_clock::now();
+				m_Log << "TIMING local capture_pair_ms=" << std::chrono::duration<double, std::milli>(Captured - Start).count() << " pure_compare_ms=" << std::chrono::duration<double, std::milli>(Finished - Captured).count() << " changes=" << Result.ChangeCount() << std::endl;
+			}
 			Compare().*Access(TGroup{}) = false;
-			Compare().Open(*this, m_pBefore, m_pAfter);
+			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
 		Do([this] {
 			SelectKind(MapDiff::EEntryKind::LAYER, "Perf layer");
 			Check((Compare().*Access(TZoom{})) <= 20.0f, "large layer automatic fit stays at inspection scale");
 		});
+		if(LocalMaps)
+		{
+			auto pCount = std::make_shared<uint64_t>();
+			Do([this, pCount] { *pCount = m_CaptureCount; Tabs().SelectMap(*this, m_pBefore); });
+			Delay();
+			Do([this] { const auto Start = std::chrono::steady_clock::now(); Tabs().Open(*this, m_pBefore, m_pAfter); m_Log << "TIMING unchanged_tab_request_ms=" << std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-Start).count() << std::endl; });
+			WaitReady();
+			Do([this, pCount] { Check(m_CaptureCount == *pCount, "large unchanged tab switch performs zero captures"); Tabs().SelectMap(*this, m_pAfter); });
+			Delay();
+			Do([this, pCount] { for(int i = 0; i < 20; ++i) { m_pAfter->m_MapInfo.m_aVersion[0] = 'a' + i; m_pAfter->OnModify(); } Check(m_CaptureCount == *pCount, "large hidden repeated edits perform zero captures"); Tabs().Open(*this, m_pBefore, m_pAfter); });
+			WaitReady();
+			Do([this, pCount] { Check(m_CaptureCount == *pCount + 1, "large pending tab coalesces edits into one capture"); m_Log << "TIMING refresh_captures=" << m_CaptureCount - *pCount << std::endl; });
+		}
 		MeasureFrames(LocalMaps ? "local context off" : "dense context off");
 		if(LocalMaps)
 			Screenshot("performance-layer");
-		Click([] { return vec2(240, 16); });
+		Click([] { return vec2(240, 62); });
 		MeasureFrames(LocalMaps ? "local selection context" : "dense selection context");
-		Click([] { return vec2(240, 16); });
+		Click([] { return vec2(240, 62); });
 		MeasureFrames(LocalMaps ? "local context on" : "dense context on");
-		Click([] { return vec2(170, 41); });
+		Click([] { return vec2(170, 87); });
 		MeasureFrames(LocalMaps ? "local full context with layer tree" : "dense full context with layer tree");
-		Click([] { return vec2(55, 41); });
+		if(LocalMaps)
+		{
+			Screenshot("performance-layer-tree");
+			Do([this] { Graphics()->Resize(800,600,0); OnWindowResize(); });
+			Delay();
+			Screenshot("performance-layer-tree-800x600");
+			Do([this] { Graphics()->Resize(1280,800,0); OnWindowResize(); });
+			Delay();
+		}
+		Click([] { return vec2(55, 87); });
 		if(LocalMaps)
 			Screenshot("performance-full-context");
 		MeasureMotion(LocalMaps ? "local full context pan/zoom" : "dense full context pan/zoom");
@@ -2037,13 +2146,13 @@ class CSmokeEditor : public CEditor
 			Check((Compare().*Access(TZoom{})) <= 20.0f, "wheel cannot zoom out to an unbounded tile workload");
 		});
 		MeasureFrames(LocalMaps ? "local maximum zoom out" : "dense maximum zoom out");
-		Click([] { return vec2(167, 16); });
+		Click([] { return vec2(167, 62); });
 		Do([this] { Check((Compare().*Access(TZoom{})) <= 20.0f, "large group fit stays at inspection scale"); });
 		MeasureFrames(LocalMaps ? "local group context on" : "dense group context on");
 		MeasureMotion(LocalMaps ? "local group full context pan/zoom" : "dense group full context pan/zoom");
 		ToggleMapContext();
 		MeasureFrames(LocalMaps ? "local group context off" : "dense group context off");
-		Do([this] { Compare().Close(); });
+		Do([this] { CloseComparison(); });
 		Delay();
 		if(!LocalMaps)
 		{
@@ -2052,7 +2161,7 @@ class CSmokeEditor : public CEditor
 				str_copy(pGroup->m_aName, m_pBefore->m_vpGroups.back()->m_aName);
 				str_copy(pGroup->m_vpLayers.back()->m_aName, m_pBefore->m_vpGroups.back()->m_vpLayers.back()->m_aName);
 				Compare().*Access(TGroup{}) = false;
-				Compare().Open(*this, m_pBefore, m_pAfter);
+				OpenComparison(*this, m_pBefore, m_pAfter);
 			});
 			WaitReady();
 			Do([this] {
@@ -2067,7 +2176,7 @@ class CSmokeEditor : public CEditor
 			MeasureFrames("dense tile-only context off at far edge");
 			ToggleMapContext();
 			MeasureFrames("dense tile-only context on at far edge");
-			Do([this] { Compare().Close(); });
+			Do([this] { CloseComparison(); });
 			Delay();
 		}
 	}
@@ -2194,7 +2303,7 @@ class CSmokeEditor : public CEditor
 			}
 			CaptureSources();
 			Compare().*Access(TGroup{}) = false;
-			Compare().Open(*this, m_pBefore, m_pAfter);
+			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
 		Do([this] {
@@ -2202,8 +2311,8 @@ class CSmokeEditor : public CEditor
 			for(int Index : Compare().*Access(TNavigator{}))
 				Check(Index < 0 || (Result().m_vEntries[Index].m_Kind != MapDiff::EEntryKind::ENVELOPE && Result().m_vEntries[Index].m_Kind != MapDiff::EEntryKind::SETTINGS), "Changes excludes dedicated resource sections");
 		});
-		Click([] { return vec2(240, 16); });
-		Click([] { return vec2(240, 16); });
+		Click([] { return vec2(240, 62); });
+		Click([] { return vec2(240, 62); });
 		Do([this] { Check((Compare().*Access(TCenter{})).x > 50000, "distant tile fit exercises far camera"); CheckSkyPixels(false); });
 		Screenshot("sections-distant-textured-sky");
 		auto Move = [this](vec2 P) { Ui()->OnCursorMove((P.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (P.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); };
@@ -2216,13 +2325,13 @@ class CSmokeEditor : public CEditor
 		Do([this] { CheckSkyPixels(false); SDL_Event E{}; E.type = SDL_MOUSEWHEEL; E.wheel.y = -1; SDL_PushEvent(&E); });
 		Delay();
 		Do([this] { CheckSkyPixels(false); });
-		Click([] { return vec2(240, 16); });
+		Click([] { return vec2(240, 62); });
 		Do([this] { CheckSkyPixels(false, false); });
-		Click([] { return vec2(240, 16); });
+		Click([] { return vec2(240, 62); });
 		Do([this] { CheckSkyPixels(false, false); });
-		Click([] { return vec2(240, 16); });
+		Click([] { return vec2(240, 62); });
 		Do([this, pChangesState] { *pChangesState = {Compare().*Access(TCenter{}), Compare().*Access(TZoom{}), Compare().*Access(TSelectedDetail{}), Compare().*Access(TGroup{})}; });
-		Click([] { return vec2(170, 41); });
+		Click([] { return vec2(170, 87); });
 		Click([this] { return TreePosition("Sky tex"); });
 		Do([this] { Compare().*Access(TZoom{}) = std::max(1.5f, Compare().*Access(TZoom{})); });
 		Delay();
@@ -2237,9 +2346,9 @@ class CSmokeEditor : public CEditor
 		Click([this] { return TreePosition("Sky"); });
 		Do([this] { CheckSkyPixels(true, true, true); });
 		Screenshot("sections-selected-zero-parallax");
-		Click([] { return vec2(55, 65); });
+		Click([] { return vec2(55, 111); });
 		Do([this] { Check((Compare().*Access(TSection{})) == 2 && (Compare().*Access(TNavigator{})).size() == 83, "Envelopes exposes changed and equal entries"); });
-		Click([] { return vec2(100, 77 + 36 + 18); });
+		Click([] { return vec2(100, 123 + 36 + 18); });
 		Do([this] { Check(Result().m_vEntries[Compare().*Access(TSelectedEntry{})].m_Name == "Tint", "equal envelope is directly selectable"); Key(SDLK_n, true); });
 		Delay();
 		Do([this] { Key(SDLK_n, false); Check(Result().m_vEntries[Compare().*Access(TSelectedEntry{})].m_Name == "Changed", "envelope N skips equal entries and map changes"); });
@@ -2249,15 +2358,15 @@ class CSmokeEditor : public CEditor
 		Delay(20);
 		auto pEnvelopeState = std::make_shared<std::pair<int, float>>();
 		Do([this, pEnvelopeState] { const auto &Scroll = (Compare().*Access(TNavLists{}))[2].*Access(TListScroll{}); *pEnvelopeState = {Compare().*Access(TSelectedEntry{}), Scroll.*Access(TScrollPos{})}; Check(pEnvelopeState->second > 1000, "envelope navigator actually overflows and scrolls"); });
-		Click([] { return vec2(170, 65); });
-		Click([] { return vec2(55, 65); });
+		Click([] { return vec2(170, 111); });
+		Click([] { return vec2(55, 111); });
 		Delay(20);
 		Do([this, pEnvelopeState] { const auto &Scroll = (Compare().*Access(TNavLists{}))[2].*Access(TListScroll{}); Check((Compare().*Access(TSelectedEntry{})) == pEnvelopeState->first && std::abs((Scroll.*Access(TScrollPos{})) - pEnvelopeState->second) < 0.1f, "envelope navigator restores its distant selection and scroll"); });
-		Click([] { return vec2(170, 65); });
+		Click([] { return vec2(170, 111); });
 		Do([this] { Check((Compare().*Access(TSection{})) == 3 && (Compare().*Access(TNavigator{})).size() == 1, "Server settings has its own navigator"); Key(SDLK_n, true); });
 		Delay();
 		Do([this] { Key(SDLK_n, false); Check(Result().m_vEntries[Compare().*Access(TSelectedEntry{})].m_Kind == MapDiff::EEntryKind::SETTINGS, "settings N wraps inside its section"); });
-		Click([] { return vec2(55, 41); });
+		Click([] { return vec2(55, 87); });
 		Do([this, pChangesState] { Check(Result().m_vEntries[Compare().*Access(TSelectedEntry{})].m_Name == "Distant", "Changes restores its spatial selection"); Check(*pChangesState == std::tuple{Compare().*Access(TCenter{}), Compare().*Access(TZoom{}), Compare().*Access(TSelectedDetail{}), Compare().*Access(TGroup{})}, "different-entry round trip restores the pre-departure camera, detail and grouping"); m_SavedCenter = Compare().*Access(TCenter{}); m_SavedEntry = Compare().*Access(TSelectedEntry{}); });
 		auto Drag = [this, Move](float Target) {
 			Do([this, Move] { Move((Compare().*Access(TDivider{})).Center()); });
@@ -2281,9 +2390,9 @@ class CSmokeEditor : public CEditor
 		Drag(10);
 		Do([this] { Check((Compare().*Access(TSidebarWidth{})) == 160, "narrow divider keeps section buttons usable"); });
 		Screenshot("sections-narrow-800");
-		Click([] { return vec2(45, 65); });
+		Click([] { return vec2(45, 111); });
 		Do([this] { Check((Compare().*Access(TSection{})) == 2 && (Compare().*Access(TSidebarWidth{})) == 160, "resource section shares resized width"); });
-		Click([] { return vec2(45, 41); });
+		Click([] { return vec2(45, 87); });
 		Do([this] { m_SavedCenter = Compare().*Access(TCenter{}); m_SavedEntry = Compare().*Access(TSelectedEntry{}); });
 		Drag(230);
 		Do([this, Move] { Move((Compare().*Access(TDivider{})).Center()); m_SavedScroll = this->*Access(TToolboxWidth{}); });
@@ -2294,7 +2403,7 @@ class CSmokeEditor : public CEditor
 		Delay();
 		Do([this] { Key(SDLK_ESCAPE, true); });
 		Delay();
-		Do([this] { Check(State() == 6, "closing during divider drag waits for release"); Mouse(SDL_BUTTON_LEFT, false); Key(SDLK_ESCAPE, false); });
+		Do([this] { Check(Tabs().Transitioning(), "leaving during divider drag waits for release"); Mouse(SDL_BUTTON_LEFT, false); Key(SDLK_ESCAPE, false); });
 		Delay();
 		auto pExtraState = std::make_shared<std::pair<EExtraEditor, float>>();
 		Do([this, Move, pExtraState] {
@@ -2327,39 +2436,39 @@ class CSmokeEditor : public CEditor
 			m_ToolBoxWidth = m_SavedScroll;
 			m_ActiveExtraEditor = pExtraState->first;
 			m_aExtraEditorSplits[EXTRAEDITOR_HISTORY] = pExtraState->second;
-			Compare().Open(*this, m_pBefore, m_pAfter);
+			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
 		Do([this, Move] { Move((Compare().*Access(TPanes{}))[0].Center()); });
 		Delay();
-		Do([this] { Check(CursorType(*this) == 0 && !(Compare().*Access(TPanning{})), "reopening resets divider drag and cursor"); Compare().Close(); });
+		Do([this] { Check(CursorType(*this) == 0 && !(Compare().*Access(TPanning{})), "reopening resets divider drag and cursor"); CloseComparison(); });
 		Delay();
 		Do([this] {
 			m_pAfter->m_vSettings = m_pBefore->m_vSettings;
 			m_pAfter->m_vpEnvelopes[2]->m_vPoints[0].m_aValues[0] = 768;
-			Compare().Open(*this, m_pBefore, m_pAfter);
+			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
-		Click([] { return vec2(55, 65); });
+		Click([] { return vec2(55, 111); });
 		Do([this] { Check((Compare().*Access(TContext{})) == 0 && (Compare().*Access(TNavigator{})).size() == 83 && (Compare().*Access(TChangedNavigator{})).empty(), "equal envelopes remain accessible with context off"); });
-		Click([] { return vec2(170, 65); });
-		Do([this] { Check((Compare().*Access(TContext{})) == 0 && (Compare().*Access(TNavigator{})).size() == 1 && (Compare().*Access(TChangedNavigator{})).empty(), "equal settings remain accessible with context off"); Compare().Close(); });
+		Click([] { return vec2(170, 111); });
+		Do([this] { Check((Compare().*Access(TContext{})) == 0 && (Compare().*Access(TNavigator{})).size() == 1 && (Compare().*Access(TChangedNavigator{})).empty(), "equal settings remain accessible with context off"); CloseComparison(); });
 		Delay();
-		Do([this] { m_pBefore->m_vpEnvelopes.clear(); m_pAfter->m_vpEnvelopes.clear(); m_pBefore->m_vSettings.clear(); m_pAfter->m_vSettings.clear(); Compare().Open(*this, m_pBefore, m_pAfter); });
+		Do([this] { m_pBefore->m_vpEnvelopes.clear(); m_pAfter->m_vpEnvelopes.clear(); m_pBefore->m_vSettings.clear(); m_pAfter->m_vSettings.clear(); OpenComparison(*this, m_pBefore, m_pAfter); });
 		WaitReady();
-		Click([] { return vec2(55, 65); });
+		Click([] { return vec2(55, 111); });
 		Do([this] { Check((Compare().*Access(TNavigator{})).empty() && (Compare().*Access(TSelectedEntry{})) == -1, "absent envelopes clear stale selection"); });
 		Screenshot("sections-empty-envelopes");
-		Click([] { return vec2(170, 65); });
+		Click([] { return vec2(170, 111); });
 		Screenshot("sections-empty-settings");
-		Do([this] { Compare().Close(); });
+		Do([this] { CloseComparison(); });
 		Delay();
-		Do([this] { m_pBefore->m_vpGroups.clear(); m_pAfter->m_vpGroups.clear(); Compare().Open(*this, m_pBefore, m_pAfter); });
+		Do([this] { m_pBefore->m_vpGroups.clear(); m_pAfter->m_vpGroups.clear(); OpenComparison(*this, m_pBefore, m_pAfter); });
 		WaitReady();
-		Click([] { return vec2(170, 41); });
+		Click([] { return vec2(170, 87); });
 		Do([this] { Check((Compare().*Access(TNavigator{})).empty() && (Compare().*Access(TSelectedEntry{})) == -1, "empty layer section clears selection"); });
 		Screenshot("sections-empty-layers");
-		Do([this] { Compare().Close(); Compare().*Access(TSidebarWidth{}) = 225; Graphics()->Resize(1280, 800, 0); OnWindowResize(); });
+		Do([this] { CloseComparison(); Compare().*Access(TSidebarWidth{}) = 225; Graphics()->Resize(1280, 800, 0); OnWindowResize(); });
 		Delay();
 	}
 	void SectionReviewSteps()
@@ -2391,30 +2500,30 @@ class CSmokeEditor : public CEditor
 			}
 			CaptureSources();
 			Compare().*Access(TGroup{}) = false;
-			Compare().Open(*this, m_pBefore, m_pAfter);
+			OpenComparison(*this, m_pBefore, m_pAfter);
 		});
 		WaitReady();
-		Click([] { return vec2(170, 65); });
+		Click([] { return vec2(170, 111); });
 		Delay();
-		Click([] { return vec2(170, 41); });
+		Click([] { return vec2(170, 87); });
 		Do([this] {
 			Check(Result().m_vEntries[Compare().*Access(TSelectedEntry{})].m_Name == "Tall", "first Layers visit from Settings chooses the tall layer");
 			const float Expected = (2080.0f + 64) / (Compare().*Access(TPanes{}))[0].h;
 			Check(std::abs((Compare().*Access(TZoom{})) - Expected) < 0.001f, "first Layers visit fits the new inspector-height panes");
 		});
 		// Save distinct same-entry inspections in the two spatial sections.
-		Click([] { return vec2(55, 41); });
+		Click([] { return vec2(55, 87); });
 		Click([this] { return DetailPosition(1); });
 		auto pOriginal = std::make_shared<std::tuple<vec2, float, int, bool>>();
 		auto pOther = std::make_shared<std::tuple<vec2, float, int, bool>>();
 		auto ReadState = [this] { return std::tuple{Compare().*Access(TCenter{}), Compare().*Access(TZoom{}), Compare().*Access(TSelectedDetail{}), Compare().*Access(TGroup{})}; };
 		Do([this, pOriginal, ReadState] { Compare().*Access(TCenter{}) = vec2(123, 456); Compare().*Access(TZoom{}) = 3.5f; *pOriginal = ReadState(); });
-		Click([] { return vec2(170, 41); });
+		Click([] { return vec2(170, 87); });
 		Click([this] { return DetailPosition(0); });
 		Do([this, pOther, ReadState] { Compare().*Access(TCenter{}) = vec2(-300, 900); Compare().*Access(TZoom{}) = 2.25f; Compare().*Access(TGroup{}) = true; *pOther = ReadState(); });
-		Click([] { return vec2(55, 41); });
+		Click([] { return vec2(55, 87); });
 		Do([this, pOriginal, ReadState] { Check(ReadState() == *pOriginal && Result().m_vEntries[Compare().*Access(TSelectedEntry{})].m_Name == "Tall", "same-entry Changes return restores pre-departure center, zoom, detail and grouping"); });
-		Click([] { return vec2(170, 41); });
+		Click([] { return vec2(170, 87); });
 		Do([this, pOther, ReadState] { Check(ReadState() == *pOther, "same-entry Layers return restores its own center, zoom, detail and grouping"); Compare().*Access(TGroup{}) = false; });
 		// Use the real inspector to verify the displayed matching explanations.
 		auto CheckMatching = [this](const char *pReason) {
@@ -2434,7 +2543,7 @@ class CSmokeEditor : public CEditor
 		});
 		Click([this] { return DetailPosition(0); });
 		Do([this, CheckMatching] { Check(SelectedDetail(Compare())[1] == 4 && Result().m_vEntries[Compare().*Access(TSelectedEntry{})].m_Positional, "positional layer matching row selected"); CheckMatching("Positional fallback in compatible ordered span"); m_SavedEntry = Compare().*Access(TSelectedEntry{}); });
-		Click([] { return vec2(55, 41); });
+		Click([] { return vec2(55, 87); });
 		Do([this] { (Compare().*Access(TSelect{}))(m_SavedEntry); });
 		Delay();
 		Do([this] {
@@ -2447,7 +2556,7 @@ class CSmokeEditor : public CEditor
 		});
 		Delay();
 		Do([this] { Check(str_find(m_aTooltip, "#1 (unnamed)") && str_find(m_aTooltip, "Before #1 / After #1"), "non-tree name tooltip exposes full unnamed label and source indices"); });
-		Click([] { return vec2(170, 41); });
+		Click([] { return vec2(170, 87); });
 		Do([this] {
 			for(int Index = 0; Index < (int)Result().m_vEntries.size(); ++Index)
 				if(Result().m_vEntries[Index].m_Kind == MapDiff::EEntryKind::LAYER && Result().m_vEntries[Index].m_Ambiguous && !Result().m_vEntries[Index].m_Positional)
@@ -2458,7 +2567,7 @@ class CSmokeEditor : public CEditor
 		});
 		Click([this] { return DetailPosition(0); });
 		Do([this, CheckMatching] { Check(SelectedDetail(Compare())[1] == 4, "duplicate layer matching row selected"); CheckMatching("Ambiguous duplicate content match"); });
-		Click([] { return vec2(170, 65); });
+		Click([] { return vec2(170, 111); });
 		auto Move = [this](vec2 P) { Ui()->OnCursorMove((P.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (P.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); };
 		Do([this, Move] { Compare().*Access(TSidebarWidth{}) = 160; Graphics()->Resize(800, 600, 0); OnWindowResize(); });
 		Delay();
@@ -2490,15 +2599,652 @@ class CSmokeEditor : public CEditor
 		Delay();
 		Do([this] { Check(((Compare().*Access(TSettings{})).*Access(TContentSize{})) > m_SavedScroll, "settings remeasure to the narrower columns on divider release"); m_SavedScroll = (Compare().*Access(TSettings{})).*Access(TContentSize{}); });
 		Delay();
-		Do([this] { Check(((Compare().*Access(TSettings{})).*Access(TContentSize{})) == m_SavedScroll, "released settings geometry remains cached"); CheckSources("section review regression"); Compare().Close(); Compare().*Access(TSidebarWidth{}) = 225; Graphics()->Resize(1280, 800, 0); OnWindowResize(); });
+		Do([this] { Check(((Compare().*Access(TSettings{})).*Access(TContentSize{})) == m_SavedScroll, "released settings geometry remains cached"); CheckSources("section review regression"); CloseComparison(); Compare().*Access(TSidebarWidth{}) = 225; Graphics()->Resize(1280, 800, 0); OnWindowResize(); });
 		Delay();
 	}
+	void Shortcut(SDL_Keycode K, bool Shift = false)
+	{
+		Do([this, K, Shift] { Key(SDLK_LCTRL, true); if(Shift) Key(SDLK_LSHIFT, true); Key(K, true); });
+		Delay(2);
+		Do([this, K, Shift] { Key(K, false); if(Shift) Key(SDLK_LSHIFT, false); Key(SDLK_LCTRL, false); });
+		Delay();
+	}
+
+	vec2 ComparisonTabPoint(CMapCompare *pTarget, bool Close = false)
+	{
+		float X = m_ToolBoxWidth + 2 + ((this->*Access(TTabScroll{})).*Access(TScrollOffset{}));
+		for(const auto &pMap : Maps())
+			X += std::clamp(TextRender()->TextWidth(10, pMap->m_aDisplayName) + 10, 60.0f, 120.0f) + 20;
+		for(const auto &pDocument : Tabs().*Access(TCompareDocuments{}))
+		{
+			const auto &Sources = pDocument.get()->*Access(TSources{});
+			const bool Pending = (pDocument.get()->*Access(TCapturedRevisions{}))[0] != Sources[0]->m_ContentRevision || (pDocument.get()->*Access(TCapturedRevisions{}))[1] != Sources[1]->m_ContentRevision;
+			const std::string Title = std::string("Before: ") + Sources[0]->m_aDisplayName + " / After: " + Sources[1]->m_aDisplayName + (Pending ? " *" : "");
+			const float Width = std::clamp(TextRender()->TextWidth(10, Title.c_str()) + 12, 150.0f, 270.0f);
+			if(pDocument.get() == pTarget)
+				return vec2(X + (Close ? Width + 9 : Width / 2), 31);
+			X += Width + 20;
+		}
+		return vec2(-1, -1);
+	}
+
+	void TabLifecycleSteps()
+	{
+		struct CFixture
+		{
+			CEditorMap *m_A = nullptr, *m_B = nullptr, *m_C = nullptr;
+			CMapCompare *m_AB = nullptr, *m_AC = nullptr;
+			const void *m_Snapshot = nullptr;
+			uint64_t m_Revision = 0;
+			size_t m_Count = 0;
+			size_t m_HistorySize = 0;
+			int m_Original = 0;
+		};
+		auto F = std::make_shared<CFixture>();
+		Do([this, F] {
+			for(int i = 0; i < 3; ++i)
+			{
+				auto pMap = std::make_unique<CEditorMap>(this);
+				pMap->CreateDefault();
+				str_copy(pMap->m_aFilename, "maps/same.map");
+				str_format(pMap->m_aDisplayName, sizeof(pMap->m_aDisplayName), "same (%d)", i + 1);
+				auto pGroup = pMap->NewGroup();
+				str_copy(pGroup->m_aName, "Persistent");
+				auto pLayer = std::make_shared<CLayerTiles>(pMap.get(), 8, 8);
+				str_copy(pLayer->m_aName, "Bookmark");
+				pLayer->m_pTiles[9].m_Index = i == 1 ? TILE_FREEZE : TILE_SOLID;
+				pGroup->AddLayer(pLayer);
+				if(i == 0)
+					F->m_A = pMap.get();
+				else if(i == 1)
+					F->m_B = pMap.get();
+				else
+					F->m_C = pMap.get();
+				Maps().push_back(std::move(pMap));
+			}
+			Tabs().Open(*this, F->m_A, F->m_B);
+		});
+		WaitReady();
+		Do([this, F] {
+			F->m_AB = Tabs().Selected();
+			F->m_Snapshot = SnapshotIdentity(Compare());
+			(Compare().*Access(TSetSection{}))(1);
+			SelectKind(MapDiff::EEntryKind::LAYER, "Bookmark");
+			Compare().*Access(TCenter{}) = vec2(123, 456);
+			Compare().*Access(TZoom{}) = 3.25f;
+			SetLayerVisible(Compare(), FindEntry("Bookmark"), false);
+			F->m_Count = (Tabs().*Access(TCompareDocuments{})).size();
+			Tabs().Open(*this, F->m_A, F->m_B);
+			Check(Tabs().Selected() == F->m_AB && (Tabs().*Access(TCompareDocuments{})).size() == F->m_Count, "opening existing ordered pair selects its stable tab");
+			Tabs().SelectMap(*this, F->m_B);
+		});
+		Delay();
+		Do([this, F] {
+			Check(!Tabs().Active() && Map() == F->m_B, "comparison returns to a valid map tab");
+			F->m_B->m_vSettings.emplace_back("tune gravity 0.5");
+			F->m_B->OnModify();
+			F->m_B->m_vSettings.emplace_back("sv_test_cmds 1");
+			F->m_B->OnModify();
+			Check(SnapshotIdentity(*F->m_AB) == F->m_Snapshot && CompareState(*F->m_AB) == 4, "hidden edits retain pending snapshot without capture");
+			Tabs().Open(*this, F->m_A, F->m_C);
+		});
+		WaitReady();
+		Screenshot("tabs-multiple-documents");
+		Do([this, F] {
+			F->m_AC = Tabs().Selected();
+			Check(F->m_AC != F->m_AB && Result().ChangeCount() == 0, "duplicate filenames keep distinct comparison documents");
+			Compare().*Access(TCenter{}) = vec2(-100, 20);
+			Tabs().Open(*this, F->m_A, F->m_B);
+		});
+		WaitReady();
+		Do([this, F] {
+			Check(Tabs().Selected() == F->m_AB && SnapshotIdentity(Compare()) != F->m_Snapshot, "activation coalesces hidden changes into one new snapshot");
+			Check((Compare().*Access(TCapturedRevisions{}))[1] == F->m_B->m_ContentRevision, "published result matches latest source revision");
+			Check((Compare().*Access(TCenter{})) == vec2(123, 456) && (Compare().*Access(TZoom{})) == 3.25f && !std::get<0>(LayerState(Compare(), FindEntry("Bookmark"))), "refresh preserves camera and object visibility");
+			Check(Result().m_vEntries[Compare().*Access(TSelectedEntry{})].m_Name == "Bookmark", "refresh restores object selection by identity");
+			F->m_Snapshot = SnapshotIdentity(Compare());
+			Tabs().SelectMap(*this, F->m_B);
+		});
+		Delay();
+		Do([this, F] { F->m_Revision = F->m_B->m_ContentRevision; Check(F->m_B->Save("maps/tabs-save.map", [this](const char *pError) { Check(false, pError); }), "save current source"); Check(F->m_B->m_ContentRevision == F->m_Revision, "saving does not reset or advance content revision"); Tabs().Open(*this, F->m_A, F->m_B); });
+		WaitReady();
+		Do([this, F] { Check(SnapshotIdentity(Compare()) == F->m_Snapshot, "unchanged save and tab switching reuse comparison"); });
+		Do([this, F] {
+			auto pUnrelated = std::make_unique<CEditorMap>(this);
+			pUnrelated->CreateDefault();
+			pUnrelated->ResetModifiedState();
+			str_copy(pUnrelated->m_aDisplayName, "Close background");
+			auto *pMap = pUnrelated.get();
+			Maps().push_back(std::move(pUnrelated));
+			Tabs().CloseMap(*this, pMap);
+		});
+		Delay();
+		Do([this, F] { Check(Tabs().Selected() == F->m_AB && SnapshotIdentity(Compare()) == F->m_Snapshot, "closing clean unrelated source tab preserves active comparison"); });
+		// Native tab click and middle-click close, followed by the discoverable shortcut.
+		Do([this, F] { Tabs().Open(*this, F->m_A, F->m_C); });
+		WaitReady();
+		Do([this, F] { Check(Tabs().Selected() == F->m_AC, "native click starts on another comparison"); });
+		Click([this, F] { return ComparisonTabPoint(F->m_AB); });
+		Do([this, F] { Check(Tabs().Selected() == F->m_AB && SnapshotIdentity(Compare()) == F->m_Snapshot && (Compare().*Access(TCenter{})) == vec2(123, 456), "native inactive comparison tab click selects AB and preserves snapshot/camera"); });
+		Click([this, F] { return ComparisonTabPoint(F->m_AB); }, SDL_BUTTON_MIDDLE);
+		Do([this, F] { Check(!Tabs().Active() && Tabs().CanReopen() && (Tabs().*Access(TCompareDocuments{})).size() == F->m_Count, "middle click closes only its comparison and remembers sources"); });
+		Shortcut(SDLK_F4, true);
+		WaitReady();
+		Do([this, F] { F->m_AB = Tabs().Selected(); Check((Compare().*Access(TCenter{})) == vec2(123,456) && !std::get<0>(LayerState(Compare(), FindEntry("Bookmark"))), "reopen retains inspection preferences and live source identities"); });
+		// Exercise the same trackers used by held editor gestures, then switch via
+		// native Ctrl+Tab before releasing the mouse. Undo must restore the source.
+		for(int Mode = 0; Mode < 4; ++Mode)
+		{
+			Do([this, F] { Tabs().SelectMap(*this, F->m_B); });
+			Delay();
+			Do([this, F, Mode] {
+				auto *pMap = F->m_B;
+				if(Mode == 0)
+				{
+					pMap->m_SelectedGroup = pMap->m_vpGroups.size() - 1;
+					pMap->m_vSelectedLayers = {0};
+					auto pLayer = std::static_pointer_cast<CLayerTiles>(pMap->SelectedLayer(0));
+					F->m_Original = pLayer->GetTile(2, 2).m_Index;
+					pLayer->SetTile(2, 2, CTile{TILE_FREEZE});
+					pMap->m_MapViewState.m_ActiveOp = CMapView::EActiveOp::BRUSH_DRAW;
+				}
+				else if(Mode == 1)
+				{
+					pMap->m_SelectedGroup = 0;
+					pMap->m_vSelectedLayers = {0};
+					pMap->m_vSelectedQuads = {0};
+					auto pLayer = std::static_pointer_cast<CLayerQuads>(pMap->SelectedLayer(0));
+					F->m_Original = pLayer->m_vQuads[0].m_aPoints[4].x;
+					pMap->m_QuadTracker.BeginQuadTrack(pLayer, {0});
+					pLayer->m_vQuads[0].m_aPoints[4].x += 1024;
+				}
+				else if(Mode == 2)
+				{
+					auto pEnv = std::make_shared<CEnvelope>(3);
+					pEnv->AddPoint(CFixedTime(0), {0, 0, 0, 0});
+					pMap->InsertEnvelope(pMap->m_vpEnvelopes.size(), pEnv);
+					pMap->m_SelectedEnvelope = pMap->m_vpEnvelopes.size() - 1;
+					pMap->m_vSelectedEnvelopePoints = {{0, 0}};
+					pMap->m_EnvOpTracker.Begin(EEnvelopeEditorOp::DRAG_POINT);
+					pEnv->m_vPoints[0].m_aValues[0] = 1024;
+					F->m_Original = 0;
+				}
+				else
+				{
+					auto pLayer = std::make_shared<CLayerSounds>(pMap);
+					pLayer->NewSource(0, 0);
+					pMap->m_vpGroups.back()->AddLayer(pLayer);
+					pMap->m_SelectedGroup = pMap->m_vpGroups.size() - 1;
+					pMap->m_vSelectedLayers = {(int)pMap->m_vpGroups.back()->m_vpLayers.size() - 1};
+					pMap->m_SelectedSoundSource = 0;
+					pMap->m_SoundSourceOperationTracker.Begin(&pLayer->m_vSources[0], ESoundSourceOp::MOVE, pMap->m_vSelectedLayers[0]);
+					pLayer->m_vSources[0].m_Position.x = 1024;
+					F->m_Original = 0;
+				}
+				F->m_HistorySize = (Mode == 2 ? pMap->m_EnvelopeEditorHistory : pMap->m_EditorHistory).m_vpUndoActions.size();
+				Key(SDLK_LCTRL, true);
+				Key(SDLK_TAB, true);
+				Mouse(SDL_BUTTON_LEFT, true);
+			});
+			Delay(2);
+			Do([this, F, Mode] {
+				const auto &H = Mode == 2 ? F->m_B->m_EnvelopeEditorHistory : F->m_B->m_EditorHistory;
+				Check(H.m_vpUndoActions.size() == F->m_HistorySize + 1, "switch finalizes held editor operation " + std::to_string(Mode));
+				Key(SDLK_TAB, false);
+				Key(SDLK_LCTRL, false);
+			});
+			Delay(2);
+			Do([this] { Check(Tabs().Transitioning(), "held mouse prevents destination input after shortcut release"); Mouse(SDL_BUTTON_LEFT, false); });
+			Delay();
+			Do([this, F, Mode] {
+				Check(!Tabs().Transitioning() && Map() == F->m_C, "release completes source map transition");
+				auto &H = Mode == 2 ? F->m_B->m_EnvelopeEditorHistory : F->m_B->m_EditorHistory;
+				Check(H.Undo(), "finalized gesture can undo on its source");
+				int Value = -1;
+				if(Mode == 0)
+					Value = std::static_pointer_cast<CLayerTiles>(F->m_B->m_vpGroups.back()->m_vpLayers[0])->GetTile(2, 2).m_Index;
+				else if(Mode == 1)
+					Value = std::static_pointer_cast<CLayerQuads>(F->m_B->m_vpGroups[0]->m_vpLayers[0])->m_vQuads[0].m_aPoints[4].x;
+				else if(Mode == 2)
+					Value = F->m_B->m_vpEnvelopes.back()->m_vPoints[0].m_aValues[0];
+				else
+					Value = std::static_pointer_cast<CLayerSounds>(F->m_B->m_vpGroups.back()->m_vpLayers.back())->m_vSources[0].m_Position.x;
+				Check(Value == F->m_Original, "undo restores held gesture value " + std::to_string(Mode));
+			});
+		}
+		Do([this, F] { Tabs().Open(*this, F->m_A, F->m_B); });
+		WaitReady();
+		// All three histories must refresh even when individual actions omit OnModify.
+		for(int History = 0; History < 3; ++History)
+		{
+			Do([this, F, History] {
+				auto &H = History == 0 ? F->m_B->m_EditorHistory : History == 1 ? F->m_B->m_ServerSettingsHistory :
+												  F->m_B->m_EnvelopeEditorHistory;
+				const auto Revision = F->m_B->m_ContentRevision;
+				H.RecordAction(std::make_shared<CSmokeAction>(F->m_B));
+				Check(F->m_B->m_ContentRevision > Revision, "history RecordAction advances revision " + std::to_string(History));
+				H.Undo();
+			});
+			WaitReady();
+			Do([this, F, History] {
+				Check((Compare().*Access(TCapturedRevisions{}))[1] == F->m_B->m_ContentRevision, "automatic refresh after undo history " + std::to_string(History));
+				Check(std::any_of(Result().m_vEntries.begin(), Result().m_vEntries.end(), [](const auto &E) { return std::any_of(E.m_vProperties.begin(), E.m_vProperties.end(), [](const auto &P) { return P.m_After == "UNEXPECTED UNDO"; }); }), "undo result contains current author value");
+				auto &H = History == 0 ? F->m_B->m_EditorHistory : History == 1 ? F->m_B->m_ServerSettingsHistory :
+												  F->m_B->m_EnvelopeEditorHistory;
+				H.Redo();
+			});
+			WaitReady();
+			Do([this, F, History] { Check((Compare().*Access(TCapturedRevisions{}))[1] == F->m_B->m_ContentRevision, "automatic refresh after redo history " + std::to_string(History)); Check(std::any_of(Result().m_vEntries.begin(), Result().m_vEntries.end(), [](const auto &E) { return std::any_of(E.m_vProperties.begin(), E.m_vProperties.end(), [](const auto &P) { return P.m_After == "UNEXPECTED REDO"; }); }), "redo result contains current author value"); });
+		}
+		Do([this, F] {
+			F->m_B->OnModify();
+			Tabs().OnUpdate(*this); // Marks pending.
+			Tabs().OnUpdate(*this); // Captures and starts the one worker.
+			Check(CompareState(Compare()) == 3, "stale completion fixture starts comparison worker");
+			str_copy(F->m_B->m_MapInfo.m_aAuthor, "Newest generation");
+			F->m_B->OnModify();
+			Tabs().OnUpdate(*this);
+			Check(CompareState(Compare()) != 4, "obsolete worker result cannot publish");
+			Tabs().Open(*this, F->m_A, F->m_C);
+			Tabs().Open(*this, F->m_C, F->m_B);
+			Tabs().Open(*this, F->m_A, F->m_B);
+			int Workers = (Tabs().*Access(TRetiredWorker{})).valid();
+			for(auto &pDocument : Tabs().*Access(TCompareDocuments{}))
+				Workers += (pDocument.get()->*Access(TWorker{})).valid();
+			Check(Workers <= 1, "rapid different-pair switching retains at most one global worker");
+		});
+		WaitReady();
+		Do([this, F] { Check((Compare().*Access(TCapturedRevisions{}))[1] == F->m_B->m_ContentRevision, "newest generation wins after obsolete work is reaped"); });
+		Do([this, F] {
+			// A current selection cannot accidentally follow a reused numeric slot.
+			for(auto *pMap : {F->m_A, F->m_B})
+			{
+				pMap->m_vpGroups.back()->m_vpLayers.clear();
+				auto pReplacement = std::make_shared<CLayerTiles>(pMap, 8, 8);
+				str_copy(pReplacement->m_aName, "Replacement");
+				pMap->m_vpGroups.back()->AddLayer(pReplacement);
+				pMap->OnModify();
+			}
+			IInput::CEvent Event{};
+			Event.m_Key = KEY_HOME;
+			Event.m_Flags = IInput::FLAG_PRESS;
+			OnInput(Event);
+			Check((Compare().*Access(TCenter{})) == vec2(123, 456), "Home rejects stale snapshot indices before refresh");
+		});
+		WaitReady();
+		Do([this, F] { Check((Compare().*Access(TSelectedEntry{})) == -1 && (Compare().*Access(TSelectedDetail{})) == -1, "deleted selection clears instead of following replacement index"); Tabs().SelectMap(*this, F->m_B); });
+		Delay();
+		Do([this, F] {
+			const auto Revision = F->m_B->m_ContentRevision;
+			Check(AddImage("editor/checker.png", IStorage::TYPE_ALL, this), "direct image add succeeds");
+			Check(F->m_B->m_ContentRevision > Revision, "direct image add notifies comparison");
+			F->m_Revision = F->m_B->m_ContentRevision;
+			Check(ReplaceImage("editor/checker.png", IStorage::TYPE_ALL, false), "direct image replacement succeeds");
+			Check(F->m_B->m_ContentRevision > F->m_Revision, "same-index image replacement notifies comparison");
+			Tabs().Open(*this, F->m_A, F->m_B);
+		});
+		WaitReady();
+		// Multiple Ctrl+Tab presses while Ctrl is held advance the pending tab.
+		Do([this] { Key(SDLK_LCTRL, true); Key(SDLK_TAB, true); });
+		Delay(2);
+		Do([this] { Key(SDLK_TAB, false); });
+		Delay(2);
+		Do([this] { Key(SDLK_TAB, true); });
+		Delay(2);
+		Do([this] { Check(Tabs().Transitioning(), "held Ctrl keeps destination input behind transition barrier"); Key(SDLK_TAB, false); Key(SDLK_LCTRL, false); });
+		Delay();
+		Do([this, F] { Check(!Tabs().Active() && Map() == Maps()[0].get(), "repeated Ctrl+Tab advances pending target while modifier held"); Tabs().Open(*this, F->m_A, F->m_B); });
+		WaitReady();
+		Do([this, F] { Tabs().SelectMap(*this, F->m_B); });
+		Delay();
+		Do([this, F] {
+			F->m_B->ResetModifiedState();
+			F->m_B->m_SelectedGroup = 0;
+			F->m_B->m_vSelectedLayers = {0};
+			F->m_B->m_vSelectedQuads = {0};
+			auto pLayer = std::static_pointer_cast<CLayerQuads>(F->m_B->SelectedLayer(0));
+			F->m_Original = pLayer->m_vQuads[0].m_aPoints[4].x;
+			F->m_B->m_QuadTracker.BeginQuadTrack(pLayer, {0});
+			pLayer->m_vQuads[0].m_aPoints[4].x += 1024;
+			F->m_HistorySize = F->m_B->m_EditorHistory.m_vpUndoActions.size();
+			Key(SDLK_LCTRL, true);
+			Key(SDLK_F4, true);
+			Mouse(SDL_BUTTON_LEFT, true);
+		});
+		Delay(2);
+		Do([this, F] { Check(F->m_B->m_Modified && F->m_B->m_EditorHistory.m_vpUndoActions.size() == F->m_HistorySize + 1, "same-map close finalizes unsaved held quad before deciding confirmation"); Key(SDLK_F4, false); Key(SDLK_TAB, true); });
+		Delay(2);
+		Do([this] { Key(SDLK_TAB, false); Key(SDLK_LCTRL, false); Mouse(SDL_BUTTON_LEFT, false); });
+		Delay();
+		Do([this, F] { Check(Ui()->IsPopupOpen() && !Tabs().Active() && Map() == F->m_B, "held close keeps confirmation on source map despite Tab press"); Key(SDLK_ESCAPE, true); });
+		Delay(2);
+		Do([this] { Key(SDLK_ESCAPE, false); });
+		Delay();
+		Do([this, F] { Check(F->m_B->m_EditorHistory.Undo() && std::static_pointer_cast<CLayerQuads>(F->m_B->m_vpGroups[0]->m_vpLayers[0])->m_vQuads[0].m_aPoints[4].x == F->m_Original, "cancelled held close retains undoable source gesture"); Tabs().Open(*this, F->m_A, F->m_B); });
+		WaitReady();
+		Do([this, F] { Tabs().CloseMap(*this, F->m_B); });
+		Delay();
+		Do([this, F] { Check(Ui()->IsPopupOpen() && m_PopupEventType == POPEVENT_CLOSE_MAP, "dirty source close keeps visible confirmation associated with source map"); Check((Tabs().*Access(TCompareDocuments{})).size() >= 2, "unconfirmed source close retains all dependents"); Key(SDLK_ESCAPE, true); });
+		Delay(2);
+		Do([this] { Key(SDLK_ESCAPE, false); });
+		Delay();
+		Do([this, F] { Check(!Ui()->IsPopupOpen(), "cancel source close through native Escape"); Tabs().Open(*this, F->m_A, F->m_B); });
+		WaitReady();
+		Do([this, F] {
+			Check(Tabs().Selected() == F->m_AB, "cancelled close preserves comparison identity");
+			const auto Count = (Tabs().*Access(TCompareDocuments{})).size();
+			Check(HandleMapDrop("maps/coverage.map", IStorage::TYPE_ALL), "unrelated drop loads a map");
+			Check((Tabs().*Access(TCompareDocuments{})).size() == Count, "unrelated load preserves all comparisons");
+		});
+		Delay();
+		Do([this, F] { Tabs().Open(*this, F->m_A, F->m_B); });
+		WaitReady();
+		Shortcut(SDLK_F4);
+		Do([this] { Check(Tabs().CanReopen(), "Ctrl+F4 remembers closed comparison"); });
+		Do([this, F] {
+			for(size_t i = 0; i < Maps().size(); ++i)
+				if(Maps()[i].get() == F->m_A)
+				{
+					CloseMap(i, false);
+					break;
+				}
+			Check((Tabs().*Access(TCompareDocuments{})).size() == 1 && !Tabs().CanReopen(), "source disposal closes multiple dependents and prunes their history while retaining unrelated comparison");
+		});
+		Delay();
+		Do([this, F] { Tabs().Open(*this, F->m_C, F->m_B); });
+		WaitReady();
+		Click([this] { return ComparisonTabPoint(Tabs().Selected(), true); });
+		Do([this] { Check(!Tabs().Active() && Tabs().CanReopen(), "X closes comparison without disposing sources"); Tabs().Reopen(*this); });
+		WaitReady();
+		Shortcut(SDLK_TAB, true);
+		Do([this] { Check(!Tabs().Active(), "Ctrl+Shift+Tab returns from first comparison to last map"); });
+		Do([this, F] {
+			const auto Captures = m_CaptureCount;
+			Tabs().Open(*this, F->m_B, F->m_C);
+			Check(CompareState(Compare()) == 2, "new comparison can close before first capture");
+			CloseComparison();
+			Check(m_CaptureCount == Captures, "closing pending comparison avoids snapshot work");
+		});
+		Delay();
+		Shortcut(SDLK_F4, true);
+		WaitReady();
+		Do([this] { Check(!Result().m_vEntries.empty() && (Compare().*Access(TSelectedEntry{})) >= 0, "reopening before first capture uses initial result selection"); });
+		Do([this] { CloseComparison(); });
+		Delay();
+		for(int i = 0; i < 12; ++i)
+		{
+			Do([this, F] { Tabs().Open(*this, F->m_B, F->m_C); });
+			Delay(2);
+			Do([this] { CloseComparison(); });
+			Delay(2);
+		}
+		Do([this] { Check(ClosedComparisonCount(Tabs()) == 10, "recent comparison history is bounded to ten lightweight descriptors"); });
+		Do([this, F] {
+			for(size_t i = 0; i < Maps().size(); ++i)
+				if(Maps()[i].get() == F->m_B)
+				{
+					CloseMap(i, false);
+					break;
+				}
+			Check((Tabs().*Access(TCompareDocuments{})).empty() && !Tabs().CanReopen(), "last dependent source disposal releases remaining comparison state");
+		});
+
+		Delay();
+	}
+
+	void WriteReviewSounds()
+	{
+		// A 20 ms mono Opus silence fixture.
+		static const char aAdd[] =
+			"\x4f\x67\x67\x53\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00\xe0\x7b\x3e\x6a\x00\x00\x00\x00\xc5\x02"
+			"\x48\xbf\x01\x13\x4f\x70\x75\x73\x48\x65\x61\x64\x01\x01\x38\x01\x80\xbb\x00\x00\x00\x00\x00\x4f"
+			"\x67\x67\x53\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xe0\x7b\x3e\x6a\x01\x00\x00\x00\x8f\xa4\xdd"
+			"\x2a\x01\x3d\x4f\x70\x75\x73\x54\x61\x67\x73\x0c\x00\x00\x00\x4c\x61\x76\x66\x36\x31\x2e\x37\x2e"
+			"\x31\x30\x30\x01\x00\x00\x00\x1d\x00\x00\x00\x65\x6e\x63\x6f\x64\x65\x72\x3d\x4c\x61\x76\x63\x36"
+			"\x31\x2e\x31\x39\x2e\x31\x30\x30\x20\x6c\x69\x62\x6f\x70\x75\x73\x4f\x67\x67\x53\x00\x04\xf8\x04"
+			"\x00\x00\x00\x00\x00\x00\xe0\x7b\x3e\x6a\x02\x00\x00\x00\x58\xab\xa0\xe0\x02\x03\x03\xf8\xff\xfe"
+			"\xf8\xff\xfe";
+		IOHANDLE Add = Storage()->OpenFile("review-add.opus", IOFLAG_WRITE, IStorage::TYPE_SAVE);
+		io_write(Add, aAdd, sizeof(aAdd) - 1);
+		io_close(Add);
+		// A 60 ms mono Opus silence fixture.
+		static const char aReplace[] =
+			"\x4f\x67\x67\x53\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00\x77\xe6\xca\x8f\x00\x00\x00\x00\x5b\x00"
+			"\x50\x09\x01\x13\x4f\x70\x75\x73\x48\x65\x61\x64\x01\x01\x38\x01\x80\xbb\x00\x00\x00\x00\x00\x4f"
+			"\x67\x67\x53\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x77\xe6\xca\x8f\x01\x00\x00\x00\xa0\xc7\xcb"
+			"\x3c\x01\x3d\x4f\x70\x75\x73\x54\x61\x67\x73\x0c\x00\x00\x00\x4c\x61\x76\x66\x36\x31\x2e\x37\x2e"
+			"\x31\x30\x30\x01\x00\x00\x00\x1d\x00\x00\x00\x65\x6e\x63\x6f\x64\x65\x72\x3d\x4c\x61\x76\x63\x36"
+			"\x31\x2e\x31\x39\x2e\x31\x30\x30\x20\x6c\x69\x62\x6f\x70\x75\x73\x4f\x67\x67\x53\x00\x04\x78\x0c"
+			"\x00\x00\x00\x00\x00\x00\x77\xe6\xca\x8f\x02\x00\x00\x00\x27\x1a\x49\x37\x04\x03\x03\x03\x03\xf8"
+			"\xff\xfe\xf8\xff\xfe\xf8\xff\xfe\xf8\xff\xfe";
+		IOHANDLE Replace = Storage()->OpenFile("review-replace.opus", IOFLAG_WRITE, IStorage::TYPE_SAVE);
+		io_write(Replace, aReplace, sizeof(aReplace) - 1);
+		io_close(Replace);
+	}
+
+	void ReviewSteps()
+	{
+		struct CFixture
+		{
+			CEditorMap *m_A{}, *m_B{}, *m_C{};
+			CMapCompare *m_AB{};
+			std::shared_ptr<CLayerTiles> m_pTiles;
+			std::shared_ptr<CEnvelope> m_pEnvelope;
+			SPopupMenuId m_Popup;
+			uint64_t m_Revision{};
+			size_t m_History{};
+			int m_Entry{}, m_Detail{}, m_Value{};
+			vec2 m_Center;
+		};
+		auto F = std::make_shared<CFixture>();
+		auto Press = [this](int KeyCode) { Do([this, KeyCode] { Key(KeyCode, true); }); Delay(); Do([this, KeyCode] { Key(KeyCode, false); }); Delay(); };
+		auto Move = [this](vec2 P) { Ui()->OnCursorMove((P.x - Ui()->MouseX()) * Graphics()->WindowWidth() / Ui()->Screen()->w, (P.y - Ui()->MouseY()) * Graphics()->WindowHeight() / Ui()->Screen()->h); };
+		auto CheckCaptured = [this, F](const char *pName) {
+			MapDiff::CSnapshot Current;
+			MapDiff::Capture(*F->m_B, Current);
+			Check(Tabs().Selected() == F->m_AB && (Compare().*Access(TCapturedRevisions{}))[1] == F->m_B->m_ContentRevision && MapDiff::Compare(CapturedSnapshot(Compare(), 1), Current).ChangeCount() == 0, pName);
+		};
+		Do([this, F] {
+			WriteReviewSounds();
+			for(int Side = 0; Side < 3; ++Side)
+			{
+				auto pMap = std::make_unique<CEditorMap>(this);
+				pMap->CreateDefault();
+				str_format(pMap->m_aDisplayName, sizeof(pMap->m_aDisplayName), "Review %d", Side);
+				auto pGroup = pMap->NewGroup();
+				str_copy(pGroup->m_aName, "Review group");
+				auto pTiles = std::make_shared<CLayerTiles>(pMap.get(), 8, 8);
+				str_copy(pTiles->m_aName, "ReviewTile");
+				pGroup->AddLayer(pTiles);
+				auto pEnvelope = std::make_shared<CEnvelope>(3);
+				str_copy(pEnvelope->m_aName, "Review envelope");
+				pEnvelope->AddPoint(CFixedTime(0), {0, 0, 0, 0});
+				pEnvelope->AddPoint(CFixedTime(1000), {128 * 1024, 0, 0, 0});
+				pEnvelope->m_vPoints[0].m_Curvetype = CURVETYPE_BEZIER;
+				pEnvelope->m_vPoints[0].m_Bezier.m_aOutTangentDeltaX[0] = CFixedTime(250);
+				pEnvelope->m_vPoints[0].m_Bezier.m_aOutTangentDeltaY[0] = 32 * 1024;
+				pEnvelope->m_vPoints[1].m_Bezier.m_aInTangentDeltaX[0] = CFixedTime(-250);
+				pEnvelope->m_vPoints[1].m_Bezier.m_aInTangentDeltaY[0] = -32 * 1024;
+				pMap->m_vpEnvelopes.push_back(pEnvelope);
+				if(Side == 0)
+					F->m_A = pMap.get();
+				else if(Side == 1)
+					F->m_C = pMap.get();
+				else
+				{
+					F->m_B = pMap.get();
+					F->m_pTiles = pTiles;
+					F->m_pEnvelope = pEnvelope;
+					pTiles->m_pTiles[45].m_Index = TILE_FREEZE;
+					pMap->m_vSettings = {"tune gravity 0.5", "sv_test_cmds 1"};
+					str_copy(pMap->m_MapInfo.m_aAuthor, "Review author");
+				}
+				Maps().push_back(std::move(pMap));
+			}
+			Tabs().OpenSelector(*this);
+		});
+		Delay();
+		auto SourceRow = [this](int Side, const CEditorMap *pSource) {
+			const auto &Scroll = (Compare().*Access(TPairLists{}))[Side].*Access(TListScroll{});
+			const auto &Rect = Scroll.*Access(TScrollRect{});
+			int Index = 0;
+			while(Maps()[Index].get() != pSource)
+				++Index;
+			return vec2(Rect.x + 40, Rect.y + (Scroll.*Access(TScrollOffset{})) + Index * 42 + 12);
+		};
+		Click([F, SourceRow] { return SourceRow(0, F->m_A); });
+		Click([F, SourceRow] { return SourceRow(1, F->m_C); });
+		Do([this, F] { Check((Compare().*Access(TSources{}))[0] == F->m_A && (Compare().*Access(TSources{}))[1] == F->m_C, "native selector rows choose both sources while their strip tabs are visible"); });
+		Click([this] { return vec2(Ui()->Screen()->w - 80, Ui()->Screen()->h - 16); });
+		WaitReady();
+		Do([this, F] { Check((Compare().*Access(TSources{}))[0] == F->m_A && (Compare().*Access(TSources{}))[1] == F->m_C, "selector starts the chosen ordered pair"); CloseComparison(); Tabs().Open(*this, F->m_A, F->m_B); });
+		WaitReady();
+		Do([this, F] { F->m_AB = Tabs().Selected(); SelectKind(MapDiff::EEntryKind::LAYER, "ReviewTile"); F->m_Detail = Compare().*Access(TSelectedDetail{}); F->m_pTiles->m_pTiles[9].m_Index = TILE_FREEZE; F->m_B->OnModify(); });
+		Delay();
+		WaitReady();
+		auto CheckTile = [this](const char *pName) { const auto Detail = SelectedDetail(Compare()); Check(Detail[1] == 1 && Result().m_vEntries[Detail[0]].m_vTiles[Detail[2]].m_X == 5 && Result().m_vEntries[Detail[0]].m_vTiles[Detail[2]].m_Y == 5, pName); };
+		Do([this, F, CheckTile] { CheckTile("active tile detail survives changed detail index"); Check((Compare().*Access(TSelectedDetail{})) > F->m_Detail, "inserted earlier tile moves detail index"); (Compare().*Access(TSetSection{}))(2); F->m_pTiles->m_pTiles[0].m_Index = TILE_FREEZE; F->m_B->OnModify(); });
+		Delay();
+		WaitReady();
+		Do([this, CheckTile] { (Compare().*Access(TSetSection{}))(0); CheckTile("inactive section restores tile detail by coordinate after refresh"); });
+		Click([this] { return DetailPosition(Compare().*Access(TSelectedDetail{})); });
+		Do([this] { Check(!(Compare().*Access(TTreeActive{})), "native inspector click owns arrow focus"); CloseComparison(); });
+		Delay();
+		Shortcut(SDLK_F4, true);
+		WaitReady();
+		Do([this, F] { F->m_AB = Tabs().Selected(); F->m_Detail = Compare().*Access(TSelectedDetail{}); Check(!(Compare().*Access(TTreeActive{})), "reopen retains inspector arrow focus"); });
+		Press(SDLK_UP);
+		Do([this, F] { Check((Compare().*Access(TSelectedDetail{})) < F->m_Detail, "reopened inspector receives arrow input"); });
+		auto OpenTabPopup = [this, F] {
+			F->m_Entry = Compare().*Access(TSelectedEntry{});
+			F->m_Detail = Compare().*Access(TSelectedDetail{});
+			Compare().*Access(TCenter{}) = vec2(123, 456);
+			F->m_Center = Compare().*Access(TCenter{});
+			m_PopupMapTab.m_pEditor = this;
+			m_PopupMapTab.m_SelectedMap = Maps().size() - 1;
+			Ui()->DoPopupMenu(&m_PopupMapTab, 100, 100, 170, 96, &m_PopupMapTab, CPopupMapTab::Render);
+		};
+		for(int Focus = 0; Focus < 3; ++Focus)
+		{
+			Do([this, Focus, OpenTabPopup] { if(Focus == 2) { (Compare().*Access(TSetSection{}))(3); SelectKind(MapDiff::EEntryKind::SETTINGS); } Compare().*Access(TTreeActive{}) = Focus == 1; OpenTabPopup(); });
+			Delay();
+			Press(SDLK_n);
+			Press(SDLK_p);
+			Press(SDLK_HOME);
+			Press(SDLK_DOWN);
+			Do([this, F] { Check(Ui()->IsPopupOpen() && Tabs().Selected() == F->m_AB && (Compare().*Access(TSelectedEntry{})) == F->m_Entry && (Compare().*Access(TSelectedDetail{})) == F->m_Detail && (Compare().*Access(TCenter{})) == F->m_Center, "open tab popup owns viewer navigation and Home/arrow input"); });
+			Press(SDLK_ESCAPE);
+			Do([this, F] { Check(!Ui()->IsPopupOpen() && Tabs().Selected() == F->m_AB, "Escape dismisses tab popup without leaving comparison"); });
+		}
+		Do([this, F] { Tabs().SelectMap(*this, F->m_B); });
+		Delay();
+		Do([this, F] { Map()->m_SelectedGroup = Map()->m_vpGroups.size() - 1; F->m_Revision = Map()->m_ContentRevision; F->m_History = Map()->m_EditorHistory.m_vpUndoActions.size(); Ui()->DoPopupMenu(&F->m_Popup,100,100,145,256,this,PopupGroup); });
+		Delay();
+		Do([Move] { Move(vec2(207, 123)); });
+		Delay();
+		Do([this] { Mouse(SDL_BUTTON_LEFT, true); });
+		Delay();
+		Do([this] { Ui()->OnCursorMove(60, 0); });
+		Delay();
+		Do([this] { Key(SDLK_LCTRL,true); Key(SDLK_TAB,true); });
+		Delay();
+		Do([this, F] { Check(!Tabs().Active() && !Tabs().Transitioning() && Map() == F->m_B && Ui()->IsPopupOpen() && Map()->SelectedGroup()->m_OffsetX != 0, "property popup drag retains document input ownership during Ctrl+Tab"); Key(SDLK_TAB,false); Key(SDLK_LCTRL,false); Mouse(SDL_BUTTON_LEFT,false); });
+		Delay();
+		Do([this, F] { Check(Map()->m_ContentRevision > F->m_Revision && Map()->m_EditorHistory.m_vpUndoActions.size() == F->m_History + 1, "property popup release records its END revision and undo action"); });
+		Press(SDLK_ESCAPE);
+		Do([this, F] { Tabs().Open(*this, F->m_A, F->m_B); });
+		WaitReady();
+		Do([CheckCaptured] { CheckCaptured("comparison refresh includes completed property popup drag"); });
+		for(int Side = 0; Side < 2; ++Side)
+		{
+			Do([this, F] { Tabs().SelectMap(*this, F->m_B); });
+			Delay();
+			Do([this, F] { m_ActiveExtraEditor = EXTRAEDITOR_ENVELOPES; Map()->m_SelectedEnvelope = 0; Map()->m_EnvelopeEditorState.m_ActiveChannels = 1; Map()->m_EnvelopeEditorState.m_ResetZoom = true; F->m_Revision = Map()->m_ContentRevision; });
+			Delay(10);
+			Do([this, F, Move, Side] {
+				CUIRect Graph{m_ToolBoxWidth, Ui()->Screen()->h - 16 - m_aExtraEditorSplits[EXTRAEDITOR_ENVELOPES] + 32, Ui()->Screen()->w - m_ToolBoxWidth - 2, m_aExtraEditorSplits[EXTRAEDITOR_ENVELOPES] - 34};
+				const auto &Point = F->m_pEnvelope->m_vPoints[Side];
+				const auto X = Side ? Point.m_Bezier.m_aInTangentDeltaX[0] : Point.m_Bezier.m_aOutTangentDeltaX[0];
+				const int Y = Side ? Point.m_Bezier.m_aInTangentDeltaY[0] : Point.m_Bezier.m_aOutTangentDeltaY[0];
+				F->m_Value = Y;
+				Move(vec2(((this->*Access(TEnvelopeEditor{})).*Access(TEnvelopeX{}))(Graph, (Point.m_Time + X).AsSeconds()), ((this->*Access(TEnvelopeEditor{})).*Access(TEnvelopeY{}))(Graph, fx2f(Point.m_aValues[0] + Y))));
+			});
+			Delay();
+			Do([this] { Mouse(SDL_BUTTON_LEFT, true); });
+			Delay();
+			Do([this] { Ui()->OnCursorMove(40, -20); });
+			Delay();
+			Do([this, F, Side] { const auto &Point = F->m_pEnvelope->m_vPoints[Side]; Check(Map()->m_ContentRevision > F->m_Revision && (Side ? Point.m_Bezier.m_aInTangentDeltaY[0] : Point.m_Bezier.m_aOutTangentDeltaY[0]) != F->m_Value && Input()->KeyIsPressed(KEY_MOUSE_1), "native tangent mutation advances revision before release"); Key(SDLK_LCTRL,true); Key(SDLK_TAB,true); });
+			Delay();
+			Do([this] { Key(SDLK_TAB,false); Key(SDLK_LCTRL,false); });
+			Delay();
+			Do([this] { Check(Tabs().Transitioning(), "interrupted tangent waits for held mouse release"); Mouse(SDL_BUTTON_LEFT,false); });
+			WaitReady();
+			Do([CheckCaptured] { CheckCaptured("interrupted tangent edit refreshes existing comparison"); });
+		}
+		for(int Operation = 1; Operation <= 2; ++Operation)
+		{
+			Do([this, F] { Tabs().SelectMap(*this, F->m_B); });
+			Delay();
+			Do([this] { m_ActiveExtraEditor = EXTRAEDITOR_NONE; Mouse(SDL_BUTTON_LEFT,true); });
+			Delay();
+			Do([this, F, Operation] {
+				auto &Point = F->m_pEnvelope->m_vPoints[0];
+				const auto Revision = Map()->m_ContentRevision;
+				CQuad Quad{};
+				Map()->m_CurrentQuadIndex = 0;
+				Ui()->SetActiveItem(&Point);
+				m_QuadEnvelopePointOperation = static_cast<EQuadEnvelopePointOperation>(Operation);
+				Ui()->OnCursorMove(10, 0);
+				Ui()->Update();
+				Map()->m_MapViewState.m_MouseDeltaWorld = vec2(1, 1);
+				Map()->m_MapViewState.m_MouseWorldPos = vec2(64, 96);
+				Graphics()->TextureClear();
+				Graphics()->QuadsBegin();
+				DoQuadEnvPoint(&Quad, F->m_pEnvelope.get(), 0, 0);
+				Graphics()->QuadsEnd();
+				Check(Map()->m_ContentRevision > Revision, "quad envelope preview mutation advances revision");
+				if(Operation == 1)
+				{
+					const auto Same = Map()->m_ContentRevision;
+					Graphics()->QuadsBegin();
+					DoQuadEnvPoint(&Quad, F->m_pEnvelope.get(), 0, 0);
+					Graphics()->QuadsEnd();
+					Check(Map()->m_ContentRevision == Same, "unchanged quad preview values do not advance revision");
+				}
+				Ui()->SetActiveItem(nullptr);
+				m_QuadEnvelopePointOperation = EQuadEnvelopePointOperation::NONE;
+				Mouse(SDL_BUTTON_LEFT, false);
+				Tabs().Open(*this, F->m_A, F->m_B);
+			});
+			WaitReady();
+			Do([CheckCaptured] { CheckCaptured("quad preview edit refreshes existing comparison"); });
+		}
+		for(int Replace = 0; Replace < 2; ++Replace)
+		{
+			Do([this, F] { Tabs().SelectMap(*this, F->m_B); });
+			Delay();
+			Do([this, F, Replace] { const auto Revision = Map()->m_ContentRevision; Check(Replace ? ReplaceSoundCallback("review-replace.opus",IStorage::TYPE_SAVE,this) : AddSound("review-add.opus",IStorage::TYPE_SAVE,this), "valid Opus sound callback succeeds"); Check(Map()->m_ContentRevision > Revision,"sound callback advances source revision"); Tabs().Open(*this,F->m_A,F->m_B); });
+			WaitReady();
+			Do([this, F, CheckCaptured] { CheckCaptured("sound callback refresh contains current sound bytes"); const auto &Sounds = CapturedSnapshot(Compare(),1).m_vSounds; Check(Sounds.size() == 1 && Sounds[0].m_vData.size() == (size_t)F->m_B->m_vpSounds[0]->m_DataSize && !std::memcmp(Sounds[0].m_vData.data(),F->m_B->m_vpSounds[0]->m_pData,Sounds[0].m_vData.size()),"captured sound bytes equal actual decoded callback resource"); });
+		}
+		Do([this, F] { m_ActiveExtraEditor = EXTRAEDITOR_NONE; for(size_t i = Maps().size(); i-- > 0;) if(Maps()[i].get() == F->m_A || Maps()[i].get() == F->m_B || Maps()[i].get() == F->m_C) CloseMap(i,false); });
+		Delay();
+	}
+
 	void Setup()
 	{
 		Delay(10);
 		if(Storage()->FileExists("maps/perf-before.map", IStorage::TYPE_SAVE) && Storage()->FileExists("maps/perf-after.map", IStorage::TYPE_SAVE))
 		{
 			PerformanceSteps(true);
+			Do([this] { m_Log << "RESULT failures=" << m_Failures << " steps=" << m_vSteps.size() << std::endl; Client()->Quit(); });
+			return;
+		}
+		ReviewSteps();
+		TabLifecycleSteps();
+		if(std::getenv("DDNET_MAP_COMPARE_REVIEW"))
+		{
 			Do([this] { m_Log << "RESULT failures=" << m_Failures << " steps=" << m_vSteps.size() << std::endl; Client()->Quit(); });
 			return;
 		}
@@ -2515,13 +3261,13 @@ class CSmokeEditor : public CEditor
 		for(int Fixture = 0; Fixture < 4; ++Fixture)
 		{
 			const std::string Name = apNames[Fixture];
-			Do([this, Name] { LoadPair(Name); CaptureSources(); Compare().Open(*this,m_pBefore,m_pAfter); });
+			Do([this, Name] { LoadPair(Name); CaptureSources(); OpenComparison(*this,m_pBefore,m_pAfter); });
 			WaitReady();
 			Do([this, Name] { Check(Result().ChangeCount()==0,"equal real map "+Name); CheckSources(Name+" identical viewer"); });
 			if(Fixture == 0)
 			{
 				Screenshot("comparison-equal");
-				Click([] { return vec2(240, 16); });
+				Click([] { return vec2(240, 62); });
 				Do([this] {
 					Check((Compare().*Access(TUnchangedExpanded{})) && (Compare().*Access(TSelectedEntry{})) >= 0, "equal maps open unchanged section with a real selection");
 					const int Selected = Compare().*Access(TSelectedEntry{});
@@ -2534,13 +3280,13 @@ class CSmokeEditor : public CEditor
 				Do([this] { Key(SDLK_n, false); Key(SDLK_p, true); });
 				Delay(2);
 				Do([this] { Key(SDLK_p, false); Check((Compare().*Access(TSelectedEntry{})) == m_SavedEntry && (Compare().*Access(TCenter{})) == m_SavedCenter, "equal-map Prev/Next preserve selection and camera"); });
-				Click([] { return vec2(100, 95); });
+				Click([] { return vec2(100, 141); });
 				Do([this] { Check(!(Compare().*Access(TUnchangedExpanded{})) && (Compare().*Access(TSelectedEntry{})) == m_SavedEntry, "equal maps collapse without replacing the inspected selection"); });
 				Do([this] { Key(SDLK_END, true); });
 				Delay(2);
 				Do([this] { Key(SDLK_END, false); Check((Compare().*Access(TSelectedEntry{})) == m_SavedEntry, "End cannot select a header-only equal-map list"); });
 			}
-			Do([this] { Compare().Close(); });
+			Do([this] { CloseComparison(); });
 			Delay();
 			Do([this] { Mutate(); CaptureSources(); });
 			if(Fixture == 0)
@@ -2550,7 +3296,7 @@ class CSmokeEditor : public CEditor
 				Click([] { return vec2(140, 123); });
 			}
 			else
-				Do([this] { Compare().Open(*this, m_pBefore, m_pAfter); });
+				Do([this] { OpenComparison(*this, m_pBefore, m_pAfter); });
 			WaitReady();
 			Do([this, Name] { Check(Result().ChangeCount()>5,"unsaved changes "+Name); Check((Compare().*Access(TSources{}))[0]==m_pBefore && (Compare().*Access(TSources{}))[1]==m_pAfter,"context direction "+Name); SelectKind(MapDiff::EEntryKind::LAYER,"Game"); });
 			Delay();
@@ -2559,13 +3305,13 @@ class CSmokeEditor : public CEditor
 			Delay();
 			if(Fixture == 0)
 				Screenshot("comparison-quads");
-			Click([] { return vec2(167, 16); }); // By group toolbar button.
+			Click([] { return vec2(167, 62); }); // By group toolbar button.
 			Do([this] { Check(Compare().*Access(TGroup{}),"By group button"); SelectKind(MapDiff::EEntryKind::GROUP,"Smoke"); });
 			Delay();
 			Screenshot("comparison-" + std::to_string(Fixture) + "-group");
 			ToggleMapContext();
 			Do([this] { Check(Compare().*Access(TContext{}), "context toggle actual=" + std::to_string(Compare().*Access(TContext{})) + " target=" + std::to_string(m_TargetContext)); });
-			Click([] { return vec2(106, 16); });
+			Click([] { return vec2(106, 62); });
 			WaitReady();
 			Do([this] { Check((Compare().*Access(TSources{}))[0]==m_pAfter,"Swap button"); SelectKind(MapDiff::EEntryKind::GROUP,"Smoke"); });
 			Delay();
@@ -2598,12 +3344,12 @@ class CSmokeEditor : public CEditor
 				Do([this] { Check(Result().ChangeCount()>5,"pair selector compare button"); Graphics()->Resize(1100,700,0); OnWindowResize(); });
 				Delay();
 				Screenshot("comparison-resized");
-				Do([this] { CloseMap(Maps().size()-1,false); Check(State()==5,"source close invalidates"); });
+				Do([this] { CloseMap(Maps().size()-1,false); Check(!Tabs().Active(),"source disposal closes dependent comparison"); });
 				Delay();
 				Screenshot("comparison-source-closed");
-				Do([this] { Compare().Close(); });
+				Do([this] { CloseComparison(); });
 				Delay();
-				Do([this] { Compare().Open(*this,Maps()[0].get(),m_pBefore); Check(HandleMapDrop("maps/coverage.map",IStorage::TYPE_ALL),"external map drop loaded"); Check(State()==5,"external load invalidates"); Compare().Close(); });
+				Do([this] { OpenComparison(*this,Maps()[0].get(),m_pBefore); Check(HandleMapDrop("maps/coverage.map",IStorage::TYPE_ALL),"external map drop loaded"); Check(Tabs().Transitioning(),"external load safely selects its new map without discarding comparisons"); CloseComparison(); });
 				Delay();
 			}
 		}
@@ -2611,7 +3357,21 @@ class CSmokeEditor : public CEditor
 	}
 
 public:
-	void OnUpdate() override { CEditor::OnUpdate(); }
+	void OnUpdate() override
+	{
+		// Scripted positions use Ui()->OnCursorMove. Isolate them from unrelated
+		// physical mouse movement without changing native button/key delivery.
+		SDL_GetRelativeMouseState(nullptr, nullptr);
+		auto *pDocument = Tabs().Selected();
+		const void *pSnapshot = pDocument ? SnapshotIdentity(*pDocument) : nullptr;
+		const auto Start = std::chrono::steady_clock::now();
+		CEditor::OnUpdate();
+		if(pDocument && pDocument == Tabs().Selected() && HasSnapshot(*pDocument) && SnapshotIdentity(*pDocument) != pSnapshot)
+		{
+			++m_CaptureCount;
+			m_Log << "TIMING capture generation=" << m_CaptureCount << " capture_pair_ms=" << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count() << std::endl;
+		}
+	}
 	void OnRender() override
 	{
 		const auto RenderStart = std::chrono::steady_clock::now();
@@ -2626,6 +3386,7 @@ public:
 		if(m_vSteps.empty())
 		{
 			m_Log.open("map-compare-native-results.log");
+			m_Log << "INPUT physical relative mouse motion isolated; scripted cursor and native button/key assertions enabled" << std::endl;
 			g_Config.m_EdAutosaveInterval = 0;
 			Setup();
 		}

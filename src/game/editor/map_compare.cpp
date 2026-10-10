@@ -13,6 +13,7 @@
 #include <game/client/lineinput.h>
 #include <game/editor/mapitems/envelope.h>
 #include <game/editor/mapitems/image.h>
+#include <game/editor/mapitems/sound.h>
 
 #include <algorithm>
 #include <chrono>
@@ -343,8 +344,8 @@ void CMapCompare::CancelWork()
 {
 	if(m_pData)
 		m_pData->m_Cancel = true;
-	if(m_Future.valid())
-		m_vRetiredWork.push_back(std::move(m_Future));
+	if(m_pOwner)
+		m_pOwner->Retire(*this);
 }
 void CMapCompare::ReleaseBuffers()
 {
@@ -409,10 +410,8 @@ void CMapCompare::OpenSelector(CEditor &Editor)
 			break;
 		}
 	m_State = EState::SELECT;
+	m_Selector = true;
 	m_Message.clear();
-	Editor.Ui()->SetActiveItem(nullptr);
-	if(CLineInput::GetActiveInput())
-		CLineInput::GetActiveInput()->Deactivate();
 }
 void CMapCompare::Open(CEditor &Editor, const CEditorMap *pBefore, const CEditorMap *pAfter)
 {
@@ -432,55 +431,32 @@ void CMapCompare::Open(CEditor &Editor, const CEditorMap *pBefore, const CEditor
 	m_Section = SECTION_CHANGES;
 	m_LayerTreeActive = true;
 	m_Panning = false;
-	Editor.Ui()->SetActiveItem(nullptr);
-	if(CLineInput::GetActiveInput())
-		CLineInput::GetActiveInput()->Deactivate();
-}
-void CMapCompare::SourceClosing(const CEditorMap *pSource)
-{
-	if(Active() && (m_apSources[0] == pSource || m_apSources[1] == pSource))
-		Invalidate("A comparison source became unavailable because its tab was closed. Return to the editor to choose another pair.");
 }
 void CMapCompare::Invalidate(const char *pReason)
 {
 	CancelWork();
 	ReleaseBuffers();
-	m_apSources[0] = m_apSources[1] = nullptr;
 	m_Message = pReason;
 	m_State = EState::UNAVAILABLE;
 }
 void CMapCompare::Close()
 {
+	SaveView();
 	CancelWork();
 	ReleaseBuffers();
 	m_State = EState::CLOSING;
 }
-void CMapCompare::EndFrame(CEditor &Editor)
-{
-	if(m_State != EState::CLOSING)
-		return;
-	// A held button or repeating shortcut must not start editing on return.
-	for(int Key = KEY_FIRST; Key < KEY_LAST; ++Key)
-		if(Editor.Input()->KeyIsPressed(Key))
-			return;
-	Editor.Ui()->SetActiveItem(nullptr);
-	Editor.Ui()->SetHotItem(nullptr);
-	Editor.Ui()->ClosePopupMenus();
-	m_State = EState::CLOSED;
-	m_apSources[0] = m_apSources[1] = nullptr;
-	m_Panning = false;
-}
 void CMapCompare::OnInput(CEditor &Editor, const IInput::CEvent &Event)
 {
 	// Text, editing shortcuts, and editor components receive no events.
-	if(Event.m_Flags & IInput::FLAG_PRESS)
+	if(!Editor.Ui()->IsPopupOpen() && (Event.m_Flags & IInput::FLAG_PRESS))
 	{
 		if(Event.m_Key == KEY_ESCAPE)
 		{
-			Close();
+			Editor.m_MapCompare.SelectMap(Editor, Editor.Map());
 			return;
 		}
-		if(m_State == EState::READY)
+		if(m_State == EState::READY && Current(Editor))
 		{
 			if(Event.m_Key == KEY_N || Event.m_Key == KEY_P)
 			{
@@ -507,6 +483,175 @@ void CMapCompare::OnInput(CEditor &Editor, const IInput::CEvent &Event)
 	if(!(Event.m_Flags & IInput::FLAG_TEXT))
 		Editor.Ui()->OnInput(Event);
 }
+bool CMapCompare::Current(const CEditor &Editor) const
+{
+	return ValidSources(Editor) && m_aRevisions[0] == m_apSources[0]->m_ContentRevision && m_aRevisions[1] == m_apSources[1]->m_ContentRevision;
+}
+
+CMapCompare::CBookmark CMapCompare::Bookmark(const MapDiff::CEntry &Entry) const
+{
+	CBookmark Result;
+	Result.m_Present = true;
+	Result.m_Kind = Entry.m_Kind;
+	for(int Side = 0; Side < 2; ++Side)
+	{
+		const auto *pMap = m_apSources[Side];
+		const int Index = Side == 0 ? Entry.m_Before : Entry.m_After;
+		const int Group = Side == 0 ? Entry.m_BeforeGroup : Entry.m_AfterGroup;
+		if(Index < 0)
+			continue;
+		switch(Entry.m_Kind)
+		{
+		case MapDiff::EEntryKind::GROUP: Result.m_apObjects[Side] = pMap->m_vpGroups[Index]; break;
+		case MapDiff::EEntryKind::LAYER: Result.m_apObjects[Side] = pMap->m_vpGroups[Group]->m_vpLayers[Index]; break;
+		case MapDiff::EEntryKind::IMAGE: Result.m_apObjects[Side] = pMap->m_vpImages[Index]; break;
+		case MapDiff::EEntryKind::SOUND: Result.m_apObjects[Side] = pMap->m_vpSounds[Index]; break;
+		case MapDiff::EEntryKind::ENVELOPE: Result.m_apObjects[Side] = pMap->m_vpEnvelopes[Index]; break;
+		default: break;
+		}
+	}
+	return Result;
+}
+
+CMapCompare::CDetailBookmark CMapCompare::DetailBookmark(int Index) const
+{
+	CDetailBookmark Saved;
+	if(Index < 0 || Index >= (int)m_vDetails.size())
+		return Saved;
+	const auto &Detail = m_vDetails[Index];
+	const auto &Entry = m_Result.m_vEntries[Detail.m_Entry];
+	Saved.m_Entry = m_vBookmarks[Detail.m_Entry];
+	if(Detail.m_Kind == 1)
+	{
+		Saved.m_Kind = 1;
+		Saved.m_TileX = Entry.m_vTiles[Detail.m_Index].m_X;
+		Saved.m_TileY = Entry.m_vTiles[Detail.m_Index].m_Y;
+	}
+	else if(Detail.m_Kind == 0 && Entry.m_Kind != MapDiff::EEntryKind::SETTINGS && Entry.m_Kind != MapDiff::EEntryKind::ENVELOPE)
+	{
+		Saved.m_Kind = 0;
+		Saved.m_Property = Entry.m_vProperties[Detail.m_Index].m_Name;
+	}
+	else if(Detail.m_Kind == 4)
+		Saved.m_Kind = 4;
+	return Saved;
+}
+
+void CMapCompare::SaveView()
+{
+	if(m_State != EState::READY)
+		return;
+	auto Get = [&](int Index) { return Index >= 0 && Index < (int)m_vBookmarks.size() ? m_vBookmarks[Index] : CBookmark{}; };
+	m_SavedView.m_Selection = Get(m_SelectedEntry);
+	m_SavedView.m_Focus = Get(m_FocusEntry);
+	m_SavedView.m_Detail = DetailBookmark(m_SelectedDetail);
+	const int SelectedEntry = m_SelectedEntry, SelectedDetail = m_SelectedDetail;
+	const bool ByGroup = m_ByGroup;
+	for(int i = 0; i < NUM_SECTIONS; ++i)
+	{
+		const CSectionState State = i == m_Section ? CSectionState{SelectedEntry, SelectedDetail, m_Center, m_Zoom, ByGroup} : m_aSectionStates[i];
+		m_SavedView.m_aSections[i] = Get(State.m_Entry);
+		m_SavedView.m_aStates[i] = State;
+		m_SavedView.m_aNavigators[i] = m_aNavigators[i];
+		m_SelectedEntry = State.m_Entry;
+		m_ByGroup = State.m_ByGroup;
+		RebuildDetails();
+		m_SavedView.m_aSectionDetails[i] = DetailBookmark(State.m_Detail);
+	}
+	m_SelectedEntry = SelectedEntry;
+	m_ByGroup = ByGroup;
+	RebuildDetails();
+	m_SelectedDetail = SelectedDetail;
+	m_SavedView.m_Settings = m_Settings;
+	m_SavedView.m_Layers = m_LayerTree;
+	m_SavedView.m_Values = m_Values;
+	m_SavedView.m_Details = m_Details;
+	m_SavedView.m_vLayers.clear();
+	for(size_t i = 0; i < m_vLayerStates.size(); ++i)
+		if(m_vBookmarks[i].m_Kind == MapDiff::EEntryKind::GROUP || m_vBookmarks[i].m_Kind == MapDiff::EEntryKind::LAYER)
+			m_SavedView.m_vLayers.push_back({m_vBookmarks[i], {m_vLayerStates[i].m_Visible, m_vLayerStates[i].m_Expanded}});
+}
+
+void CMapCompare::RestoreView()
+{
+	auto Find = [&](const CBookmark &Saved) {
+		if(!Saved.m_Present)
+			return -1;
+		for(int i = 0; i < (int)m_vBookmarks.size(); ++i)
+		{
+			const auto &New = m_vBookmarks[i];
+			if(New.m_Kind != Saved.m_Kind)
+				continue;
+			if(New.m_Kind == MapDiff::EEntryKind::INFO || New.m_Kind == MapDiff::EEntryKind::SETTINGS)
+				return i;
+			bool Match = false, Conflict = false;
+			for(int Side = 0; Side < 2; ++Side)
+			{
+				auto OldObject = Saved.m_apObjects[Side].lock();
+				auto NewObject = New.m_apObjects[Side].lock();
+				if(OldObject && NewObject)
+				{
+					Match |= OldObject == NewObject;
+					Conflict |= OldObject != NewObject;
+				}
+			}
+			if(Match && !Conflict)
+				return i;
+		}
+		return -1;
+	};
+	for(const auto &Layer : m_SavedView.m_vLayers)
+	{
+		int Index = Find(Layer.first);
+		if(Index >= 0)
+		{
+			m_vLayerStates[Index].m_Visible = Layer.second.first;
+			m_vLayerStates[Index].m_Expanded = Layer.second.second;
+		}
+	}
+	auto ResolveDetail = [&](const CDetailBookmark &Saved) {
+		const int DetailEntry = Find(Saved.m_Entry);
+		for(int i = 0; i < (int)m_vDetails.size(); ++i)
+		{
+			const auto &Detail = m_vDetails[i];
+			if(Detail.m_Entry != DetailEntry || Detail.m_Kind != Saved.m_Kind)
+				continue;
+			const auto &Entry = m_Result.m_vEntries[Detail.m_Entry];
+			if(Detail.m_Kind == 4 ||
+				(Detail.m_Kind == 0 && Entry.m_vProperties[Detail.m_Index].m_Name == Saved.m_Property) ||
+				(Detail.m_Kind == 1 && Entry.m_vTiles[Detail.m_Index].m_X == Saved.m_TileX && Entry.m_vTiles[Detail.m_Index].m_Y == Saved.m_TileY))
+				return i;
+		}
+		return -1;
+	};
+	const bool ByGroup = m_ByGroup;
+	for(int i = 0; i < NUM_SECTIONS; ++i)
+	{
+		m_aSectionStates[i] = m_SavedView.m_aStates[i];
+		m_aNavigators[i] = m_SavedView.m_aNavigators[i];
+		m_aSectionStates[i].m_Entry = Find(m_SavedView.m_aSections[i]);
+		m_SelectedEntry = m_aSectionStates[i].m_Entry;
+		m_ByGroup = m_aSectionStates[i].m_ByGroup;
+		RebuildDetails();
+		m_aSectionStates[i].m_Detail = ResolveDetail(m_SavedView.m_aSectionDetails[i]);
+	}
+	m_ByGroup = ByGroup;
+	m_SelectedEntry = Find(m_SavedView.m_Selection);
+	m_FocusEntry = Find(m_SavedView.m_Focus);
+	m_SelectedDetail = -1;
+	RebuildNavigator(true);
+	// A lost object must not fall through to another object at its former index.
+	m_SelectedEntry = Find(m_SavedView.m_Selection);
+	RebuildDetails();
+	m_SelectedDetail = -1;
+	m_SelectedDetail = ResolveDetail(m_SavedView.m_Detail);
+	m_Settings = m_SavedView.m_Settings;
+	m_LayerTree = m_SavedView.m_Layers;
+	m_Values = m_SavedView.m_Values;
+	m_Details = m_SavedView.m_Details;
+	m_ScrollToSetting = m_ScrollToLayer = false;
+}
+
 void CMapCompare::Start(CEditor &Editor)
 {
 	if(!ValidSources(Editor))
@@ -514,53 +659,36 @@ void CMapCompare::Start(CEditor &Editor)
 		Invalidate("A comparison source is no longer open.");
 		return;
 	}
-	if(m_pData)
-		m_pData->m_Cancel = true;
+	SaveView();
+	// Caches contain snapshot addresses: destroy them before replacing snapshots.
 	m_pRenderCache.reset();
 	m_pObjectViewCache.reset();
-	m_Settings.Reset();
-	m_EnvelopeChannels = 15;
 	m_pData = std::make_shared<CData>();
-	// Capture is a const read on the UI thread; only owned values cross to the
-	// worker. Autosave and source disposal can therefore never race a capture.
-	MapDiff::Capture(*m_apSources[0], m_pData->m_aSnapshots[0]);
-	MapDiff::Capture(*m_apSources[1], m_pData->m_aSnapshots[1]);
+	for(int Side = 0; Side < 2; ++Side)
+	{
+		m_aRevisions[Side] = m_apSources[Side]->m_ContentRevision;
+		MapDiff::Capture(*m_apSources[Side], m_pData->m_aSnapshots[Side]);
+	}
 	const auto pData = m_pData;
 	m_Future = std::async(std::launch::async, [pData] {
 		return MapDiff::Compare(pData->m_aSnapshots[0], pData->m_aSnapshots[1], [pData] { return pData->m_Cancel.load(); });
 	});
 	m_State = EState::COMPUTING;
-	m_SelectedEntry = m_SelectedDetail = m_FocusEntry = -1;
 	m_vDetails.clear();
 	m_vValueRows.clear();
 	m_ValueRowsEntry = m_ValueRowsDetail = -2;
-	for(auto &List : m_aNavigators)
-		List.Reset();
-	for(auto &State : m_aSectionStates)
-		State = {};
-	m_Details.Reset();
-	m_Values.Reset();
-	Editor.Ui()->ClosePopupMenus();
 }
+
 void CMapCompare::OnUpdate(CEditor &Editor)
 {
-	for(auto It = m_vRetiredWork.begin(); It != m_vRetiredWork.end();)
+	if((m_State == EState::COMPUTING || m_State == EState::READY) && !Current(Editor))
 	{
-		if(It->wait_for(std::chrono::seconds(0)) == std::future_status::ready)
-		{
-			try
-			{
-				It->get();
-			}
-			catch(const std::exception &)
-			{
-			}
-			It = m_vRetiredWork.erase(It);
-		}
-		else
-			++It;
+		SaveView();
+		CancelWork();
+		m_State = EState::CAPTURE;
+		return;
 	}
-	if(m_State == EState::CAPTURE && m_vRetiredWork.empty())
+	if(m_State == EState::CAPTURE)
 	{
 		try
 		{
@@ -572,32 +700,37 @@ void CMapCompare::OnUpdate(CEditor &Editor)
 		}
 		return;
 	}
-	if((m_State == EState::COMPUTING || m_State == EState::READY) && !ValidSources(Editor))
-		Invalidate("A comparison source is no longer open.");
-	if(m_State == EState::COMPUTING && m_Future.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+	if(m_State == EState::COMPUTING && m_Future.valid() && m_Future.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
 	{
 		try
 		{
-			m_Result = m_Future.get();
-			if(m_Result.m_Cancelled)
+			auto Result = m_Future.get();
+			if(Result.m_Cancelled || !Current(Editor))
 			{
-				Close();
+				m_State = EState::CAPTURE;
 				return;
 			}
-			m_State = EState::READY;
+			m_Result = std::move(Result);
+			m_vBookmarks.clear();
 			m_vLayerStates.assign(m_Result.m_vEntries.size(), CLayerState{});
-			m_LayerTree.Reset();
-			m_ScrollToLayer = false;
 			for(int i = 0; i < (int)m_Result.m_vEntries.size(); ++i)
 			{
 				const auto &Entry = m_Result.m_vEntries[i];
+				m_vBookmarks.push_back(Bookmark(Entry));
 				m_vLayerStates[i].m_Changes += Entry.ChangeCount();
 				if(Entry.m_Parent >= 0)
 					m_vLayerStates[Entry.m_Parent].m_Changes += Entry.ChangeCount();
 			}
-			RebuildNavigator();
-			if(!m_vNavigator.empty() && m_vNavigator.front() >= 0)
-				Select(m_vNavigator.front());
+			m_State = EState::READY;
+			if(m_HasResult)
+				RestoreView();
+			else
+			{
+				RebuildNavigator();
+				if(!m_vNavigator.empty() && m_vNavigator.front() >= 0)
+					Select(m_vNavigator.front());
+			}
+			m_HasResult = true;
 		}
 		catch(const std::exception &Exception)
 		{
@@ -1002,10 +1135,11 @@ void CMapCompare::RenderSelector(CEditor &Editor, CUIRect View)
 		for(int i = 0; i < (int)Editor.m_vpMaps.size(); ++i)
 			if(Editor.m_vpMaps[i].get() == m_apSources[Side])
 				Selected = i;
+		m_aPairLists[Side].SetActive(!Editor.Ui()->IsPopupOpen());
 		m_aPairLists[Side].DoStart(42, Editor.m_vpMaps.size(), 1, 3, Selected, &aSides[Side]);
 		for(const auto &pMap : Editor.m_vpMaps)
 		{
-			auto Item = m_aPairLists[Side].DoNextItem(Side == 0 ? &pMap->m_TabSelectButtonId : &pMap->m_TabCloseButtonId);
+			auto Item = m_aPairLists[Side].DoNextItem(&m_aSelectorIds[Side][pMap.get()]);
 			if(Item.m_Visible)
 			{
 				CUIRect Name, Path;
@@ -1022,7 +1156,7 @@ void CMapCompare::RenderSelector(CEditor &Editor, CUIRect View)
 	Buttons.VSplitRight(160, nullptr, &Buttons);
 	Buttons.Margin(4, &Buttons);
 	if(Editor.DoButton_Editor(&m_aButtonIds[9], "Compare current contents", ValidSources(Editor) ? 0 : -1, &Buttons, BUTTONFLAG_LEFT, "Open the read-only comparison.") && ValidSources(Editor))
-		Open(Editor, m_apSources[0], m_apSources[1]);
+		Editor.m_MapCompare.Open(Editor, m_apSources[0], m_apSources[1]);
 }
 
 void CMapCompare::RenderInspector(CEditor &Editor, CUIRect View)
@@ -1032,6 +1166,7 @@ void CMapCompare::RenderInspector(CEditor &Editor, CUIRect View)
 	CUIRect List, Values;
 	View.VSplitLeft(std::min(270.0f, View.w * 0.34f), &List, &Values);
 	Values.VMargin(5, &Values);
+	m_Details.SetActive(!m_LayerTreeActive && !Editor.Ui()->IsPopupOpen());
 	m_Details.DoStart(19, m_vDetails.size(), 1, 3, m_SelectedDetail, &List);
 	for(const auto &Detail : m_vDetails)
 	{
@@ -1228,7 +1363,7 @@ void CMapCompare::RenderSettings(CEditor &Editor, CUIRect View)
 	m_Settings.End();
 	if(Remeasured && !m_Settings.ContentOverflows())
 		m_Settings.Reset();
-	if(!m_LayerTreeActive)
+	if(!m_LayerTreeActive && !Editor.Ui()->IsPopupOpen())
 	{
 		if(Editor.Ui()->ConsumeHotkey(CUi::HOTKEY_DOWN))
 			Navigate(1);
@@ -1724,7 +1859,7 @@ void CMapCompare::RenderLayerTree(CEditor &Editor, CUIRect View)
 			vRows.push_back(i);
 	}
 	bool FoldChanged = false;
-	if(m_LayerTreeActive && !vRows.empty() && !Editor.Input()->ModifierIsPressed() && !Editor.Input()->ShiftIsPressed() && !Editor.Input()->AltIsPressed())
+	if(m_LayerTreeActive && !vRows.empty() && !Editor.Ui()->IsPopupOpen() && !Editor.Input()->ModifierIsPressed() && !Editor.Input()->ShiftIsPressed() && !Editor.Input()->AltIsPressed())
 	{
 		const auto It = std::find(vRows.begin(), vRows.end(), m_FocusEntry);
 		int Row = It == vRows.end() ? -1 : It - vRows.begin();
@@ -1887,13 +2022,9 @@ void CMapCompare::RenderLayerTree(CEditor &Editor, CUIRect View)
 	m_ScrollToLayer = false;
 }
 
-void CMapCompare::Render(CEditor &Editor)
+void CMapCompare::Render(CEditor &Editor, CUIRect View)
 {
-	Editor.m_aTooltip[0] = 0;
-	Editor.m_CursorType = CEditor::CURSOR_NORMAL;
-	Editor.Graphics()->Clear(0.08f, 0.08f, 0.1f);
 	Editor.Ui()->MapScreen();
-	CUIRect View = *Editor.Ui()->Screen();
 	View.Margin(6, &View);
 	CUIRect Toolbar;
 	View.HSplitTop(23, &Toolbar, &View);
@@ -1904,7 +2035,7 @@ void CMapCompare::Render(CEditor &Editor)
 		return Editor.DoButton_Editor(&m_aButtonIds[Id], pText, Checked, &Rect, BUTTONFLAG_LEFT, pTooltip ? pTooltip : pText) != 0;
 	};
 	if(Button(0, "Back [Esc]", 76))
-		Close();
+		Editor.m_MapCompare.SelectMap(Editor, Editor.Map());
 	if(m_State == EState::CLOSING)
 	{
 		Label(Editor, View, "Returning to the editor. Release keys and mouse buttons to continue.", 14);
@@ -1920,15 +2051,14 @@ void CMapCompare::Render(CEditor &Editor)
 		Editor.TextRender()->Text(View.x + 12, View.y + 30, 14, m_Message.c_str(), View.w - 24);
 		return;
 	}
-	if(m_State == EState::CAPTURE || m_State == EState::COMPUTING)
+	if(m_State == EState::CAPTURE || m_State == EState::COMPUTING || !Current(Editor))
 	{
-		Label(Editor, View, "Comparing current map contents... Back / Escape cancels.", 14);
+		Label(Editor, View, "Updating comparison to current map contents...", 14);
 		return;
 	}
 	if(Button(1, "Swap", 52))
 	{
-		std::swap(m_apSources[0], m_apSources[1]);
-		m_State = EState::CAPTURE;
+		Editor.m_MapCompare.Open(Editor, m_apSources[1], m_apSources[0]);
 		return;
 	}
 	if(Button(2, m_ByGroup ? "By group" : "By layer", 74))
@@ -2041,7 +2171,7 @@ void CMapCompare::Render(CEditor &Editor)
 		RenderLayerTree(Editor, Navigator);
 	else if(!m_vNavigator.empty())
 	{
-		NavigatorList().SetActive(m_LayerTreeActive);
+		NavigatorList().SetActive(m_LayerTreeActive && !Editor.Ui()->IsPopupOpen());
 		int NavSelected = -1;
 		for(int i = 0; i < (int)m_vNavigator.size(); ++i)
 			if(m_SelectedEntry >= 0 && m_vNavigator[i] == m_SelectedEntry)
@@ -2149,5 +2279,271 @@ void CMapCompare::Render(CEditor &Editor)
 		const CUIRect Tip{12, Editor.Ui()->Screen()->h - 21, Editor.Ui()->Screen()->w - 24, 17};
 		Tip.Draw(ColorRGBA(0.05f, 0.05f, 0.06f, 0.95f), IGraphics::CORNER_ALL, 3);
 		Label(Editor, Tip, Editor.m_aTooltip, 9);
+	}
+}
+
+CMapCompareTabs::~CMapCompareTabs()
+{
+	for(auto &pDocument : m_vpDocuments)
+		if(pDocument->m_pData)
+			pDocument->m_pData->m_Cancel = true;
+}
+
+void CMapCompareTabs::Retire(CMapCompare &Document)
+{
+	if(!Document.m_Future.valid())
+		return;
+	// Only the selected document can launch work, and launching is gated on
+	// this slot being empty. A tab transition never destroys a running future.
+	dbg_assert(!m_RetiredWork.valid(), "Comparison worker already retiring");
+	m_RetiredWork = std::move(Document.m_Future);
+}
+
+void CMapCompareTabs::Select(CEditor &Editor, CMapCompare *pDocument)
+{
+	if(Editor.m_Dialog != DIALOG_NONE || Editor.m_PopupEventActivated || Editor.m_PopupEventWasActivated)
+		return;
+	if(!m_Transition && pDocument == m_pSelected)
+		return;
+	if(!m_Transition && !Active())
+		Editor.FinishMapInteraction();
+	if(m_pSelected)
+	{
+		m_pSelected->m_Panning = false;
+		if(m_pSelected->m_State == CMapCompare::EState::COMPUTING)
+		{
+			m_pSelected->CancelWork();
+			m_pSelected->m_State = CMapCompare::EState::CAPTURE;
+		}
+	}
+	m_pPending = pDocument;
+	m_pPendingMap = nullptr;
+	m_Transition = true;
+	Editor.m_MapTabsRevealSelected = true;
+}
+
+void CMapCompareTabs::SelectMap(CEditor &Editor, const CEditorMap *pMap)
+{
+	if(Editor.m_Dialog != DIALOG_NONE || Editor.m_PopupEventActivated || Editor.m_PopupEventWasActivated)
+		return;
+	if(!Active() && !m_Transition && Editor.Map() == pMap)
+		return;
+	// Map-to-map transitions also finish gestures and wait for held input.
+	if(!Active() && !m_Transition)
+		Editor.FinishMapInteraction();
+	Select(Editor, nullptr);
+	m_pPending = nullptr;
+	m_pPendingMap = pMap;
+	m_Transition = true;
+	Editor.m_MapTabsRevealSelected = true;
+}
+
+void CMapCompareTabs::CloseMap(CEditor &Editor, const CEditorMap *pMap)
+{
+	if(Editor.m_Dialog != DIALOG_NONE || Editor.m_PopupEventActivated || Editor.m_PopupEventWasActivated)
+		return;
+	if(!Active() && !m_Transition)
+		Editor.FinishMapInteraction();
+	// Dirty maps need their own editing context for the save/discard dialog.
+	// Closing a clean background map keeps the active document selected.
+	if(pMap->m_Modified)
+		SelectMap(Editor, pMap);
+	if(!m_Transition)
+	{
+		m_pPending = m_pSelected;
+		m_pPendingMap = Active() ? nullptr : Editor.Map();
+	}
+	m_pCloseMap = pMap;
+	m_Transition = true;
+	Editor.m_MapTabsRevealSelected = true;
+}
+
+void CMapCompareTabs::OpenSelector(CEditor &Editor)
+{
+	if(Editor.m_vpMaps.size() < 2 || (Editor.m_Dialog != DIALOG_NONE || Editor.m_PopupEventActivated || Editor.m_PopupEventWasActivated))
+		return;
+	for(auto &pDocument : m_vpDocuments)
+		if(pDocument->m_State == CMapCompare::EState::SELECT)
+		{
+			Select(Editor, pDocument.get());
+			return;
+		}
+	auto pDocument = std::make_unique<CMapCompare>();
+	pDocument->m_pOwner = this;
+	pDocument->OpenSelector(Editor);
+	auto *pSelect = pDocument.get();
+	m_vpDocuments.push_back(std::move(pDocument));
+	Select(Editor, pSelect);
+}
+
+void CMapCompareTabs::Open(CEditor &Editor, const CEditorMap *pBefore, const CEditorMap *pAfter)
+{
+	if(Editor.m_Dialog != DIALOG_NONE || Editor.m_PopupEventActivated || Editor.m_PopupEventWasActivated)
+		return;
+	for(auto &pDocument : m_vpDocuments)
+		if(pDocument->m_State != CMapCompare::EState::SELECT && pDocument->m_State != CMapCompare::EState::CLOSING && pDocument->m_apSources[0] == pBefore && pDocument->m_apSources[1] == pAfter)
+		{
+			Select(Editor, pDocument.get());
+			for(auto &pOther : m_vpDocuments)
+				if(pOther->m_Selector)
+					pOther->Close();
+			return;
+		}
+	auto pDocument = std::make_unique<CMapCompare>();
+	pDocument->m_pOwner = this;
+	pDocument->Open(Editor, pBefore, pAfter);
+	if(!pDocument->Active())
+		return;
+	auto *pSelect = pDocument.get();
+	m_vpDocuments.push_back(std::move(pDocument));
+	Select(Editor, pSelect);
+	// The selector is transient; its replacement is applied at the frame boundary.
+	for(auto &pOther : m_vpDocuments)
+		if(pOther->m_State == CMapCompare::EState::SELECT)
+			pOther->Close();
+}
+
+void CMapCompareTabs::Dispose(CEditor &Editor, CMapCompare *pDocument, bool Remember)
+{
+	if(Remember && !pDocument->m_Selector && pDocument->ValidSources(Editor))
+	{
+		pDocument->SaveView();
+		m_vClosed.push_back({{pDocument->m_apSources[0], pDocument->m_apSources[1]}, pDocument->m_SavedView,
+			pDocument->m_Center, pDocument->m_ParallaxOrigin, pDocument->m_Zoom, pDocument->m_SidebarWidth,
+			pDocument->m_Context, pDocument->m_Section, pDocument->m_EnvelopeChannels, pDocument->m_ByGroup, pDocument->m_UnchangedExpanded, pDocument->m_HasResult, pDocument->m_LayerTreeActive});
+		if(m_vClosed.size() > 10)
+			m_vClosed.erase(m_vClosed.begin());
+	}
+	pDocument->CancelWork();
+	if(m_pSelected == pDocument)
+		m_pSelected = nullptr;
+	if(m_pPending == pDocument)
+		m_pPending = nullptr;
+	m_vpDocuments.erase(std::find_if(m_vpDocuments.begin(), m_vpDocuments.end(), [&](const auto &pOther) { return pOther.get() == pDocument; }));
+}
+
+void CMapCompareTabs::SourceClosing(CEditor &Editor, const CEditorMap *pSource)
+{
+	if(m_pPendingMap == pSource)
+		m_pPendingMap = nullptr;
+	if(m_pCloseMap == pSource)
+		m_pCloseMap = nullptr;
+	for(size_t i = 0; i < m_vpDocuments.size();)
+	{
+		auto *pDocument = m_vpDocuments[i].get();
+		if(pDocument->m_apSources[0] == pSource || pDocument->m_apSources[1] == pSource)
+		{
+			if(pDocument == m_pSelected)
+				m_Transition = true;
+			Dispose(Editor, pDocument, false);
+		}
+		else
+			++i;
+	}
+	m_vClosed.erase(std::remove_if(m_vClosed.begin(), m_vClosed.end(), [&](const CClosed &Closed) { return Closed.m_apSources[0] == pSource || Closed.m_apSources[1] == pSource; }), m_vClosed.end());
+}
+
+void CMapCompareTabs::Reopen(CEditor &Editor)
+{
+	if(m_vClosed.empty() || (Editor.m_Dialog != DIALOG_NONE || Editor.m_PopupEventActivated || Editor.m_PopupEventWasActivated))
+		return;
+	auto Closed = std::move(m_vClosed.back());
+	m_vClosed.pop_back();
+	Open(Editor, Closed.m_apSources[0], Closed.m_apSources[1]);
+	auto *pDocument = m_pPending;
+	if(!pDocument || pDocument->m_HasResult)
+		return;
+	pDocument->m_SavedView = std::move(Closed.m_View);
+	pDocument->m_HasResult = Closed.m_HasResult;
+	pDocument->m_Center = Closed.m_Center;
+	pDocument->m_ParallaxOrigin = Closed.m_Origin;
+	pDocument->m_Zoom = Closed.m_Zoom;
+	pDocument->m_SidebarWidth = Closed.m_SidebarWidth;
+	pDocument->m_Context = Closed.m_Context;
+	pDocument->m_Section = Closed.m_Section;
+	pDocument->m_EnvelopeChannels = Closed.m_EnvelopeChannels;
+	pDocument->m_ByGroup = Closed.m_ByGroup;
+	pDocument->m_UnchangedExpanded = Closed.m_UnchangedExpanded;
+	pDocument->m_LayerTreeActive = Closed.m_LayerTreeActive;
+}
+
+void CMapCompareTabs::OnUpdate(CEditor &Editor)
+{
+	if(m_RetiredWork.valid() && m_RetiredWork.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+	{
+		try
+		{
+			m_RetiredWork.get();
+		}
+		catch(const std::exception &)
+		{
+		}
+	}
+	if(m_pSelected && !m_Transition && !m_RetiredWork.valid())
+		m_pSelected->OnUpdate(Editor);
+}
+
+void CMapCompareTabs::OnInput(CEditor &Editor, const IInput::CEvent &Event)
+{
+	if(m_Transition)
+		return;
+	if(m_pSelected)
+		m_pSelected->OnInput(Editor, Event);
+}
+
+void CMapCompareTabs::Render(CEditor &Editor, CUIRect View)
+{
+	if(m_Transition)
+		Label(Editor, View, "Release held keys and mouse buttons to switch tabs.", 14);
+	else if(m_pSelected)
+		m_pSelected->Render(Editor, View);
+}
+
+void CMapCompareTabs::EndFrame(CEditor &Editor)
+{
+	for(const auto &pDocument : m_vpDocuments)
+		if(!m_Transition && pDocument.get() == m_pSelected && pDocument->m_State == CMapCompare::EState::CLOSING)
+			SelectMap(Editor, Editor.Map());
+	if(m_Transition)
+	{
+		for(int Key = KEY_FIRST; Key < KEY_LAST; ++Key)
+			if(Editor.Input()->KeyIsPressed(Key))
+				return;
+		Editor.Reset();
+		Editor.Ui()->SetHotItem(nullptr);
+		if(CLineInput::GetActiveInput())
+			CLineInput::GetActiveInput()->Deactivate();
+		m_pSelected = m_pPending;
+		if(m_pSelected && m_pSelected->m_State == CMapCompare::EState::READY && !m_pSelected->Current(Editor))
+		{
+			m_pSelected->SaveView();
+			m_pSelected->m_State = CMapCompare::EState::CAPTURE;
+		}
+		if(m_pPendingMap)
+			for(size_t i = 0; i < Editor.m_vpMaps.size(); ++i)
+				if(Editor.m_vpMaps[i].get() == m_pPendingMap)
+					Editor.m_SelectedMap = i;
+		m_pPending = nullptr;
+		m_pPendingMap = nullptr;
+		m_Transition = false;
+		Editor.m_MapTabsRevealSelected = true;
+		if(m_pCloseMap)
+		{
+			const auto *pClose = m_pCloseMap;
+			m_pCloseMap = nullptr;
+			for(size_t i = 0; i < Editor.m_vpMaps.size(); ++i)
+				if(Editor.m_vpMaps[i].get() == pClose)
+				{
+					Editor.CloseMap(i, true);
+					break;
+				}
+		}
+	}
+	for(size_t i = 0; i < m_vpDocuments.size();)
+	{
+		if(m_vpDocuments[i]->m_State == CMapCompare::EState::CLOSING)
+			Dispose(Editor, m_vpDocuments[i].get(), true);
+		else
+			++i;
 	}
 }

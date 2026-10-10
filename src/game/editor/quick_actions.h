@@ -341,11 +341,19 @@ REGISTER_QUICK_ACTION(
 REGISTER_QUICK_ACTION(
 	CloseMap,
 	"Close map",
-	[&]() { CloseMap(m_SelectedMap, true); },
+	[&]() { m_MapCompare.CloseMap(*this, Map()); },
 	ALWAYS_FALSE,
 	ALWAYS_FALSE,
 	DEFAULT_BTN,
 	"[Ctrl+F4] Close the current map.")
+REGISTER_QUICK_ACTION(
+	ReopenComparison,
+	"Reopen comparison",
+	[&]() { m_MapCompare.Reopen(*this); },
+	[&]() -> bool { return !m_MapCompare.CanReopen(); },
+	ALWAYS_FALSE,
+	DEFAULT_BTN,
+	"[Ctrl+Shift+F4] Reopen the most recently closed comparison.")
 REGISTER_QUICK_ACTION(
 	Envelopes,
 	"Envelopes",
