@@ -234,6 +234,11 @@ TEST(Datafile, EagerFailureIsStickyAndDoesNotReadOversizedInput)
 	EXPECT_EQ(Writer.AddData(static_cast<size_t>(std::numeric_limits<int>::max()) + 1, &DataByte), -1);
 	EXPECT_TRUE(Writer.Failed());
 	EXPECT_EQ(Writer.AddData(1, &DataByte), -1);
+	const int Item = 42;
+	EXPECT_EQ(Writer.AddItem(0, 0, sizeof(Item), &Item), -1);
+	EXPECT_EQ(Writer.AddItem(MAPITEMTYPE_TEST, 0, sizeof(Item), &Item), -1);
+	const CUuid Uuid = {};
+	EXPECT_EQ(Writer.AddItem(-1, 0, sizeof(Item), &Item, &Uuid), -1);
 	EXPECT_FALSE(Writer.Finish());
 	Info.m_DeleteTestStorageFilesOnSuccess = true;
 }

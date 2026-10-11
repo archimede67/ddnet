@@ -167,7 +167,11 @@ int main(int argc, const char **argv)
 	}
 
 	g_DataReader.Close();
-	Writer.Finish();
+	if(!Writer.Finish())
+	{
+		dbg_msg("map_replace_image", "failed to write destination map. filename='%s'", pDestFilename);
+		return -1;
+	}
 
 	dbg_msg("map_replace_image", "image '%s' replaced", pImageName);
 	return 0;

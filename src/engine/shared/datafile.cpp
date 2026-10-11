@@ -1113,8 +1113,7 @@ int CDataFileWriter::GetExtendedItemTypeIndex(int Type, const CUuid *pUuid)
 	m_vExtendedItemTypes.emplace_back(ExtendedType);
 
 	const CItemEx ItemEx = CItemEx::FromUuid(Uuid);
-	AddItem(ITEMTYPE_EX, GetTypeFromIndex(Index), sizeof(ItemEx), &ItemEx);
-	return Index;
+	return AddItem(ITEMTYPE_EX, GetTypeFromIndex(Index), sizeof(ItemEx), &ItemEx) < 0 ? -1 : Index;
 }
 
 int CDataFileWriter::AddItem(int Type, int Id, size_t Size, const void *pData, const CUuid *pUuid)
@@ -1126,9 +1125,14 @@ int CDataFileWriter::AddItem(int Type, int Id, size_t Size, const void *pData, c
 	dbg_assert(Size % sizeof(int) == 0, "Invalid data boundary");
 	dbg_assert(m_vItems.size() < (size_t)std::numeric_limits<int>::max(), "Too many items");
 
+	if(m_Failed)
+		return -1;
 	if(Type == -1 || Type >= OFFSET_UUID)
 	{
-		Type = GetTypeFromIndex(GetExtendedItemTypeIndex(Type, pUuid));
+		const int Index = GetExtendedItemTypeIndex(Type, pUuid);
+		if(Index < 0)
+			return -1;
+		Type = GetTypeFromIndex(Index);
 	}
 
 	const int NumItems = m_vItems.size();
@@ -1142,6 +1146,11 @@ int CDataFileWriter::AddItem(int Type, int Id, size_t Size, const void *pData, c
 	if(Size > 0)
 	{
 		Info.m_pData = malloc(Size);
+		if(Info.m_pData == nullptr)
+		{
+			m_Failed = true;
+			return -1;
+		}
 		mem_copy(Info.m_pData, pData, Size);
 	}
 	else

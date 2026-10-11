@@ -30,7 +30,7 @@ public:
 
 static bool ReplaceArea(IStorage *, const char[3][64], const float[][2][2]);
 static bool OpenMaps(IStorage *, const char[3][64], CDataFileReader[2], CDataFileWriter &);
-static void SaveOutputMap(CDataFileReader &, CDataFileWriter &);
+static bool SaveOutputMap(CDataFileReader &, CDataFileWriter &);
 static bool CompareLayers(const char[3][64], CDataFileReader[2]);
 static void CompareGroups(const char[3][64], CDataFileReader[2]);
 static const CMapItemGroup *GetLayerGroup(CDataFileReader &, int);
@@ -143,9 +143,7 @@ bool ReplaceArea(IStorage *pStorage, const char aaMapNames[3][64], const float a
 			ReplaceAreaQuads(aInputMaps, aaaGameAreas, apLayerGroups, apItem, aLayersStart[1] + i);
 	}
 
-	SaveOutputMap(aInputMaps[1], OutputMap);
-
-	return true;
+	return SaveOutputMap(aInputMaps[1], OutputMap);
 }
 
 bool OpenMaps(IStorage *pStorage, const char aaMapNames[3][64], CDataFileReader aInputMaps[2], CDataFileWriter &OutputMap)
@@ -168,7 +166,7 @@ bool OpenMaps(IStorage *pStorage, const char aaMapNames[3][64], CDataFileReader 
 	return true;
 }
 
-void SaveOutputMap(CDataFileReader &InputMap, CDataFileWriter &OutputMap)
+bool SaveOutputMap(CDataFileReader &InputMap, CDataFileWriter &OutputMap)
 {
 	for(int i = 0; i < InputMap.NumItems(); i++)
 	{
@@ -196,7 +194,12 @@ void SaveOutputMap(CDataFileReader &InputMap, CDataFileWriter &OutputMap)
 		OutputMap.AddData(Size, pData);
 	}
 
-	OutputMap.Finish();
+	if(!OutputMap.Finish())
+	{
+		dbg_msg("map_replace_area", "ERROR: unable to write output map");
+		return false;
+	}
+	return true;
 }
 
 bool CompareLayers(const char aaMapNames[3][64], CDataFileReader aInputMaps[2])

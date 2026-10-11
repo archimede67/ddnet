@@ -128,7 +128,11 @@ static void Process(IStorage *pStorage, const char *pMapName, const char *pConfi
 		log_error("config_store", "Failed to import settings from '%s': failed to open map '%s' for writing", pConfigName, pMapName);
 		return;
 	}
-	Writer.Finish();
+	if(!Writer.Finish())
+	{
+		log_error("config_store", "Failed to import settings from '%s': failed to write map '%s'", pConfigName, pMapName);
+		return;
+	}
 	log_info("config_store", "Imported settings from '%s' into '%s'", pConfigName, pMapName);
 }
 #include "config_common.h"
