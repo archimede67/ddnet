@@ -2753,6 +2753,7 @@ if(CLIENT)
     laser_data.h
     lineinput.cpp
     lineinput.h
+    lineinput_history.h
     multiview.cpp
     pickup_data.cpp
     pickup_data.h
@@ -3464,6 +3465,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     jobs_test.cpp
     json_test.cpp
     jsonwriter_test.cpp
+    lineinput_history.cpp
     linereader_test.cpp
     mapbugs_test.cpp
     mapitems_test.cpp

@@ -3,6 +3,8 @@
 #ifndef GAME_CLIENT_LINEINPUT_H
 #define GAME_CLIENT_LINEINPUT_H
 
+#include "lineinput_history.h"
+
 #include <base/vmath.h>
 
 #include <engine/client.h>
@@ -12,6 +14,7 @@
 
 #include <game/client/ui_rect.h>
 
+#include <optional>
 #include <string>
 
 enum class EInputPriority
@@ -82,6 +85,11 @@ private:
 	bool m_WasRendered;
 
 	char m_ClearButtonId;
+	CLineInputHistory m_LocalHistory;
+	bool m_ProcessingInput = false;
+	CLineInputHistory::CState TextHistoryState() const;
+	void RestoreTextHistoryState(const CLineInputHistory::CState &State);
+	void RecordTextHistoryState(const CLineInputHistory::CState &Before);
 
 	void UpdateStrData();
 	enum EMoveDirection
@@ -165,7 +173,11 @@ public:
 	vec2 GetCaretPosition() const { return m_CaretPosition; } // only updated while the input is active
 
 	bool IsHidden() const { return m_Hidden; }
-	void SetHidden(bool Hidden) { m_Hidden = Hidden; }
+	void SetHidden(bool Hidden)
+	{
+		m_Hidden = Hidden;
+		m_LocalHistory.SetEnabled(!Hidden);
+	}
 
 	const char *GetEmptyText() const { return m_pEmptyText; }
 	void SetEmptyText(const char *pText) { m_pEmptyText = pText; }
@@ -175,6 +187,9 @@ public:
 	void SetCalculateOffsetCallback(const FCalculateOffsetCallback &pfnCalculateOffsetCallback) { m_pfnCalculateOffsetCallback = pfnCalculateOffsetCallback; }
 
 	bool ProcessInput(const IInput::CEvent &Event);
+	/** Traverse only this focused draft. A false result must not trigger map undo. */
+	bool UndoText();
+	bool RedoText();
 	bool WasChanged()
 	{
 		const bool Changed = m_WasChanged;
