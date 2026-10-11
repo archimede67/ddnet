@@ -334,7 +334,11 @@ int main(int argc, const char **argv)
 	}
 
 	Reader.Close();
-	Writer.Finish();
+	if(!Writer.Finish())
+	{
+		dbg_msg("map_optimize", "failed to write destination map");
+		return -1;
+	}
 
 	return 0;
 }

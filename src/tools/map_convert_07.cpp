@@ -225,6 +225,10 @@ int main(int argc, const char **argv)
 	}
 
 	g_DataReader.Close();
-	g_DataWriter.Finish();
+	if(!g_DataWriter.Finish())
+	{
+		dbg_msg("map_convert_07", "failed to write destination map. filename='%s'", aDestFilename);
+		return -1;
+	}
 	return Success ? 0 : -1;
 }

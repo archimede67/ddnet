@@ -7,7 +7,13 @@
 
 void CDataFileWriterFinishJob::Run()
 {
-	m_Writer.Finish();
+	if(!m_Writer.Finish())
+	{
+		str_format(m_aErrorMessage, sizeof(m_aErrorMessage), "Saving failed: Could not completely write temporary map file '%s'.", m_aTempFilename);
+		log_error("editor/save", "%s", m_aErrorMessage);
+		m_pStorage->RemoveFile(m_aTempFilename, IStorage::TYPE_SAVE);
+		return;
+	}
 	if(!m_pStorage->RenameFile(m_aTempFilename, m_aRealFilename, IStorage::TYPE_SAVE))
 	{
 		str_format(m_aErrorMessage, sizeof(m_aErrorMessage), "Saving failed: Could not move temporary map file '%s' to '%s'.", m_aTempFilename, m_aRealFilename);
