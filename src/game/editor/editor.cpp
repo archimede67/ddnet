@@ -24,7 +24,6 @@
 #include <engine/input.h>
 #include <engine/keys.h>
 #include <engine/shared/config.h>
-#include <engine/shared/filecollection.h>
 #include <engine/storage.h>
 #include <engine/textrender.h>
 
@@ -4794,8 +4793,13 @@ void CEditor::HandleAutosave()
 
 void CEditor::QueueWriterFinishJob(const std::shared_ptr<CDataFileWriterFinishJob> &pJob)
 {
+	// Serialize before allocating dense planes, including aliased destinations.
 	m_WriterFinishJobs.push_back(pJob);
+	pJob->SetWriteTurn(m_SaveQueue.Register());
 	Engine()->AddJob(pJob);
+	for(const auto &pMap : m_vpMaps)
+		if(pMap->OwnsSave(pJob->Ticket()))
+			pMap->m_DocumentHistory.InvalidateMemoryUsage();
 }
 
 void CEditor::HandleWriterFinishJobs()
@@ -4812,18 +4816,14 @@ void CEditor::HandleWriterFinishJobs()
 	auto MapIt = std::find_if(m_vpMaps.begin(), m_vpMaps.end(), [&](const std::unique_ptr<CEditorMap> &pMap) {
 		return pMap->OwnsSave(pJob->Ticket());
 	});
+	if(MapIt != m_vpMaps.end())
+		(*MapIt)->m_DocumentHistory.InvalidateMemoryUsage();
 	if(MapIt != m_vpMaps.end() && (*MapIt)->CompleteSave(pJob->Ticket(), pErrorMessage[0] == '\0'))
 		UpdateMapDisplayNames();
 	if(pErrorMessage[0] != '\0')
 	{
 		ShowFileDialogError("%s", pErrorMessage);
 		return;
-	}
-
-	if(pJob->Ticket().Kind() == editor_history::ESaveKind::AUTOMATIC && pJob->AutosaveMax() > 0 && !pJob->AutosaveName().empty())
-	{
-		CFileCollection AutosavedMaps;
-		AutosavedMaps.Init(Storage(), "maps/auto", pJob->AutosaveName().c_str(), ".map", pJob->AutosaveMax());
 	}
 
 	if(MapIt != m_vpMaps.end())
@@ -4847,13 +4847,6 @@ void CEditor::HandleWriterFinishJobs()
 				Client()->Rcon("hot_reload");
 		}
 	}
-}
-
-bool CEditor::IsSaving(const char *pFilename) const
-{
-	return std::any_of(m_WriterFinishJobs.begin(), m_WriterFinishJobs.end(), [&](const auto &pJob) {
-		return str_comp(pFilename, pJob->RealFilename()) == 0;
-	});
 }
 
 bool CEditor::IsSavingMap(const CEditorMap &Map) const

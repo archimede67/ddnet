@@ -2832,6 +2832,7 @@ if(CLIENT)
     history/revision_history.h
     history/save_job.cpp
     history/save_job.h
+    history/save_queue.h
     history/save_state.h
     history/shared_value.h
     history/tile_plane.h
@@ -3531,6 +3532,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     src/game/client/components/censor.h
     src/game/editor/history/save_job.cpp
     src/game/editor/history/save_job.h
+    src/game/editor/history/save_queue.h
     src/game/editor/mapitems/document_export.cpp
     src/game/editor/mapitems/document_export.h
     # tidy-alphabetical-end

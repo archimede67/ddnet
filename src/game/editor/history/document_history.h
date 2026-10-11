@@ -63,6 +63,7 @@ public:
 		std::uint64_t m_SamplesStarted = 0;
 		std::size_t m_LiveBytes = 0;
 		std::size_t m_DraftExtraBytes = 0;
+		std::size_t m_SavePinnedBytes = 0;
 		std::size_t m_CacheBytes = 0;
 	};
 	/** Request coalesced worker accounting; figures can be stale while updating. */
@@ -141,6 +142,7 @@ private:
 	mutable std::shared_ptr<CMemoryJob> m_pMemoryJob;
 	mutable std::uint64_t m_MemoryGeneration = 1;
 	mutable std::uint64_t m_FingerprintGeneration = 0;
+	mutable std::size_t m_CompletedSaves = 0;
 	mutable bool m_MemoryRequested = false;
 	void PruneSession();
 };

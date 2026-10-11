@@ -317,11 +317,11 @@ public:
 	float m_LastAutosaveUpdateTime = -1.0f;
 	void HandleAutosave();
 	std::deque<std::shared_ptr<CDataFileWriterFinishJob>> m_WriterFinishJobs;
+	editor_history::CSaveQueue m_SaveQueue;
 	std::uint64_t m_NextSaveJob = 1;
 	void QueueWriterFinishJob(const std::shared_ptr<CDataFileWriterFinishJob> &pJob);
 	void HandleWriterFinishJobs();
 	bool IsSavingMap(const CEditorMap &Map) const;
-	bool IsSaving(const char *pFilename) const;
 	void UpdateMapDisplayNames();
 
 	// TODO: The name of the ShowFileDialogError function is not accurate anymore, this is used for generic error messages.

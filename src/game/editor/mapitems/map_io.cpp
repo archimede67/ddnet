@@ -1,4 +1,3 @@
-#include "document_export.h"
 #include "image.h"
 #include "sound.h"
 
@@ -65,11 +64,6 @@ bool CEditorMap::SaveWithKind(const char *pFilename, editor_history::ESaveKind K
 			Editor()->Reset();
 	}
 
-	if(Editor()->IsSaving(pFilename))
-	{
-		ErrorHandler("This map file is already being saved. Wait for the save to finish before saving it again.");
-		return false;
-	}
 	char aSaveRoot[IO_MAX_PATH_LENGTH];
 	Editor()->Storage()->GetCompletePath(IStorage::TYPE_SAVE, "", aSaveRoot, sizeof(aSaveRoot));
 	if(str_length(aSaveRoot) + str_length(pFilename) + 64 >= IO_MAX_PATH_LENGTH)
@@ -97,30 +91,12 @@ bool CEditorMap::SaveWithKind(const char *pFilename, editor_history::ESaveKind K
 	IStorage::FormatTmpPath(aFilenameTmp, sizeof(aFilenameTmp), aFilenameBase);
 	log_info("editor/save", "Saving map to '%s'...", aFilenameTmp);
 
-	std::string ExportError;
-	{
-		CDataFileWriter Writer;
-		if(!Writer.Open(Editor()->Storage(), aFilenameTmp))
-		{
-			char aError[IO_MAX_PATH_LENGTH + 64];
-			str_format(aError, sizeof(aError), "Error: Failed to open file '%s' for writing.", aFilenameTmp);
-			ErrorHandler(aError);
-			return false;
-		}
-		if(WriteEditorDocument(*Ticket->m_pRoot, Writer, ExportError))
-		{
-			// Native projection stays on the foreground. Only Finish and rename run
-			// in the worker, and the snapshot pin is released before submission.
-			auto pJob = std::make_shared<CDataFileWriterFinishJob>(Editor()->Storage(), aFilenameTmp, std::move(Writer), std::move(*Ticket));
-			if(Kind == editor_history::ESaveKind::AUTOMATIC)
-				pJob->SetAutosaveName(m_aAutosaveName, g_Config.m_EdAutosaveMax);
-			Editor()->QueueWriterFinishJob(pJob);
-			return true;
-		}
-	} // Close the unfinished writer before removing its temporary file.
-	Editor()->Storage()->RemoveFile(aFilenameTmp, IStorage::TYPE_SAVE);
-	ErrorHandler(ExportError.c_str());
-	return false;
+	// The worker owns export buffers and the writer for their entire lifetime.
+	auto pJob = std::make_shared<CDataFileWriterFinishJob>(Editor()->Storage(), aFilenameTmp, std::move(*Ticket));
+	if(Kind == editor_history::ESaveKind::AUTOMATIC)
+		pJob->SetAutosaveName(m_aAutosaveName, g_Config.m_EdAutosaveMax);
+	Editor()->QueueWriterFinishJob(pJob);
+	return true;
 }
 
 bool CEditorMap::PerformPreSaveSanityChecks(const FErrorHandler &ErrorHandler)

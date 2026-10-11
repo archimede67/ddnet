@@ -483,11 +483,11 @@ namespace
 	public:
 		explicit CWriterOutput(CDataFileWriter &Writer) :
 			m_Writer(Writer) {}
-		bool Success() const { return m_Success; }
+		bool Success() const { return m_Success && !m_Writer.Failed(); }
 
 		int AddItem(int Type, int Id, std::size_t Size, const void *pData) override
 		{
-			if(Id < 0 || Id > 65535 || Size % sizeof(int) != 0 || Size > std::numeric_limits<int>::max() || (Size != 0 && pData == nullptr))
+			if(!Success() || Id < 0 || Id > 65535 || Size % sizeof(int) != 0 || Size > std::numeric_limits<int>::max() || (Size != 0 && pData == nullptr))
 			{
 				m_Success = false;
 				return -1;
@@ -496,7 +496,7 @@ namespace
 		}
 		int AddData(std::size_t Size, const void *pData) override
 		{
-			if(Size == 0 || Size > std::numeric_limits<int>::max() || pData == nullptr)
+			if(!Success() || Size == 0 || Size > std::numeric_limits<int>::max() || pData == nullptr)
 			{
 				m_Success = false;
 				return -1;
@@ -505,12 +505,32 @@ namespace
 		}
 		int AddDataSwapped(std::size_t Size, const void *pData) override
 		{
-			if(Size == 0 || Size % sizeof(int) != 0 || Size > std::numeric_limits<int>::max() || pData == nullptr)
+			if(!Success() || Size == 0 || Size % sizeof(int) != 0 || Size > std::numeric_limits<int>::max() || pData == nullptr)
 			{
 				m_Success = false;
 				return -1;
 			}
 			return m_Writer.AddDataSwapped(Size, pData);
+		}
+		int AddResourceBlob(const editor_history::CResourceBlob &Blob) override
+		{
+			return Success() ? IEditorDocumentOutput::AddResourceBlob(Blob) : -1;
+		}
+		int AddTilePlane(CEditorTilePayload Plane, const std::array<unsigned char, 256> &aFlags) override
+		{
+			return Success() ? IEditorDocumentOutput::AddTilePlane(Plane, aFlags) : -1;
+		}
+		int AddEmptyTiles(std::size_t Count) override
+		{
+			return Success() ? IEditorDocumentOutput::AddEmptyTiles(Count) : -1;
+		}
+		int AddLayerObjects(const editor_history::CSharedValue<CLayerDocumentValues> &Layer, const CEditorDocumentValues &Document) override
+		{
+			return Success() ? IEditorDocumentOutput::AddLayerObjects(Layer, Document) : -1;
+		}
+		std::array<unsigned char, 256> ImageTileFlags(const CEditorImageValues &Image) override
+		{
+			return Success() ? IEditorDocumentOutput::ImageTileFlags(Image) : std::array<unsigned char, 256>{};
 		}
 	};
 
@@ -602,7 +622,7 @@ bool WriteEditorDocument(const CEditorDocumentValues &Document, CDataFileWriter 
 		return false;
 	if(!Output.Success())
 	{
-		Error = "The document exceeds the native map format limits";
+		Error = "Could not prepare or compress map data (allocation failure or map format limit)";
 		return false;
 	}
 	return true;

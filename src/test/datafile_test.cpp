@@ -6,6 +6,7 @@
 #include <engine/shared/datafile.h>
 #include <engine/storage.h>
 
+#include <game/editor/history/save_job.h>
 #include <game/mapitems_ex.h>
 
 #include <gtest/gtest.h>
@@ -240,5 +241,54 @@ TEST(Datafile, EagerFailureIsStickyAndDoesNotReadOversizedInput)
 	const CUuid Uuid = {};
 	EXPECT_EQ(Writer.AddItem(-1, 0, sizeof(Item), &Item, &Uuid), -1);
 	EXPECT_FALSE(Writer.Finish());
+	Info.m_DeleteTestStorageFilesOnSuccess = true;
+}
+
+TEST(EditorSaveJob, FailedWritePreservesDestinationAndSavedContentMarker)
+{
+	CTestInfo Info;
+	const auto pStorage = Info.CreateTestStorage();
+	ASSERT_NE(pStorage, nullptr);
+	for(const char *pName : {"temporary.map", "saved.map"})
+	{
+		const auto File = pStorage->OpenFile(pName, IOFLAG_WRITE, IStorage::TYPE_SAVE);
+		ASSERT_NE(File, nullptr);
+		ASSERT_EQ(io_write(File, "original", 8), 8u);
+		ASSERT_EQ(io_close(File), 0);
+	}
+	CReadOnlyOutputStorage ReadOnly(pStorage.get());
+	CEditorSaveState Saves;
+	ASSERT_TRUE(Saves.InitializeLoaded("baseline"));
+	CEditorDocumentValues Document;
+	CGroupDocumentValues Group;
+	Group.m_Id = 1;
+	Group.m_GameGroup = true;
+	CLayerDocumentValues Layer;
+	Layer.m_Id = 2;
+	Layer.m_Type = LAYERTYPE_TILES;
+	auto &Tiles = std::get<CTileLayerDocumentValues>(Layer.m_Data);
+	Tiles.m_HasGame = true;
+	ASSERT_TRUE(Tiles.m_Tiles.Resize(1, 1));
+	Group.m_Layers.Update([&](auto &vLayers) { vLayers.emplace_back(std::move(Layer)); });
+	Document.m_Groups.Update([&](auto &vGroups) { vGroups.emplace_back(std::move(Group)); });
+	auto Ticket = Saves.Capture(std::make_shared<const CEditorDocumentValues>(std::move(Document)), "changed", "saved.map", editor_history::ESaveKind::MANUAL);
+	ASSERT_TRUE(Ticket);
+	auto pJob = std::make_shared<CDataFileWriterFinishJob>(&ReadOnly, "temporary.map", *Ticket);
+	editor_history::CSaveQueue Queue;
+	pJob->SetWriteTurn(Queue.Register());
+	CJobPool Pool;
+	Pool.Init(1);
+	Pool.Add(pJob);
+	Pool.Shutdown();
+	ASSERT_EQ(pJob->State(), IJob::STATE_DONE);
+	EXPECT_NE(pJob->ErrorMessage()[0], '\0');
+	EXPECT_FALSE(Saves.Complete(pJob->Ticket(), pJob->ErrorMessage()[0] == '\0'));
+	EXPECT_FALSE(Saves.Dirty("baseline", editor_history::ESaveKind::MANUAL));
+	EXPECT_TRUE(Saves.Dirty("changed", editor_history::ESaveKind::MANUAL));
+	char *pContents = pStorage->ReadFileStr("saved.map", IStorage::TYPE_SAVE);
+	ASSERT_NE(pContents, nullptr);
+	EXPECT_STREQ(pContents, "original");
+	free(pContents);
+	EXPECT_FALSE(pStorage->FileExists("temporary.map", IStorage::TYPE_SAVE));
 	Info.m_DeleteTestStorageFilesOnSuccess = true;
 }

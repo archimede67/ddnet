@@ -83,7 +83,7 @@ class CEditorDocumentHistory::CMemoryJob : public IJob
 {
 	void Run() override
 	{
-		editor_history::CStorageUsage Live, Draft, Caches;
+		editor_history::CStorageUsage Live, Draft, Saves, Caches;
 		m_Live.Account(Live);
 		m_Result.m_LiveBytes = Live.Bytes();
 		if(m_Active)
@@ -96,6 +96,10 @@ class CEditorDocumentHistory::CMemoryJob : public IJob
 			m_Draft.Account(Draft);
 			m_Result.m_DraftExtraBytes = Draft.Bytes() - Retained;
 		}
+		for(const auto &pRoot : m_vSaves)
+			if(Saves.Add(pRoot.get(), sizeof(CEditorDocumentValues)))
+				pRoot->Account(Saves);
+		m_Result.m_SavePinnedBytes = Saves.Bytes();
 		m_Caches.Account(Caches);
 		m_Result.m_CacheBytes = Caches.Bytes();
 		m_Result.m_Sampled = true;
@@ -105,13 +109,14 @@ class CEditorDocumentHistory::CMemoryJob : public IJob
 		m_Draft = {};
 		m_Caches = {};
 		m_vRetained.clear();
+		m_vSaves.clear();
 	}
 
 public:
 	SMemoryUsage m_Result;
 	bool m_Active = false;
 	editor_history::CStorageObservation m_Live, m_Draft, m_Caches;
-	std::vector<std::shared_ptr<const CEditorDocumentValues>> m_vRetained;
+	std::vector<std::shared_ptr<const CEditorDocumentValues>> m_vRetained, m_vSaves;
 };
 
 CEditorDocumentHistory::SMemoryUsage CEditorDocumentHistory::MemoryUsage() const
@@ -123,6 +128,15 @@ CEditorDocumentHistory::SMemoryUsage CEditorDocumentHistory::MemoryUsage() const
 	{
 		InvalidateMemoryUsage();
 		m_FingerprintGeneration = Map()->m_FingerprintCache.Generation();
+	}
+	// A worker can retire its root before the foreground collects its ticket.
+	const auto CompletedSaves = std::count_if(Editor()->m_WriterFinishJobs.begin(), Editor()->m_WriterFinishJobs.end(), [&](const auto &pSave) {
+		return Map()->OwnsSave(pSave->Ticket()) && pSave->State() == IJob::STATE_DONE;
+	});
+	if(m_CompletedSaves != static_cast<std::size_t>(CompletedSaves))
+	{
+		m_CompletedSaves = CompletedSaves;
+		InvalidateMemoryUsage();
 	}
 	if(m_pMemoryJob && m_pMemoryJob->State() == IJob::STATE_DONE)
 	{
@@ -149,6 +163,14 @@ CEditorDocumentHistory::SMemoryUsage CEditorDocumentHistory::MemoryUsage() const
 				pJob->m_vRetained.push_back(Revision.m_pRoot);
 			History()->ObserveDraft(pJob->m_Draft);
 		}
+		pJob->m_vSaves.reserve(Editor()->m_WriterFinishJobs.size());
+		for(const auto &pSave : Editor()->m_WriterFinishJobs)
+			if(Map()->OwnsSave(pSave->Ticket()))
+			{
+				auto pRoot = pSave->ExportRoot();
+				if(pRoot)
+					pJob->m_vSaves.push_back(std::move(pRoot));
+			}
 		Editor()->Engine()->AddJob(pJob);
 		m_pMemoryJob = std::move(pJob);
 		++m_MemoryUsage.m_SamplesStarted;

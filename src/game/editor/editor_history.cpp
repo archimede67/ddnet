@@ -60,8 +60,8 @@ void CEditor::RenderEditorHistory(CUIRect View)
 	if(!Usage.m_Sampled)
 		str_copy(aMemory, "Memory details updating...");
 	else
-		str_format(aMemory, sizeof(aMemory), "Last sample%s: live %.1f MiB, draft extra %.1f MiB, CPU caches %.1f MiB (shared counts overlap)", Usage.m_Current ? "" : " (updating)",
-			Usage.m_LiveBytes / 1048576.0, Usage.m_DraftExtraBytes / 1048576.0, Usage.m_CacheBytes / 1048576.0);
+		str_format(aMemory, sizeof(aMemory), "Last sample%s: live %.1f MiB, draft extra %.1f MiB, save pins %.1f MiB, CPU caches %.1f MiB (shared counts overlap)", Usage.m_Current ? "" : " (updating)",
+			Usage.m_LiveBytes / 1048576.0, Usage.m_DraftExtraBytes / 1048576.0, Usage.m_SavePinnedBytes / 1048576.0, Usage.m_CacheBytes / 1048576.0);
 	InfoProps.m_MaxWidth = Label.w;
 	Ui()->DoLabel(&Label, aMemory, 10.0f, TEXTALIGN_ML, InfoProps);
 
